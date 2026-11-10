@@ -1155,7 +1155,7 @@ class TradingMemory:
         errors must never erase a fill the first attempt achieved — and keep the
         original submit time, while advancing status/error and bumping `attempt`.
         """
-        from ..execution.shadow_execution import assert_trade_publication
+        from ..execution.trade_publication import assert_trade_publication
 
         assert_trade_publication(self, entries)
         for t in entries:
@@ -1255,7 +1255,7 @@ class TradingMemory:
         fills = [f for f in fills if f.get("sec_type") not in NOT_RECORDED]
         if not fills:
             return 0
-        from ..execution.shadow_execution import assert_trade_publication
+        from ..execution.trade_publication import assert_trade_publication
 
         assert_trade_publication(self, fills)
         before = self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"]

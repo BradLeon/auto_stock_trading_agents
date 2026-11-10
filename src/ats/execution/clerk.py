@@ -212,9 +212,9 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
         except Exception as exc:  # noqa: BLE001 - one failed step must not
             from ..workflow.cutover_routing import RouteUnavailable
             from ..workflow.cutover_wiring import BoundaryWriteRefused
-            from ..workflow.shadow_ledger import ShadowLedgerWriteRefused
+            from .trade_publication import TradePublicationRefused
 
-            if isinstance(exc, (ShadowLedgerWriteRefused, BoundaryWriteRefused, RouteUnavailable)):
+            if isinstance(exc, (TradePublicationRefused, BoundaryWriteRefused, RouteUnavailable)):
                 raise
             # Ordinary unavailable steps remain recoverable; publication violations stop.
             log.exception("clerk step %s failed", step)

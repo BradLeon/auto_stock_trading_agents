@@ -845,10 +845,7 @@ def trader(state: ChiefDecisionState) -> dict:
         from ..memory import get_store
 
         reasons = [e.error for e in entries]
-        from ..execution.shadow_execution import publish_shadow_results
-
-        shadow_published = publish_shadow_results(entries)
-        for entry in ([] if shadow_published else entries):
+        for entry in entries:
             import json
 
             get_store().save_trades([entry], cycle_id=state.cycle_id, source=state.source,
@@ -865,7 +862,7 @@ def trader(state: ChiefDecisionState) -> dict:
     for e in entries:
         print(f"   {e.action} {e.symbol} x{e.qty:.0f} [{e.status}]"
               + (f" @ {e.avg_fill_price}" if e.avg_fill_price else ""))
-    outcome = "shadow_refused" if entries and all(e.status == "rejected" and e.error.startswith("shadow broker write prohibited:") for e in entries) else "placed"
+    outcome = "placed"  # the "shadow_refused" outcome went with the shadow transport (r5 8.4)
     execution_checks = {}
     if pre is not None and pre["ok"] and entries and all(
             e.status == "rejected" and e.error.startswith("auto execution disabled") for e in entries):
@@ -898,11 +895,8 @@ def persist(state: ChiefDecisionState) -> dict:
     # The approval record is written in boss_review, before the execution gate derives its
     # authorization; the legacy `cycles.approval_status` column is no longer written (switch-trade r5 7.1).
 
-    from ..execution.shadow_execution import publish_shadow_results
-
-    shadow_published = publish_shadow_results(state.order_results, state.fills)
     by_symbol = {d.symbol: d for d in state.approved_decisions or state.decisions}
-    for entry in ([] if shadow_published else state.order_results):
+    for entry in state.order_results:
         context = texec.trade_context_json(
             state.source, state.approval, state.approved_decisions or state.decisions,
             decision=by_symbol.get(entry.symbol), risk_notes=state.risk_notes)
@@ -933,8 +927,7 @@ def persist(state: ChiefDecisionState) -> dict:
               CycleStatus.MANUAL_REVIEW if state.approval and state.approval.status == "approved" else
               CycleStatus.APPROVAL_REJECTED)
     held_reason = (state.execution_checks or {}).get("reason", "")
-    outcome = ("shadow_refused" if shadow_published and state.gate_outcome == "shadow_refused" else
-               "partial_execution_requires_reconciliation" if submitted and incomplete else
+    outcome = ("partial_execution_requires_reconciliation" if submitted and incomplete else
                f"approved_not_executed:{held_reason}" if held_back else
                "dry_run" if state.dry_run else
                "executed" if executed else str(state.approval.status if state.approval else "unknown"))

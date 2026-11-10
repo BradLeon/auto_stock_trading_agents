@@ -67,7 +67,7 @@ def _artifact_verified(receipt):
     """
     # Qualification tier only: the rollback evidence citing this drill must not
     # retire on a test or evidence-script edit (those are held by the freeze).
-    from .business_replay_inputs import qualification_implementation_hashes
+    from .assurance_surface import qualification_implementation_hashes
     try:
         if receipt.get('kind') != 'junit' or receipt.get('status') != 'passed':
             return False

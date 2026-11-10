@@ -429,7 +429,6 @@ qualification_policy:
     - src/ats/agents/sector/cross_section.py
     - src/ats/workflow/business_replay_inputs.py
     - src/ats/workflow/evaluation_clock.py
-    - src/ats/workflow/shadow_replay.py
     - config/settings.yaml
     - config/watchlist.yaml
     - config/entities.yaml
@@ -792,9 +791,9 @@ qualification_policy:
     - src/ats/execution/route_drill.py
     - src/ats/execution/route_registry.py
     - src/ats/execution/route_switch.py
-    - src/ats/execution/shadow_execution.py
     - src/ats/execution/simulation.py
     - src/ats/execution/state_api.py
+    - src/ats/execution/trade_publication.py
     - src/ats/graph/__init__.py
     - src/ats/graph/checkpoint.py
     - src/ats/graph/chief.py
@@ -901,11 +900,6 @@ qualification_policy:
     - src/ats/workflow/joint_cutover.py
     - src/ats/workflow/read_recovery.py
     - src/ats/workflow/routing.py
-    - src/ats/workflow/shadow_compare.py
-    - src/ats/workflow/shadow_inputs.py
-    - src/ats/workflow/shadow_ledger.py
-    - src/ats/workflow/shadow_matrix.py
-    - src/ats/workflow/shadow_reports.py
     - src/ats/workflow/store.py
     - src/ats/workflow/triggers.py
     - uv.lock

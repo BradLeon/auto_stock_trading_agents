@@ -332,3 +332,36 @@ def assert_outside_fingerprint_surface(changed_paths: Iterable[str],
 
 class FingerprintSurfaceError(RuntimeError):
     """A cutover action would have invalidated recorded evidence."""
+
+
+# Implementation fingerprints of the whole business source tree. Moved here from business_replay_inputs
+# (switch-trade r5 8.4): route_switch pins its isolated recovery proof to them, and the recovery drill receipt that
+# qualification evidence cites uses the qualification tier.
+def implementation_hashes():
+    """Conservatively pin business code plus role prompts and model adapters.
+
+    Qualification's manifest surface is necessary but does not enumerate all
+    model prompts/helpers. A rehearsal therefore pins the complete ats source tree.
+    """
+    from ..config import REPO_ROOT
+
+    paths = set(load_surface().all_paths())
+    paths.update(str(p.relative_to(REPO_ROOT)) for p in (REPO_ROOT / 'src/ats').rglob('*')
+                 if p.is_file() and p.suffix in {'.py', '.md'})
+    return fingerprint(sorted(paths))
+
+
+def qualification_implementation_hashes():
+    """The same complete source tree, minus the freeze-only tier.
+
+    For proofs that back qualification evidence (the recovery drill a rollback
+    event cites). They must retire on the code production runs, not on tests,
+    evidence scripts or other families' verifiers; those are held by the freeze.
+    """
+    from ..config import REPO_ROOT
+
+    surface = load_surface()
+    paths = set(surface.qualification_paths())
+    paths.update(str(p.relative_to(REPO_ROOT)) for p in (REPO_ROOT / 'src/ats').rglob('*')
+                 if p.is_file() and p.suffix in {'.py', '.md'})
+    return fingerprint(sorted(paths - set(surface.freeze_only)))

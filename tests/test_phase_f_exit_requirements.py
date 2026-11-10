@@ -13,7 +13,7 @@ def test_recovery_drill_receipt_binds_the_qualification_tier_not_tooling(tmp_pat
     code but not with tests or evidence scripts (those are held by the freeze)."""
     import hashlib
 
-    from ats.workflow.business_replay_inputs import (
+    from ats.workflow.assurance_surface import (
         implementation_hashes,
         qualification_implementation_hashes,
     )

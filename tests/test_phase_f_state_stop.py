@@ -24,7 +24,7 @@ from ats.workflow import cutover as plane
 from ats.workflow import joint_cutover as joint
 from ats.workflow import runtime_reads as reads
 from ats.workflow import scoped_routes as scopes
-from ats.workflow.business_replay_inputs import implementation_hashes
+from ats.workflow.assurance_surface import implementation_hashes
 from ats.workflow.cutover_routing import RouteUnavailable
 from ats.workflow.cutover_wiring import BoundaryWriteRefused
 from ats.workflow.isolation import verified_isolation_root

@@ -17,7 +17,6 @@ from ats.graph import chief
 def _production_lock(monkeypatch, *, route=False):
     """The facts of production: no isolated transport selected (C3), and optionally no trade route."""
     monkeypatch.setattr("ats.execution.simulation.selected_simulation", lambda: None)
-    monkeypatch.setattr("ats.execution.shadow_execution.selected_shadow", lambda: None)
     if not route:
         monkeypatch.setattr("ats.execution.authorization.active_route_state", lambda: None)
 

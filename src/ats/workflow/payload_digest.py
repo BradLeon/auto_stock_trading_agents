@@ -1,8 +1,8 @@
 """A stable content hash for a JSON-able payload.
 
 It lived in `shadow_replay` (a Phase F cutover tool) although the Dispatcher uses it to record what a reused projection
-read; the Dispatcher must not import a tool that is about to be retired, so it is here. `shadow_replay` re-exports it for
-the cutover modules that still import it from there.
+read; the Dispatcher must not import a tool that is about to be retired, so it is here. `shadow_replay` itself was
+retired in switch-trade r5 8.4.
 """
 
 from __future__ import annotations

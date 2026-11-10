@@ -101,24 +101,6 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
     from ..workflow.runtime_reads import current_read_context, guard_input
 
     guard_input(consumer, scope, as_of=as_of, business_scope=business_scope)
-    from ..workflow.business_replay_inputs import governed_read, capture_governed
-    # Clerk's broker steps (positions, fills, completed orders) are what an isolated run's own simulated
-    # broker produces, stamped with that run's isolation root; a replay re-reads them from its own broker
-    # instead of serving the captured ones, which would publish a capture's fills into the replay's root.
-    # Contract, scope and audit still apply; only the freeze is skipped (as for the execution
-    # authorization, which a replay rebuilds rather than replays).
-    live_in_run = product == "BROKER_STATE" and bool(scope.get("step"))
-    if live_in_run:
-        governed_read = lambda *a, **k: None  # noqa: E731
-        capture_governed = lambda packet: packet  # noqa: E731
-    frozen = governed_read(consumer, product, scope, as_of=as_of)
-    if frozen is not None:
-        from ..workflow.consumer_reads import record_read
-        record_read(consumer, "ats.data.consumer_api.read_input", refs=frozen.input_refs,
-                    status=frozen.status, product=product, source_as_of=frozen.source_as_of,
-                    scope=_json(scope), queried_at=frozen.queried_at.isoformat(),
-                    payload_hash=sha256(json.dumps(_json(frozen.payload), sort_keys=True).encode()).hexdigest())
-        return frozen
     queried_at = evaluation_now(timezone.utc)
     point = as_of or queried_at
     context = current_read_context()
@@ -341,9 +323,9 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
     record_read(consumer, "ats.data.consumer_api.read_input", refs=refs, status=status,
                 product=product, source_as_of=stamps, scope=_json(scope), queried_at=queried_at.isoformat(),
                 payload_hash=sha256(json.dumps(_json(payload), sort_keys=True).encode()).hexdigest())
-    return capture_governed(ConsumerInput(consumer=consumer, product=product, owner=contract["owner"],
+    return ConsumerInput(consumer=consumer, product=product, owner=contract["owner"],
                          contract_version=contract["contract_version"], input_mode=mode,
                          scope=_json(scope), as_of=point, queried_at=queried_at,
                          source_as_of=sorted(set(stamps)), status=status,
                          completeness=status, input_refs=refs, fallback=contract["fallback"],
-                         gaps=gaps, payload=_json(payload)))
+                         gaps=gaps, payload=_json(payload))

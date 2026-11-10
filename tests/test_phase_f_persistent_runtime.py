@@ -29,7 +29,6 @@ def runtime(tmp_path, monkeypatch):
     with isolated_run("persistent-runtime", root=tmp_path / "iso"):
         monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
         monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "eligible"})
-        monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (True, []))
         yield SimpleNamespace(now=datetime.now(UTC), root=tmp_path / "iso", monkeypatch=monkeypatch)
 
 
@@ -316,7 +315,6 @@ def test_real_dispatcher_two_invocations_under_one_stable_permission(business_in
     from ats.workflow import cutover as plane
     monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced",lambda *a,**kw:None)
     monkeypatch.setattr("ats.data.assurance.qualification",lambda **kw:{"status":"eligible"})
-    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report",lambda *a,**kw:(True,[]))
     r=SimpleNamespace(now=datetime.now(UTC),root=verified_isolation_root(),monkeypatch=monkeypatch)
     who,*_=deploy(r,"technical","technical-review")
     dispatcher=Dispatcher(workflow_store=WorkflowStore(str(isolated.path)), max_workers=1)

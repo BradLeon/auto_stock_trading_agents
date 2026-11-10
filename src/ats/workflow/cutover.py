@@ -53,6 +53,9 @@ SIX_BOUNDARIES: tuple[str, ...] = (
     APPROVAL_LIFECYCLE, CLERK_PUBLICATION, LIVE_TRADER,
 )
 
+ACTIVATION_RETIRED = ("boundary activation must cite a signed shadow batch report; the report tools were retired "
+                      "(switch-trade r5 8.4), so activation through this path is closed")
+
 # The route each boundary can point at. `target` is the Phase F route; the others
 # are named so "switching" to one is a decision with a name rather than a boolean.
 ROUTE_TARGET = "target"
@@ -571,14 +574,11 @@ def preflight(*, boundary: str | None = None,
     result.checked.append("wiring_declared")
 
     if request is not None:
-        from .shadow_reports import activation_batch, require_batch_report
-
-        if request.boundary in SIX_BOUNDARIES:
-            citable, problems = require_batch_report(activation_batch(request), report_checker)
-            result.checked.append("shadow_report_citable")
-            if not citable:
-                result.ok = False
-                result.problems.extend(problems)
+        # An activation had to cite a signed shadow batch report. The report tools were retired with the trade-path
+        # cutover (switch-trade r5 8.4), so no activation can be justified any more: refuse rather than skip the check.
+        result.checked.append("shadow_report_citable")
+        result.ok = False
+        result.problems.append(ACTIVATION_RETIRED)
         if request.boundary not in SIX_BOUNDARIES:
             result.ok = False
             result.problems.append(f"unknown boundary {request.boundary!r}")
@@ -623,41 +623,16 @@ def read_activation(boundary: str, scope_hash: str,
 def record_activation(*, request: ActivationRequest, route: str = ROUTE_TARGET,
                       report_checker=None,
                       path: str | Path | None = None) -> dict[str, Any]:
-    """Record an activation. The caller must have run the gate first.
-
-    Recorded rather than only asserted, so "which scopes are on the new route" is
-    answerable after the fact rather than only inferable from current state.
+    """Refuse: an activation had to cite a signed shadow batch report, and the report tools were retired
+    (switch-trade r5 8.4). Recorded activations stay readable through `active_scopes`; R5d removes this module.
     """
-    from uuid import uuid4
-
     if route != ROUTE_TARGET:
         raise CutoverError(
             f"only the target route is activated through this path; {route!r} is a "
             f"boundary state, not an activation")
     target = path or default_cutover_db_path()
     assert_wired(request.boundary, target)
-    from .shadow_reports import activation_batch, require_batch_report
-
-    citable, problems = require_batch_report(activation_batch(request), report_checker)
-    if not citable:
-        raise CutoverError("; ".join(problems))
-    activation_id = f"activation-{uuid4().hex[:32]}"
-    with _LOCK:
-        with _connect(target) as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                conn.execute(
-                    "INSERT INTO cutover_activations (activation_id, boundary,"
-                    " scope_hash, route, report_id, activated_by, activated_at)"
-                    " VALUES (?,?,?,?,?,?,?)",
-                    (activation_id, request.boundary, request.scope_hash(), route,
-                     request.report_id, request.actor, _now()))
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-            conn.execute("COMMIT")
-    return {"activation_id": activation_id, "boundary": request.boundary,
-            "scope_hash": request.scope_hash(), "route": route}
+    raise CutoverError(ACTIVATION_RETIRED)
 
 
 def release_activation(*, boundary: str, scope_hash: str, actor: str = "",

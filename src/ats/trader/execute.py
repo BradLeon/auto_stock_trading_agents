@@ -170,14 +170,11 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     刻意与上面的授权拒绝同形——「不成交」必须有可见且有据的原因，
     而不是一个数字为 0 的静默丢弃。
     """
-    from ..execution.shadow_execution import selected_shadow
     from ..execution.simulation import selected_simulation
 
+    # The only isolated transport is the simulation; the shadow refusal transport was retired (r5 8.4).
     simulated_broker = selected_simulation()
-    shadow_broker = selected_shadow()
-    if simulated_broker is not None and shadow_broker is not None:
-        raise PermissionError("multiple_isolated_transports_selected")
-    if simulated_broker is None and shadow_broker is None:
+    if simulated_broker is None:
         entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
                                  action=d.action, qty=q, revision_no=revision_no,
                                  order_seq=i, status="rejected", submitted_at=_now(),
@@ -308,10 +305,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     fills: list[dict] = []
     if fresh:
         try:
-            broker = shadow_broker or simulated_broker or IBKRBroker()
-            if shadow_broker is not None:
-                shadow_broker.authorization = auth.model_dump(mode="json")
-                shadow_broker.execution_audit = execution_audit
+            broker = simulated_broker or IBKRBroker()
             # Keep causal receipts if a later order's handoff fails. A rejection
             # must not erase an earlier accepted intent or invent its resubmission.
             for i, d, q in fresh:
@@ -464,10 +458,9 @@ def _last_price_enabled(symbol: str) -> float | None:
 
 def execution_locked() -> bool:
     """True when no isolated transport is selected: production, where C3 refuses every submission."""
-    from ..execution.shadow_execution import selected_shadow
     from ..execution.simulation import selected_simulation
 
-    return selected_simulation() is None and selected_shadow() is None
+    return selected_simulation() is None
 
 
 def preflight_checks(to_place: list[tuple[TradeDecision, float]], cycle_id: str,

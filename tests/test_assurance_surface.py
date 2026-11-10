@@ -255,9 +255,9 @@ def test_freeze_only_tier_is_frozen_but_never_qualification_bound(surface):
         bound = surface.paths_for(consumer)
         assert not [p for p in bound if p.startswith(("tests/", "scripts/"))], consumer
         assert not freeze_only & set(bound), consumer
-    assert surface.consumers_touched_by("tests/test_phase_f_scoped_intake.py") == ()
+    assert surface.consumers_touched_by("tests/test_phase_f_stage_one.py") == ()
     assert surface.consumers_touched_by("src/ats/workflow/boundary_evidence.py") == ()
-    surface_mod.assert_outside_fingerprint_surface(["tests/test_phase_f_scoped_intake.py"], surface)
+    surface_mod.assert_outside_fingerprint_surface(["tests/test_phase_f_stage_one.py"], surface)
 
 
 def test_runtime_code_and_data_verifiers_stay_qualification_bound(surface):
@@ -343,7 +343,7 @@ def test_a_path_cannot_be_both_qualification_bound_and_freeze_only(tmp_path):
 
 
 def test_qualification_implementation_hashes_exclude_only_the_freeze_only_tier(surface):
-    from ats.workflow.business_replay_inputs import (
+    from ats.workflow.assurance_surface import (
         implementation_hashes,
         qualification_implementation_hashes,
     )

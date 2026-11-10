@@ -45,7 +45,6 @@ def deployed(tmp_path, monkeypatch, request):
             request["deployment_policy"] = "until_stopped"
         monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
         monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "eligible"})
-        monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report", lambda *a, **k: (True, []))
         adapter = gates()
         adapter["compatibility"] = lambda w, i, r: {"workflow": w, "identity": i.as_row(),
             "valid": True, "reference": "isolated-matrix", "edges": []}
@@ -109,27 +108,6 @@ def test_authorization_revoked_between_ticks(deployed):
     joint.revoke_authorization("fixture-deployment", actor="fixture", reason="revoked before next tick")
     with pytest.raises(RouteUnavailable, match="authorization"):
         windows.bind_plan(make_plan(deployed.now + timedelta(minutes=1)))
-
-
-@pytest.mark.parametrize("deployed", ["finite", "persistent"], indirect=True)
-def test_research_windows_do_not_depend_on_a_signed_batch_report(deployed, monkeypatch):
-    """The batch reports came from the research cutover tooling retired with R2 (tasks 4.1). A research window is
-    still refused when its authorization is revoked (test above), but a report check is no longer asked of it."""
-    windows.bind_plan(make_plan(deployed.now))
-    asked = []
-    monkeypatch.setattr("ats.workflow.shadow_reports.check_batch_report",
-                        lambda *a, **k: asked.append(a) or (False, ["report revoked"]))
-    windows.bind_plan(make_plan(deployed.now + timedelta(minutes=1)))          # does not raise
-    assert asked == []
-
-
-def test_trade_consumers_still_need_the_signed_batch_report():
-    from types import SimpleNamespace
-
-    for consumer in ("risk", "trader", "clerk"):
-        assert windows._batch_report_required(SimpleNamespace(consumer_id=consumer))
-    for consumer in ("technical", "information", "fundamental", "layer", "macro", "sector"):
-        assert not windows._batch_report_required(SimpleNamespace(consumer_id=consumer))
 
 
 @pytest.mark.parametrize("deployed", ["finite", "persistent"], indirect=True)

@@ -50,10 +50,12 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | `risk.checks.pre_trade_adapter` | 7.5（**2026-11-08 已退役**，用户批准方案 A：`ats risk check` 改调 `review_revision`，拿不到账户时驳回而非放行；`paired_business` 旧风控一侧返回 retired；`pre_trade` 删除） |
 | `migration.batch_read_cutover` | 8.5 |
 | `migration.schedule_cutover` | 8.6 |
-| `migration.intake`、`migration.analysis_verification` | 8.7（`isolated_entry` 只删可删部分，见其 8.3） |
+| `migration.intake`、`migration.analysis_verification` | 8.7（2026-11-08 用户决定：`isolated_entry` 整个删除） |
 | `migration.dispatch_dedup` | 8.8（必须在 8.6 之后） |
-| `migration.trade_cutover_tooling` | 8.4（`joint_cutover`、`boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`ats cutover`） |
+| `migration.trade_cutover_tooling` | 8.4（`boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`ats cutover`；`joint_cutover` 按 11-08 调用图核对移到 9.3） |
 | `migration.read_route_and_qualification` | 9.2–9.3（读路由与资格机制收窄：`consumer_api.read_input` 收窄为「查声明 → 查数据产品 → 读」，再删路由表、资格账本、指纹绑定与边界接线证据） |
+
+**第 6、7 组复验 V4–V6（2026-11-10，tasks 6.6、7.6）：** 两组合入后的首次定时运行都正常。chief-daily 11-09 22:45（`chief-20261109-144500`）到 `pending_approval`，风控评审 approved，风控读取全部经 `read_input`，新周期不写旧 `cycles`/`decisions` 表；clerk-daily 11-10 07:00 completed，六步均有结果。全量测试对照见 `docs/TEST_BASELINE.md` 第 6、7 组两行。
 
 每条退役沿用本 change 的做法：V1–V3 → 删除 → V4–V6，并把登记改成 retired、附清零证明；`ats retirement decide` 显示「外部门未满足」的 20 条，在那个 change 的 5.4 之后变为可判定。
 

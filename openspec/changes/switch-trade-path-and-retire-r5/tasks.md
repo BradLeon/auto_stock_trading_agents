@@ -88,17 +88,21 @@
 
 - [x] 6.4 `decision_roles.unwired_to_governed_read_api`：风控、Trader、Clerk、Fundamental 四个消费方经受治理读取面取数后退役。验证：`ats retirement zero` 对四个消费方判 zero（11-07 用户批准方案 1 并退役。核查发现扫描器给风控只登记了备忘模块，真正做审查的 `risk.checks`、`risk.assess`、`risk_officer.daily` 没扫，beta/现价/IV/持仓/规则/净值史都直接读——先补扫描器入口，并把决策角色直连运行时/内部源记为 `runtime_bypass`、阻断清零。风控改经 `read_input`（新模块 `risk/inputs.py`）：`RISK_RULES` 扩为限额+风险政策+品种映射（规则集哈希不变），账户 `PORTFOLIO_DATA`，净值史 `HISTORY_DATA`（契约新授权给 risk，用户批准），beta（`MARKET_DATA` 新增 beta 范围，内部仍是 `cached_beta`）、收盘价、ATM IV 走 `MARKET_DATA`；风控业务范围取这次评审的实时持仓（用户批准做法 A：配置名单外有 6 个持仓，原样会被拒、数值会变），按标的读取越出所评审持仓即拒绝。账户句柄 `account_broker` 移到 `broker/account.py`。Clerk 的券商读取改为 `BROKER_STATE` 按步读取（每步各自失败，B4 不变，TWS 断开仍抛 `IBKRUnavailable`），决策链经 `DECISION_APPROVAL_CONTEXT`。V1 `zero` 四者判清零（trader 余停用保留函数 `disabled_bypass`，fundamental 余 PEAD 旧回退 `provider_bypass`，均另有条目管理）；V2 同一实时账户快照改前/改后风控评审逐项相同（仅列表顺序不同）；V3 `decide` 带 3.9 回退演练引用判可退出；墓碑检查 consistent。防回退：`tests/test_decision_roles_governed_reads.py`。V4–V6 随 6.6）
 - [x] 6.5 `macro_reviews`、`technical_reviews`：做法同 6.3。`ats macro show`、`ats technical show` 等改读已发布的任务投影并逐项对照；Chief 消费方已由 2.1 清掉；`runtime.cli` 与 Chief 都判 zero 后退役，旧表保留只读。验证：同 6.3（11-07 同 6.3 方案 A：`macro_reviews`、`technical_reviews` 是宏观、技术面分析师的完整工作记录——宏观读上一期结论算结论变化，技术面读最新一份做缓存与上期对比——改登记为分析师自有记录，移出待退；`show` 命令属所有者读取，保留读原表；Chief 已由 2.1、6.1 清零。V4–V6 随 6.6）
-- [ ] 6.6 本批复验 V4–V6，TEST_BASELINE 与退役 runbook 记录本批。验证：重启后下一次 `chief-daily` 与 `clerk-daily` 正常完成
+- [x] 6.6 本批复验 V4–V6，TEST_BASELINE 与退役 runbook 记录本批。验证：重启后下一次 `chief-daily` 与 `clerk-daily` 正常完成
+  - 记录（2026-11-10）：chief-daily 11-09 22:45 台北（周期 `chief-20261109-144500`）22:48 到 `pending_approval`：一轮修订、风控评审 approved；风控 109 次读取全部经 `consumer_api.read_input`（RISK_RULES 30、MARKET_DATA 70、HISTORY_DATA 7、PORTFOLIO_DATA 2），其中 14 次 `no_coverage` 是 BRK B、DRAM 的 beta 缓存缺口，属数据覆盖，非退役；无 runtime_bypass。clerk-daily 11-10 07:00（`run_44fcdf2e6977be7956e909e8`，窗口 11-09）completed，对账、标记、回合、预测、绩效、持仓六步均有结果，errors 为空。 全量测试对照见 TEST_BASELINE「交易路径切换第 6 组全量」；runbook 已补本批记录。
 
 ## 7. R5b 写入与入口侧条目
 
-- [ ] 7.1 `memory.store.legacy_decision_write_path`：确认镜像写的读取方全部清零后，移除镜像写；旧 `cycles/decisions` 表保留只读。验证：V1–V3 通过；新周期不再写旧表；旧表历史可读
+- [x] 7.1 `memory.store.legacy_decision_write_path`：确认镜像写的读取方全部清零后，移除镜像写；旧 `cycles/decisions` 表保留只读。验证：V1–V3 通过；新周期不再写旧表；旧表历史可读
+  - 记录（2026-11-10）：合入后的首个周期 `chief-20261109-144500` 只写审计表（`decision_cycles`、`decision_revisions`、`decision_risk_reviews`），旧 `cycles`、`decisions` 中该周期 0 行，旧表最新一行仍是 11-06；`classify_legacy_decisions` 只读读出旧表 57 个周期、223 行。
 - [x] 7.2 `trades.client_order_id.legacy_derivation`：旧式订单号行由 Clerk 标记为 `legacy_unknown`（不伪造审计字段）或对账承接后，移除旧派生式。验证：新写入全部使用 `cycle + revision + 序号` 派生；旧行可读并带标记
-- [ ] 7.3 `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`：生产触发只经 `clerk-daily`，`ats journal` 的独立对账入口与 `ats trader snapshot` 降为单步调试或删除（逐个判定）。验证：V1–V3 通过；`clerk-daily` 继续正常完成
+- [x] 7.3 `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot`：生产触发只经 `clerk-daily`，`ats journal` 的独立对账入口与 `ats trader snapshot` 降为单步调试或删除（逐个判定）。验证：V1–V3 通过；`clerk-daily` 继续正常完成
+  - 记录（2026-11-10）：五个命令已删，11-10 07:00 clerk-daily 正常完成，六步均有结果（见 6.6 记录）。
 - [x] 7.4 `journal.report.render_ledger`：月度台账改读派生读模型。验证：同一月份新旧台账输出一致或差异可解释
 - [x] 7.5 `risk.checks.pre_trade_adapter`：确认 `runtime.cli` 的组合级巡检已迁到 `review_revision` 或声明退役后，删除适配层。验证：V1–V3 通过；风控测试全绿
   - 2026-11-08 记录（用户批准）：7.1 删镜像写与 `set_cycle_approval`、`save_chief_run`，旧表只读保留；7.2 旧派生式库内 0 行、代码无引用，52 行 7 月空订单号历史行用户决定不迁移、不加标记（原「旧行带 `legacy_unknown` 标记」验证项按用户决定取消）；7.3 五个命令整个删除，不保留单步调试；7.4 台账只读 `journal_entries`，代码不变；7.5 方案 A。六条登记 `decide` 判可退出、`tombstone` 判一致。实现在分支 `feat/switch-trade-g7`，6.6 观察完成后合入。7.1（新周期不再写旧表）、7.3（clerk-daily 继续正常完成）待合入后的生产运行确认再勾。
-- [ ] 7.6 本批复验 V4–V6，记录本批。验证：同 6.6
+- [x] 7.6 本批复验 V4–V6，记录本批。验证：同 6.6
+  - 记录（2026-11-10）：V4 全量对照见 TEST_BASELINE「交易路径切换第 7 组全量」（新增变红 1 属 worktree 环境，合入后主仓库复验通过）；V5–V6 即 6.6 记录的两次定时运行，与第 6 组同批观察。
 
 ## 8. R5c 切换期工具（交易侧，加上 2026-10-27 从退役 change 转入的原 R2）
 

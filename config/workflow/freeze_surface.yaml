@@ -66,8 +66,6 @@ src_tools:
   reason: offline analysis verification harness; imported by no module
 - path: src/ats/workflow/consumer_disposition.py
   reason: consumer disposition report; reached only from the cli
-- path: src/ats/workflow/cutover_acceptance.py
-  reason: cutover acceptance report; reached only from the cli
 - path: src/ats/runtime/evidence_observe.py
   reason: chain-evidence extraction run by the data refresh controller; no consumer's qualification evidence reads it
 - path: src/ats/workflow/intake.py

@@ -904,7 +904,6 @@ qualification_policy:
     - src/ats/workflow/joint_cutover.py
     - src/ats/workflow/read_recovery.py
     - src/ats/workflow/routing.py
-    - src/ats/workflow/schedule_cutover.py
     - src/ats/workflow/shadow_compare.py
     - src/ats/workflow/shadow_inputs.py
     - src/ats/workflow/shadow_ledger.py

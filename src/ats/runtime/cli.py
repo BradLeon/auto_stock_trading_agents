@@ -621,16 +621,11 @@ def live_command(args, *, parser) -> int:
     parser.error(f"unknown action {action!r}")
 
 
-def schedule_cutover_command(args, *, parser) -> int:
-    """Phase F 10.1–10.4: schedule ownership and rollback.
+def dispatch_command(args, *, parser) -> int:
+    """`ats dispatch`: pause/resume a workflow, the owner log, and the schedule runtime (`runtime-*`).
 
-    Reads group 4's real claim ledger rather than reimplementing the identity
-    mapping — `trigger_key` is the whole point of that module, and a second
-    derivation would be a second opinion about which triggers are the same one.
+    The migration-period ownership / rollback-dedup reports were retired with schedule_cutover (r5 8.6).
     """
-    from ..workflow import dispatch_claims as claims
-    from ..workflow import schedule_cutover as sc
-
     if args.action.startswith("runtime-"):
         from ..workflow import schedule_runtime as runtime
         from datetime import datetime
@@ -642,7 +637,7 @@ def schedule_cutover_command(args, *, parser) -> int:
             child = copy.copy(args)
             child.isolation_root = ""
             with isolated_run("schedule-control-cli", root=args.isolation_root):
-                return schedule_cutover_command(child, parser=parser)
+                return dispatch_command(child, parser=parser)
         action = args.action.removeprefix("runtime-")
         try:
             scope = json.loads(args.business_scope) if getattr(args, "business_scope", "") else None
@@ -699,85 +694,15 @@ def schedule_cutover_command(args, *, parser) -> int:
             print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
             return 2
 
-    state_path = args.state or None
-    switch_db = args.switch_db or None
+    if args.action in DISPATCH_RETIRED:
+        print(f"❌ `ats dispatch {args.action}` 已退役：{DISPATCH_RETIRED[args.action]}")
+        return 2
+
     action = args.action
-
-    def _ledger() -> list[dict]:
-        return list(claims.claims(path=state_path))
-
-    def _expected() -> list[str]:
-        """The triggers that *should* be in the ledger.
-
-        Group 4's 4.6 exports an expected-trigger set as the comparison baseline
-        for exactly this reason: deriving the set from the ledger alone would make
-        an empty ledger look clean. Declared here as the legacy job set, because
-        the ledger is keyed by hashed trigger and the job list is the readable
-        source of "which triggers exist at all".
-        """
-        return sorted(claims.LEGACY_JOBS)
-
-    def _triggers():
-        if args.trigger:
-            return [args.trigger]
-        return _expected()
-
-    # One snapshot for the whole sweep. Reading the ledger per trigger would let
-    # a claim taken mid-sweep make the same sweep report one trigger as sole and
-    # another as conflicted, which is not a finding about anything.
-    snapshot = {str(row["trigger_key"]): [dict(row)]
-                for row in _ledger()} if not args.trigger else {}
-
-    def _holders_reader():
-        def reader(trigger):
-            if trigger in snapshot:
-                return snapshot[trigger]
-            if not args.trigger:
-                # The ledger has never heard of this key. Raising KeyError is the
-                # module's "not verified" signal — returning [] here would read
-                # as "known and unclaimed", which is a different and wrong claim.
-                raise KeyError(trigger)
-            return [dict(row) for row in _ledger()
-                    if str(row["trigger_key"]) == trigger]
-        return reader
-
-    def _owner() -> str:
-        state = claims.read_owner(path=state_path)
-        return state.owner if state else ""
-
-    ownership = sc.assert_sole_ownership(
-        _triggers(), holders_reader=_holders_reader(), owner_reader=_owner)
-
-    if action == "ownership":
-        print(ownership.summary())
-        return 0 if ownership.clean else 2
-
     if action == "ledger":
-        print(json.dumps(_ledger(), ensure_ascii=False, indent=2))
-        return 0
+        from ..workflow import dispatch_claims as claims
 
-    if action == "executed":
-        for trigger, refs in sorted(sc.executed_triggers(switch_db).items()):
-            print(f"{trigger:44} {', '.join(refs)}")
-        return 0
-
-    if action == "record-execution":
-        if not args.trigger or not args.execution_ref:
-            parser.error("--trigger and --execution-ref are both required")
-        sc.record_execution(args.trigger, execution_ref=args.execution_ref,
-                            actor=args.actor, path=switch_db)
-        print(f"recorded {args.trigger} → {args.execution_ref}")
-        return 0
-
-    if action == "rollback-plan":
-        plan = sc.plan_rollback(_triggers(),
-                                executed=sc.executed_triggers(switch_db))
-        print(json.dumps(plan, ensure_ascii=False, indent=2))
-        return 0 if plan["dedup_sound"] else 2
-
-    if action == "rollback-history":
-        rows = sc.rollback_history(path=switch_db)
-        print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
+        print(json.dumps(list(claims.claims(path=args.state or None)), ensure_ascii=False, indent=2))
         return 0
 
     parser.error(f"unknown action {action!r}")
@@ -824,6 +749,14 @@ RETIRED_MIGRATION_COMMANDS = {
     "drill": "切换边界演练已删除（r5 8.4）；实盘路由演练用 `ats live drill` / `ats live rollback-drill`",
     "read": "研究侧读切流的批次执行与部署授权工具已删除（r5 8.5）",
     "batch": "切流批次清单工具已删除（r5 8.5）",
+}
+
+
+# The schedule ownership / rollback-dedup reports read the migration-period switch ledger (schedule_cutover), retired in
+# r5 8.6. `ledger` stays until the claims ledger itself goes (8.8); pause/resume/owner-log and runtime-* are kept.
+DISPATCH_RETIRED = {
+    action: "切换期调度所有权与回滚去重报告已删除（r5 8.6）；停用/恢复用 pause/resume，覆盖核验用 runtime-expected/runtime-compare"
+    for action in ("ownership", "executed", "record-execution", "rollback-plan", "rollback-history")
 }
 
 
@@ -3733,10 +3666,7 @@ def main(argv: list[str] | None = None) -> int:
         "rollback-plan", "rollback-history", "pause", "resume", "owner-switch", "owner-rollback", "owner-log"])
     sp.add_argument("--approval", default="", help="resume: 用户批准原文或其引用（恢复必填，停用不需要）")
     sp.add_argument("--void-unfinished", default="", help="pause/resume: 作废未完成认领的理由（有未完成认领时必填，running 不可作废）")
-    sp.add_argument("--trigger", default="", help="限定单一逻辑触发")
-    sp.add_argument("--execution-ref", default="", help="record-execution: 执行引用")
-    sp.add_argument("--state", default="", help="第4组的 dispatch 状态库")
-    sp.add_argument("--switch-db", default="", help="执行记录与回滚记录库")
+    sp.add_argument("--state", default="", help="ledger: 认领账本库（8.8 前保留）")
     sp.add_argument("--actor", default="", help="执行人")
     sp.add_argument("--isolation-root", default="", help="runtime-* 隔离演练根目录；不修改生产 owner")
     sp.add_argument("--workflow", default="", help="runtime-* workflow ID")
@@ -4238,7 +4168,7 @@ def main(argv: list[str] | None = None) -> int:
         return live_command(args, parser=parser)
 
     if args.command == "dispatch":
-        return schedule_cutover_command(args, parser=parser)
+        return dispatch_command(args, parser=parser)
 
     if args.command == "workflow":
         return workflow_command(args, parser=parser)

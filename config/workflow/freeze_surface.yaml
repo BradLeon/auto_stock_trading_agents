@@ -7,7 +7,8 @@
 # here only run while evidence is taken, registered or gated, so a change to one
 # does not retire recorded evidence. It does change the freeze: a new freeze
 # taken against an older one must dispose of every changed path here
-# (`scoped_intake.freeze_snapshot(previous=..., dispositions=...)`).
+# (that tool, `scoped_intake.freeze_snapshot`, was retired in switch-trade r5 8.7; the qualification
+# machinery this file serves is narrowed in R5d).
 #
 # This file is outside the manifest digest on purpose: registering a new test or
 # script must not rewrite the manifest, which would retire every recorded row.
@@ -25,9 +26,7 @@ tests:
 - tests/test_workflow_planning.py
 - tests/test_phase_f_broker_enforcement.py
 - tests/test_phase_f_business_wiring.py
-- tests/test_phase_f_disposition_a_regression.py
 - tests/test_phase_f_entry_evidence.py
-- tests/test_phase_f_entry_evidence_assembly.py
 - tests/test_phase_f_exit_requirements.py
 - tests/test_phase_f_isolated_authority.py
 - tests/test_phase_f_joint_cutover.py
@@ -39,9 +38,7 @@ tests:
 - tests/test_phase_f_safe_reads.py
 - tests/test_phase_f_schedule_runtime.py
 - tests/test_phase_f_schedule_stop.py
-- tests/test_phase_f_scoped_intake.py
 - tests/test_phase_f_scoped_routes.py
-- tests/test_phase_f_shadow_business.py
 - tests/test_phase_f_snapshot_dependencies.py
 - tests/test_phase_f_stage_one.py
 - tests/test_phase_f_startup_admission.py
@@ -51,25 +48,16 @@ tests:
 - tests/test_phase_f_trade_switch_drill.py
 - tests/test_phase_f_trader_a.py
 scripts:
-- scripts/assemble_phase_f_entry_evidence.py
 - scripts/prepare_information_capture.py
-- scripts/prepare_phase_f_stage_one.py
 - scripts/probe_phase_f_tws_readonly.py
 - scripts/reconcile_article_metadata.py
-- scripts/refresh_phase_f_evidence.py
 - scripts/review_information_capture.py
 - scripts/review_information_selection.py
 - scripts/run_information_capture.py
 - scripts/verify_dataflow_qualification.py
 src_tools:
-- path: src/ats/workflow/analysis_verification.py
-  reason: offline analysis verification harness; imported by no module
-- path: src/ats/workflow/consumer_disposition.py
-  reason: consumer disposition report; reached only from the cli
 - path: src/ats/runtime/evidence_observe.py
   reason: chain-evidence extraction run by the data refresh controller; no consumer's qualification evidence reads it
-- path: src/ats/workflow/intake.py
-  reason: prerequisite intake and evidence registration; reached only from the cli
 - path: src/ats/workflow/pytest_optional_deps_plugin.py
   reason: pytest plugin; test runs only
 - path: src/ats/workflow/retirement_clearance.py

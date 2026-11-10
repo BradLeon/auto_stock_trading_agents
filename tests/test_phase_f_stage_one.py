@@ -1,4 +1,5 @@
-"""Preparation cannot turn a successful subset or a failure label into admission."""
+"""Information and probe behaviour first pinned during Phase F stage one (the stage-one preparation script and its
+audits were retired with scoped_intake in r5 8.7)."""
 import importlib.util
 import json
 import hashlib
@@ -9,62 +10,6 @@ import pytest
 
 from ats.config import REPO_ROOT
 
-spec = importlib.util.spec_from_file_location("phase_f_stage_one", REPO_ROOT / "scripts/prepare_phase_f_stage_one.py")
-stage = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(stage)
-
-
-def test_inventory_selects_one_fundamental_mode_and_keeps_downstream_conditional():
-    result = stage.inventory("2026-10-10T03:00:00+00:00")
-    assert not result["production_claim"]
-    assert {r["consumer"] for g in result["groups"] for r in g["required_uses"]} | {
-        r["consumer"] for r in result["downstream_uses"]} == {
-            "layer", "sector", "information", "fundamental", "macro", "technical", "chief", "risk", "trader", "clerk"}
-    for group in result["groups"]:
-        if not group["profile"]:
-            continue
-        tasks = {r["task_id"] for r in group["required_uses"]}
-        mode = group["selected_fundamental_mode"]
-        assert "fundamental-" + mode in tasks
-        assert "fundamental-" + ({"routine", "event"} - {mode}).pop() not in tasks
-        assert {"layer-review", "information-brief", "sector-review", "macro-review", "technical-review"} <= tasks
-        assert all(r["report_status"] == "not_bound" for r in group["required_uses"])
-    routine = next(g for g in result["groups"] if g["workflow"] == "fundamental-routine")
-    assert {r["task_id"] for r in routine["required_uses"]} == {"information-brief", "fundamental-routine"}
-
-
-def test_triage_preserves_unknown_shared_failure_and_refuses_dropped_original(tmp_path):
-    junit = tmp_path / "discovery.xml"
-    junit.write_text('<testsuites><testsuite><testcase classname="tests.test_unknown_shared" name="test_shared"><failure message="unsafe"/></testcase></testsuite></testsuites>')
-    previous = tmp_path / "previous.json"
-    previous.write_text(json.dumps({"failures": [{"test": "tests/test_unknown_shared.py::test_shared", "classification": "requires attribution"}]}))
-    report = stage.failures(junit, previous)
-    row = report["failures"][0]
-    assert row["disposition"] == "unattributed"
-    assert not row["scope_exclusion_proven"] and not row["gate_pass_claim"]
-    junit.write_text('<testsuites><testsuite/></testsuites>')
-    with pytest.raises(ValueError, match="missing from discovery"):
-        stage.failures(junit, previous)
-
-
-def test_preflight_missing_report_cannot_pass_eligible_qualification(monkeypatch):
-    from ats.workflow import scoped_intake
-    from ats.workflow.runtime_reads import business_identity
-    who = business_identity("technical", kind="entity", scope_id="COHR", entities=["COHR"], as_of="2026-10-10T03:00:00+00:00")
-    checks = []
-    monkeypatch.setattr(scoped_intake, "check_freeze", lambda snapshot: checks.append(snapshot))
-    monkeypatch.setattr(scoped_intake, "qualification_report", lambda *a, **k: {
-        "scopes": [{"identity": who.as_row(), "qualification": {"status": "eligible"}}]})
-    result = stage.preflight([who.as_row()], {"fixture": True}, {}, source_ledger="fixture")
-    assert result["status"] == "pending" and len(checks) == 2
-    assert not result["production_claim"] and not result["permission_checked"]
-    with pytest.raises(ValueError, match="escape"):
-        stage.preflight([who.as_row()], {}, {"other": {}}, source_ledger="fixture")
-
-
-def test_inventory_rejects_ambiguous_time():
-    with pytest.raises(ValueError, match="timezone"):
-        stage.inventory("2026-10-10T03:00:00")
 
 
 def test_cached_probe_uses_invocation_time_and_never_window_end():
@@ -84,16 +29,6 @@ def test_cached_probe_uses_invocation_time_and_never_window_end():
     assert probe.probe_time(bounded, "2026-10-10T03:00:00+00:00").hour == 3
     with pytest.raises(RouteUnavailable, match="outside"):
         probe.probe_time(bounded, "2026-10-10T05:00:00+00:00")
-
-
-def test_real_preflight_missing_ledger_is_readonly_and_pending(tmp_path):
-    from ats.workflow.scoped_intake import freeze_snapshot
-    from ats.workflow.runtime_reads import business_identity
-    who = business_identity("technical", kind="entity", scope_id="COHR", entities=["COHR"], as_of="2026-10-10T03:00:00+00:00")
-    source = tmp_path / "missing.sqlite"
-    result = stage.preflight([who.as_row()], freeze_snapshot(), {}, source_ledger=source)
-    assert result["status"] == "pending" and not source.exists()
-    assert result["scopes"][0]["qualification"]["status"] == "ineligible"
 
 
 def test_readonly_probe_empty_or_bad_broker_cannot_prove_availability(monkeypatch):
@@ -117,122 +52,6 @@ def test_readonly_probe_empty_or_bad_broker_cannot_prove_availability(monkeypatc
     receipt = module.probe(Broker())
     assert receipt["status"] == "pending" and receipt["broker_state"]["payload"] is None
     assert not receipt["qualification_granted"] and not receipt["permission_granted"]
-
-
-def test_cache_audit_keeps_referenced_missing_history_pending_without_store_writes(tmp_path):
-    from ats.data.stores.structured.repository import SQLiteStructuredRepository
-    from ats.data.stores.unstructured.platform import PlatformUnstructuredRepository
-    data = tmp_path / 'data.sqlite'
-    SQLiteStructuredRepository(data).close()
-    repository = PlatformUnstructuredRepository(data, writable=True)
-    repository.conn.execute('INSERT INTO data_document_versions VALUES (?,?,?,?,?,?,?,?)',
-        ('doc@version', 'doc', 'expected-hash', str(tmp_path / 'missing.txt'), 50,
-         'fixture:source', '2026-10-10T01:00:00+00:00', '2026-10-10T01:00:00+00:00'))
-    repository.conn.commit()
-    repository.close()
-    internal = tmp_path / 'internal.sqlite'
-    with sqlite3.connect(internal) as connection:
-        connection.execute('CREATE TABLE historical_refs (input_ref TEXT)')
-        connection.execute('INSERT INTO historical_refs VALUES (?)', ('doc@version',))
-    manifest = tmp_path / 'inventory.json'
-    manifest.write_text(json.dumps({'groups': [], 'downstream_uses': []}))
-    before = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (data, internal)}
-    result = stage.cache_audit(manifest, data, internal)
-    assert result['status'] == 'pending' and not result['qualification_granted']
-    row = result['historical_document_versions'][0]
-    assert row['status'] == 'unresolved'
-    assert row['internal_reference_hits'] == [{'table': 'historical_refs', 'rows': 1}]
-    assert {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in before} == before
-
-
-def test_cache_audit_missing_store_refuses_without_creating_it(tmp_path):
-    manifest = tmp_path / 'inventory.json'
-    manifest.write_text('{}')
-    missing = tmp_path / 'missing.sqlite'
-    with pytest.raises(ValueError, match='existing'):
-        stage.cache_audit(manifest, missing, missing)
-    assert not missing.exists()
-
-
-@pytest.mark.parametrize('fault', [None, 'missing_entity', 'period', 'unit', 'missing_history',
-                                  'corrupt_history', 'migration_label_without_proof', 'conflict'])
-def test_selected_financial_uses_reopen_history_and_refuse_incomplete_inputs(tmp_path, fault):
-    from datetime import datetime, UTC
-    from ats.data.core.structured_models import ArtifactDescriptor, ObservationInput, SeriesIdentity, QualityStatus
-    from ats.data.stores.structured.repository import SQLiteStructuredRepository
-    from ats.data.stores.unstructured.platform import PlatformUnstructuredRepository
-    point = datetime(2026, 10, 10, tzinfo=UTC)
-    data, artifacts = tmp_path / 'source.sqlite', tmp_path / 'raw'
-    repo = SQLiteStructuredRepository(data, artifact_root=artifacts)
-    repo.bootstrap_catalog()
-    artifact = repo.put_artifact({'revenue': 100}, ArtifactDescriptor(source_id='yfinance_financials',
-        dataset_id='company_financials', fetched_at=point, query_scope={'entities': ['NVDA']},
-        source_url='https://example.test/financials', retention='query_slice'))
-    observation = repo.save_observation(ObservationInput(series=SeriesIdentity(source_id='yfinance_financials',
-        dataset_id='company_financials', entity_id='NVDA', metric_id='financial.revenue.gaap',
-        unit='USD', currency='USD', period_basis='quarter'), period='2026-07-31', value=100.,
-        known_at=point, fetched_at=point, artifact_id=artifact.id,
-        quality_status=QualityStatus.CONFLICT if fault == 'conflict' else QualityStatus.ACCEPTED))
-    if fault == 'migration_label_without_proof':
-        repo.conn.execute('UPDATE structured_observations SET value=101, quality_json=? WHERE observation_id=?',
-            (json.dumps({'reason_codes': ['semantic_reclassification']}), observation.id))
-        repo.conn.commit()
-    raw_path = artifacts / repo.conn.execute('SELECT relative_path FROM structured_artifact_blobs').fetchone()[0]
-    repo.close()
-    PlatformUnstructuredRepository(data, writable=True).close()
-    if fault == 'missing_history': raw_path.unlink()
-    if fault == 'corrupt_history': raw_path.write_text('different raw data')
-    use = {'use': 'financial:NVDA', 'entity': 'NVDA', 'source_id': 'yfinance_financials',
-        'period': '2026-07-31', 'currency': 'USD',
-        'metrics': [{'metric_id': 'financial.revenue.gaap', 'period_basis': 'quarter', 'unit': 'USD'}]}
-    if fault == 'missing_entity': use['entity'] = 'COHR'
-    if fault == 'period': use['period'] = '2026-04-30'
-    if fault == 'unit': use['metrics'][0]['unit'] = 'TWD'
-    manifest = tmp_path / 'required.json'
-    manifest.write_text(json.dumps({'as_of': point.isoformat(), 'uses': [use]}))
-    before = hashlib.sha256(data.read_bytes()).hexdigest()
-    result = stage.financial_use_audit(manifest, data, artifacts)
-    assert result['status'] == ('passed' if fault is None else 'failed')
-    assert not result['qualification_granted'] and not result['production_claim']
-    assert hashlib.sha256(data.read_bytes()).hexdigest() == before
-    if fault is None:
-        assert result['uses'][0]['input_refs'] == [observation.id]
-        assert result['uses'][0]['historical_refs'] == [observation.id]
-    else:
-        assert result['uses'][0]['problems']
-        if fault == 'conflict':
-            assert 'not accepted' in result['uses'][0]['problems'][0]
-
-
-def test_completed_data_audit_keeps_missing_dependency_blocked():
-    required = [{'use': 'information:MRVL'}, {'use': 'fundamental:MRVL'}]
-    checks = [{'use': required[0]['use'], 'status': 'passed', 'problems': []},
-              {'use': required[1]['use'], 'status': 'rejected', 'problems': ['missing input lineage']}]
-    result = stage.summarize_selected_audit(required, checks)
-    assert result['audit_status'] == 'completed'
-    assert result['coverage_status'] == 'pending' and result['gaps'] == [checks[1]]
-    assert not result['retirement_allowed'] and not result['qualification_granted']
-    assert not result['production_claim']
-
-
-@pytest.mark.parametrize('fault', ['omit', 'extra', 'duplicate', 'unsupported_status', 'unexplained_rejection'])
-def test_data_audit_cannot_complete_by_dropping_required_uses_or_hiding_errors(fault):
-    required = [{'use': 'information:MRVL'}, {'use': 'fundamental:MRVL'}]
-    checks = [{'use': row['use'], 'status': 'passed', 'problems': []} for row in required]
-    if fault == 'omit': checks.pop()
-    if fault == 'extra': checks.append({'use': 'unexpected', 'status': 'passed'})
-    if fault == 'duplicate': checks.append(checks[0])
-    if fault == 'unsupported_status': checks[0]['status'] = 'error'
-    if fault == 'unexplained_rejection': checks[0]['status'] = 'rejected'
-    with pytest.raises(ValueError):
-        stage.summarize_selected_audit(required, checks)
-
-
-def test_selected_use_audit_missing_internal_store_refuses_without_creation(tmp_path):
-    missing = tmp_path / 'absent.sqlite'
-    with pytest.raises(ValueError, match='existing read-only internal'):
-        stage.selected_use_audit(missing, missing, tmp_path, missing)
-    assert not missing.exists()
 
 
 def test_information_target_scope_is_configured_frozen_and_role_specific(tmp_path):

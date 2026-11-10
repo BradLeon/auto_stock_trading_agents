@@ -298,105 +298,6 @@ def _require(value: str, flag: str, parser) -> str:
     return value
 
 
-def intake_verification_command(args, *, parser) -> int:
-    """Phase F 7.1–7.7: isolated intake verification and per-consumer disposition.
-
-    Kept separate from `cutover` and `shadow` because this command's defining
-    property is that it does NOT change anything: it runs the ten roles' access
-    checks under the isolation environment and reports what it found. An operator
-    who sees it next to the mutating commands would reasonably assume some of its
-    actions write, so it carries its own name.
-    """
-    from ..workflow import consumer_disposition as disposition
-    from ..workflow import intake_verification as iv
-
-    action = args.action
-
-    if action in {"verify", "report"}:
-        consumers = ([args.consumer_id] if args.consumer_id
-                     else list(iv.TEN_CONSUMERS))
-        try:
-            records = []
-            for consumer_id in consumers:
-                if consumer_id not in iv.TEN_CONSUMERS:
-                    parser.error(f"unknown consumer {consumer_id!r}; expected one of "
-                                 + ", ".join(iv.TEN_CONSUMERS))
-                records.append(iv.scan_consumer_access(
-                    consumer_id,
-                    opinion_inputs=args.opinion_input or ()))
-        except iv.IntakeVerificationError as exc:
-            # A verification that could not run is not a clean result. Reported
-            # as JSON with a non-zero exit so a script cannot read "the check
-            # failed" as "nothing is wrong".
-            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
-            return 1
-
-        if action == "verify":
-            payload = [record.as_row() for record in records]
-            print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-        else:
-            print(iv.render_report(records))
-        # Non-zero when anything is non-compliant, so a gate script fails on it.
-        return 0 if all(r.compliant for r in records) else 1
-
-    if action == "digest":
-        records = [iv.scan_consumer_access(c) for c in iv.TEN_CONSUMERS]
-        print(json.dumps({"digest": iv.verification_digest(records),
-                          "evidence_id": f"intake-verification:{iv.verification_digest(records)[:16]}",
-                          "consumers": len(records),
-                          "compliant": sum(1 for r in records if r.compliant)},
-                         ensure_ascii=False, indent=2))
-        return 0
-
-    if action == "not-tradable":
-        # The refusal, exposed as a command so the rule is checkable without
-        # writing a test: an isolated acceptance is not a trading authorisation.
-        try:
-            iv.assert_isolated_result_not_tradable(
-                iv.IsolationAttestation(run_id=args.run_id or "(none)",
-                                        isolation_root="", broker_write_prohibited=True,
-                                        surfaces_redirected=()),
-                consumer_id=args.consumer_id or "")
-        except iv.IntakeVerificationError as exc:
-            print(json.dumps({"tradable": False, "reason": str(exc)},
-                             ensure_ascii=False, indent=2))
-            return 1
-        print(json.dumps({"tradable": True}, ensure_ascii=False))
-        return 0
-
-    if action == "disposition":
-        try:
-            reports = disposition.consumer_dispositions(
-                stale_by_report_age=args.stale_input or (),
-                optional_inputs=args.optional_input or ())
-        except disposition.DispositionError as exc:
-            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
-            return 1
-        print(disposition.render_dispositions(reports))
-        return 0
-
-    if action == "evidence-index":
-        # The index task 7.8's runbook chapter is checked against. Every evidence
-        # id the runbook cites must be derivable from here, or the runbook is
-        # citing something that does not exist.
-        records = [iv.scan_consumer_access(c) for c in iv.TEN_CONSUMERS]
-        digest = iv.verification_digest(records)
-        index = {record.consumer_id: {
-            "evidence_id": f"intake-verification:{digest[:16]}:{record.consumer_id}",
-            "entry_point": record.entry_point,
-            "reached_entry_point": record.reached_entry_point,
-            "compliant": record.compliant,
-            "violations": [v.as_row() for v in record.violations],
-            "gaps": list(record.gaps),
-        } for record in records}
-        print(json.dumps({"digest": digest, "consumers": index},
-                         ensure_ascii=False, indent=2, default=str))
-        return 0
-
-    parser.error(f"unhandled intake action {action!r}")
-    return 2
-
-
 def retirement_command(args, *, parser) -> int:
     """Phase F 12.1–12.6: consumer zero, reconciliation, tombstone consistency.
 
@@ -749,6 +650,7 @@ RETIRED_MIGRATION_COMMANDS = {
     "drill": "切换边界演练已删除（r5 8.4）；实盘路由演练用 `ats live drill` / `ats live rollback-drill`",
     "read": "研究侧读切流的批次执行与部署授权工具已删除（r5 8.5）",
     "batch": "切流批次清单工具已删除（r5 8.5）",
+    "intake": "隔离接入核验与消费者处置报告已删除（r5 8.7）；退役消费方核验用 `ats retirement zero/decide`",
 }
 
 
@@ -3589,25 +3491,8 @@ def main(argv: list[str] | None = None) -> int:
 
     sh = sub.add_parser("shadow", help="已退役（switch-trade r5 8.4）：影子比较、验收与影子账本工具已删除")
     sh.add_argument("rest", nargs=argparse.REMAINDER)
-    iv = sub.add_parser(
-        "intake",
-        help="接入核验与逐消费者处置（交易路径切换前保留；只读，不改路由、不落生产证据）")
-    iv.add_argument("action", choices=[
-        "verify", "report", "digest", "not-tradable", "disposition",
-        "evidence-index"])
-    iv.add_argument("--consumer-id", default="",
-                    help="verify/not-tradable: 单一消费者；缺省为全部十个")
-    iv.add_argument("--run-id", default="", help="not-tradable: 隔离运行 ID")
-    iv.add_argument("--opinion-input", action="append", default=[],
-                    help="verify: 该角色实际读取的观点来源，可重复")
-    iv.add_argument("--optional-input", action="append", default=[],
-                    help="disposition: 缺失的可选输入，可重复")
-    iv.add_argument("--stale-input", action="append", default=[],
-                    help="disposition: 按报告年龄被判 stale 的来源，可重复")
-
-    # Named `dispatch`, not `schedule`: `schedule` is Phase E's "run the daily
-    # cycle" command, and a cutover reader sharing its name would be one
-    # mistyped flag away from firing a real cycle.
+    iv = sub.add_parser("intake", help="已退役（switch-trade r5 8.7）：隔离接入核验与处置报告已删除；退役消费方核验用 ats retirement zero/decide")
+    iv.add_argument("rest", nargs=argparse.REMAINDER)
     rt = sub.add_parser(
         "retirement",
         help="退役：消费者清零、数据对账、墓碑一致性、依赖与门（G0）检查（**只读，不改登记表**）")
@@ -4159,8 +4044,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "consumer-cutover":
         return consumer_cutover_command(args, parser=parser)
-    if args.command == "intake":
-        return intake_verification_command(args, parser=parser)
     if args.command == "retirement":
         return retirement_command(args, parser=parser)
 

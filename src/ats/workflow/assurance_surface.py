@@ -31,8 +31,9 @@ runtime code/config plus the data evidence's own verifiers. The freeze-only tier
 modules and verifiers of other evidence families. The freeze covers both tiers,
 so nothing leaves the final implementation freeze; only qualification stops
 retiring on edits to files production never executes. A freeze-only change is
-disposed of explicitly when the next freeze is taken (`scoped_intake`), instead
-of silently retiring every recorded row.
+disposed of explicitly when the next freeze is taken (the freeze tool, `scoped_intake`, was retired in
+switch-trade r5 8.7; R5d narrows the qualification fingerprints), instead of silently retiring every
+recorded row.
 """
 
 from __future__ import annotations

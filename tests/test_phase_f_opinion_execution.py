@@ -16,7 +16,6 @@ from ats.graph.chief_state import ChiefDecisionState
 from ats.runtime.cli import run_decision_graph
 from ats.schemas.decision import BossApproval
 from ats.schemas.portfolio import PortfolioSnapshot
-from ats.workflow.analysis_verification import verify_analysis_access
 from ats.workflow.consumer_reads import trace_reads, read_projection
 from ats.agent.task_projection import ProjectionScope
 
@@ -41,12 +40,12 @@ def test_actual_opinion_edges_and_published_lineage(business_inputs, isolated, r
             return {t:hashlib.sha256(json.dumps(sorted(map(str,conn.execute('SELECT * FROM "'+t+'"')))).encode()).hexdigest()
                     for t in tables}
     original=fact_hashes()
-    with verify_analysis_access() as calls, trace_reads() as reads:
+    with trace_reads() as reads:
         result=decision_run(business_inputs, isolated)
     assert result.complete and result.decision_cycle_ready, result.as_dict()
     assert fact_hashes()==original
     allowed={("layer","sector"),("information","fundamental")}
-    edges=[r for r in calls if r.get("api")=="task_projection" and r["status"]=="complete"
+    edges=[r for r in reads if r.get("api")=="task_projection" and r["status"]=="complete"
            and r["consumer"] in {"sector","fundamental"}]
     assert {(r["producer"],r["consumer"]) for r in edges}==allowed
     published=[e for o in result.outcomes for e in o.projections]
@@ -59,41 +58,9 @@ def test_actual_opinion_edges_and_published_lineage(business_inputs, isolated, r
     with trace_reads() as refused, pytest.raises(PermissionError, match="undeclared"):
         read_projection(isolated,consumer="fundamental",role="macro_review",scope=ProjectionScope(kind="portfolio"))
     assert refused[0]["status"]=="blocked"
-    record_property("actual_access",json.dumps(calls))
     record_property("actual_reads",json.dumps(reads))
     record_property("published",json.dumps([e.model_dump(mode="json") for e in published]))
     record_property("unchanged_shared_facts",json.dumps(original))
-
-
-@pytest.mark.parametrize("operation", ["provider", "repository", "sql_read", "sql_cursor", "opinion_write", "opinion_read"])
-def test_executed_analysis_bypass_invalidates_acceptance(isolated, operation, record_property):
-    import os
-    import sqlite3
-    from ats.data.stores.unstructured import get_platform_unstructured_store
-    from ats.data import fundamentals
-    repo=get_platform_unstructured_store()
-    conn=sqlite3.connect(os.environ["ATS_DATA_DB_PATH"])
-    cursor=conn.cursor()
-    before=conn.iterdump()
-    original=list(before)
-    statements={"provider":"fundamentals.fetch_light('COHR')",
-        "repository":"repo.document_candidates()",
-        "sql_read":"conn.execute('SELECT * FROM data_documents').fetchall()",
-        "sql_cursor":"cursor.execute('SELECT * FROM data_documents').fetchall()",
-        "opinion_write":"conn.execute(\"CREATE TABLE forbidden_opinion_as_fact(value TEXT)\")",
-        "opinion_read":"store.task_projection_envelopes(agent_role='macro_review')"}
-    namespace={"__name__":"ats.agents.fundamental.boundary_probe","conn":conn,
-               "repo":repo,"fundamentals":fundamentals,"store":isolated,"cursor":cursor}
-    exec("def probe():\n    "+statements[operation],namespace)
-    with pytest.raises(PermissionError,match="analysis_acceptance_failed"):
-        with verify_analysis_access() as calls:
-            # Catching a refusal cannot turn the overall run into success.
-            try:namespace["probe"]()
-            except PermissionError:pass
-    assert any(r["status"]=="blocked" for r in calls)
-    assert list(conn.iterdump())==original
-    record_property("actual_refusal",json.dumps(calls))
-    conn.close();repo.close()
 
 
 def test_candidate_record_cannot_become_published_information(business_inputs, isolated, record_property):
@@ -112,11 +79,10 @@ def test_candidate_record_cannot_become_published_information(business_inputs, i
     assert outcome.validation.status=="quarantined"
     saved=repo.document_candidates(status="quarantined")
     assert any(r["candidate_id"]==candidate.candidate_id for r in saved)
-    with bind_read(scope("information",entity=True)), verify_analysis_access() as calls:
+    with bind_read(scope("information",entity=True)):
         rows=assemble.admitted_events(isolated,"COHR",cutoff=datetime.now(UTC)-timedelta(days=1))
     assert rows and all(r["publication_id"] and r["version_id"] for r in rows)
     assert all(r["source_url"]!=candidate.source_url for r in rows)
     record_property("actual_candidate",json.dumps(saved,default=str))
     record_property("admitted_inputs",json.dumps(rows))
-    record_property("actual_access",json.dumps(calls))
     repo.close()

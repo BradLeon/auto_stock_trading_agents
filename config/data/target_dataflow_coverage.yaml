@@ -422,7 +422,6 @@ qualification_policy:
     - src/ats/workflow/invocation_bindings.py
     - src/ats/workflow/read_windows.py
     - src/ats/skills/information-analyst/SKILL.md
-    - src/ats/workflow/scoped_intake.py
     - src/ats/agents/information/briefs.py
     - src/ats/agents/macro/review.py
     - src/ats/agents/pead/report.py
@@ -899,8 +898,6 @@ qualification_policy:
     - src/ats/workflow/dispatch_claims.py
     - src/ats/workflow/exit_requirements.py
     - src/ats/workflow/consumer_scan.py
-    - src/ats/workflow/intake_verification.py
-    - src/ats/workflow/isolated_entry.py
     - src/ats/workflow/joint_cutover.py
     - src/ats/workflow/read_recovery.py
     - src/ats/workflow/routing.py

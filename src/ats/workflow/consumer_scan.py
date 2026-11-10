@@ -7,7 +7,7 @@ unchanged: an AST walk over each role's declared entry points, recording the
 provider, base-table, third-party and runtime-source imports it reaches and the
 opinion edges it reads, each violation with a location a reader can act on.
 
-`intake_verification` re-exports these names until it is removed (task 8.7).
+`intake_verification` itself was removed in task 8.7.
 """
 
 from __future__ import annotations

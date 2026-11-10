@@ -35,14 +35,16 @@ from ats.workflow.consumer_reads import (
     trace_reads,
 )
 from ats.workflow.cutover_routing import FallbackUnsafe, RouteUnavailable
-from ats.workflow.intake_verification import isolated_verification
+from ats.workflow.isolation import isolated_run
 from ats.workflow.scoped_routes import transition_route
 
 
 @pytest.fixture
 def isolated(tmp_path):
     guard.reset_for_tests()
-    with isolated_verification("safe-reads", root=tmp_path / "iso"):
+    # isolated_verification (intake_verification) was isolated_run plus a production side-effect check; it was
+    # retired in r5 8.7 and the long-term isolation entry is used directly.
+    with isolated_run("safe-reads", root=tmp_path / "iso"):
         cw.bootstrap_wired()
         yield get_store()
     guard.reset_for_tests()
@@ -402,14 +404,3 @@ def test_chief_candidate_context_consumes_projection_and_state(isolated, monkeyp
     assert any(row["refs"] and row["api"] == "ats.data.consumer_api.read_input" for row in rows)
     record_property("read_trace", json.dumps(rows))
     record_property("context", result.as_context())
-
-
-def test_isolated_entry_persists_actual_read_refs(isolated, tmp_path):
-    from ats.workflow.isolated_entry import run_isolated_entry
-    result = run_isolated_entry(run_id="trace-entry", entry=chief_state_entry,
-                                root=tmp_path / "entry")
-    import sqlite3
-    with sqlite3.connect(result.record_path) as conn:
-        body = json.loads(conn.execute("SELECT body FROM isolated_business_entries").fetchone()[0])
-    assert body["read_trace"] and body["tradable"] is False
-    assert body["read_trace"][0]["consumer"] == "chief"

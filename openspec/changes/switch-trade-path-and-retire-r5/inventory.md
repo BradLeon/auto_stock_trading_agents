@@ -16,6 +16,8 @@
    - 检查逻辑（`audit_attribution` / `audit_approval` / `audit_risk` / `_revision`）只依赖 `isolation`、`broker.ibkr`、`schemas`，可以搬走。
 
    **建议：** 8.3 把这四个函数迁到长期模块（如 `src/ats/execution/trade_attribution.py`）；22 项测试的夹具改为用隔离模拟（FakeBroker）现跑一笔，不再读 Phase F 报告库。之后 `acceptance_*` 可以整组删除。
+
+   **2026-11-10 更正（用户批准，8.3）：** 不迁移。22 项追溯测试是 T0.6 的验收手段，任务已完成；它们守的事在长期测试里已有不依赖迁移期工具的等价用例（见文末「8.3 覆盖对照」），8.4 与 `acceptance_*`、`scripts/verify_phase_f_integration.py` 一起删除。删后少的只是“破坏账本看审计器是否拒绝”这类测试手段，审计器本身生产从不调用。
 3. **`shadow_execution` 在实盘锁定期没有用途。**
    - `ShadowBroker` 是“券商拒绝 + 意图写影子账本”的传输层，只有 `isolated_entry` 的 `shadow=True` 会选中它，`isolated_entry` 只被两个测试使用。
    - 隔离模拟已由 `simulation`（FakeBroker）承担，属长期保留。
@@ -44,14 +46,14 @@
 | `joint_cutover` | runtime_reads、read_windows、scoped_routes、cutover_routing、cutover_wiring、schedule_runtime（均为空操作门禁） | 无 | 7 个 phase_f 测试 | **改到 R5d 删**（见第 1 处） |
 | `paired_business` | acceptance_runner | `ats shadow`（配对业务） | 3 个 | 8.4 删 |
 | `acceptance_runner` / `acceptance_reports` / `acceptance_matrix` / `acceptance_disposition` | 互相引用；acceptance_reports 被 exit_requirements、shadow_reports 引用 | `ats shadow`（验收） | 6 个；脚本 capture_phase_f_research/technical、verify_phase_f_integration | 8.3 迁出追溯检查后，8.4 删（见第 2 处） |
-| `acceptance_assertions`（新找出） | acceptance_* | 无 | 5 个（含 22 项追溯） | `audit_*` 四个函数迁长期模块，其余 8.4 删 |
+| `acceptance_assertions`（新找出） | acceptance_* | 无 | 5 个（含 22 项追溯） | 8.4 整删（11-10 更正：不迁移，见「8.3 覆盖对照」） |
 | `shadow_compare` / `shadow_inputs` / `shadow_matrix` / `shadow_replay` | 只在 shadow_* 与 acceptance_* 之间 | `ats shadow` | 共 10 余个 | 8.4 删 |
 | `shadow_reports` | `cutover`（激活前查批次报告）、`read_windows`（交易消费者批次报告校验）、batch_manifest、read_deployment、acceptance_reports | `ats shadow` | 6 个；脚本 prepare_phase_f_stage_one | 8.4 删；先去掉 `read_windows` 的交易消费者校验（tasks 原定）。`cutover.py` 的 `preflight` / `record_activation` 两处激活检查留到 R5d 删 `cutover` 时一起处理 |
 | `shadow_ledger` | clerk（捕获异常）、shadow_execution、cutover_acceptance | `ats drill`（账本核对） | 3 个 | 8.4 删（先拆 Clerk 引用） |
 | `execution/shadow_execution` | trader/execute、graph/chief、memory/store、isolated_entry | 无 | test_phase_f_shadow_business | 见第 3 处 |
 | `batch_manifest` / `read_cutover` / `read_deployment` | 互相引用与 boundary_drill | `ats batch`、`ats read` | 10 余个；脚本 prepare_phase_f_batches | 8.5 删 |
 | `schedule_cutover` | boundary_drill | `ats dispatch` 迁移期子命令 | test_schedule_cutover | 8.6 删 |
-| `cutover_acceptance` | 无 | `ats drill traceability / unapproved-orders / acceptance` | test_cutover_acceptance | 订单可追溯、未批准订单被拒：8.3 核对 T0 与第 2 处迁出的 `audit_*` 是否等价覆盖，覆盖则 8.6 删 |
+| `cutover_acceptance` | 无 | `ats drill traceability / unapproved-orders / acceptance` | test_cutover_acceptance | 订单可追溯、未批准订单被拒已有长期等价覆盖（见「8.3 覆盖对照」），8.6 直接删 |
 | `intake` | 无 | `ats intake` | test_intake | 8.7 删 |
 | `intake_verification` | analysis_verification、consumer_disposition、isolated_entry、paired_business | `ats intake` | 5 个 | 扫描器已迁出（8.1）；余下 8.7 删 |
 | `scoped_intake` | 无（**在生产资格指纹清单里**） | 无 | 2 个；4 个 phase_f 脚本 | 8.7 删，同时从 `required_fingerprint_paths` 去掉（R5d 收窄资格时一起核） |
@@ -72,3 +74,21 @@
 
 - 调用图：对 `src/`、`tests/`、`scripts/` 做 AST 导入扫描，含函数内的延迟导入。脚本与结果存 `var/test_runs/switch-8.2/`（`g8_callgraph.py`、`callgraph.json`）。
 - 生产库只读核对：`var/phase_f_cutover.sqlite` 无 `joint_cutover_operations` 表。
+
+## 8.3 覆盖对照（2026-11-10，用户批准）
+
+结论：迁移期验收模块里没有需要迁进长期测试支撑的检查。下表左列是 22 项追溯与 `cutover_acceptance` 守的事，右列是只用长期模块（`isolation.isolated_run`、`simulation`、`route_registry`、`broker_write_guard`）的现有测试。
+
+| 要守的事 | 长期测试 |
+|---|---|
+| 下单必须与已批准修订一致 | `test_phase_f_trader_a::test_submitted_order_must_equal_approved_revision`、`test_actual_graph_through_human_approval_to_simulation` |
+| 未经批准的订单不能下 | `test_chief_graph::test_rejected_places_nothing_but_logs`；`test_phase_f_trader_a::test_no_grant_simulation_refuses`、`test_c3_still_blocks_without_explicit_simulation` |
+| 隔离环境中真实券商必须拒单 | `test_phase_f_trader_a::test_real_ibkr_transport_stays_prohibited_in_simulation` |
+| 模拟不能逃出隔离 | `test_phase_f_trader_a::test_simulation_requires_complete_isolation`、`test_saved_fake_broker_cannot_escape_context`；`test_phase_f_isolated_authority` 两项 |
+| 成交落账、部分与迟到成交 | `test_chief_graph::test_approved_places_and_persists`；`test_phase_f_trade_switch_drill::test_actual_partial_late_fill_blocks_drain_then_switch_and_rollback`；`test_clerk_linkage` |
+
+各模块处置：
+- 22 项追溯（`test_phase_f_integration_evidence`）、`acceptance_assertions`、`scripts/verify_phase_f_integration.py`：8.4 删除。
+- `cutover_acceptance`（`ats drill traceability / unapproved-orders / acceptance`）：8.6 删除，不迁。
+- `analysis_verification`、`scoped_intake`、`consumer_disposition`：只服务迁移期资格认定，8.7 删除。
+- `isolated_entry`：8.7 整删（11-08 已定）。

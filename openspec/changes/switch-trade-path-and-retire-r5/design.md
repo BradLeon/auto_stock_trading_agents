@@ -374,6 +374,8 @@
 
 **2026-11-08 调用图核对后的更正（用户批准，详见 inventory.md）：** `joint_cutover` 被读路由与 Dispatcher 的运行时门禁导入，移到 R5d；22 项追溯依赖的 `acceptance_assertions` 订单联接核验迁到长期模块后再删 `acceptance_*`；影子执行与回放冻结判定为非长期能力，在 R5c 第 3 步删除，仅隔离根检查与 `implementation_hashes` 迁到长期模块；`isolated_entry` 整个删除，取代下文与原 R2 段的“部分保留”。
 
+**2026-11-10 更正（用户批准，tasks 8.3）：** 上段“22 项追溯依赖的订单联接核验迁到长期模块”取消。22 项追溯是验收手段且已完成，其守护的检查在长期测试中已有等价覆盖（inventory.md「8.3 覆盖对照」），随 `acceptance_*` 在第 3 步删除；第 2 步判定结果为无检查需要迁移。
+
 **R5c 的顺序**（按依赖由外向内；每步每条都需你同意，并单独提交）：
 
 1. **先让退役工具自立。** `ats retirement zero/decide` 用 `intake_verification` 里的消费方扫描器（`scan_consumer_access` 及它依赖的入口清单 `CONSUMER_ENTRY_POINTS`、模块清单常量）判断有没有人还在用旧路径。退役工具要一直用到 R5 最后一条，以后的退役也要用，所以不能在 R5 中途随 `intake_verification` 一起删掉。处理办法：先把扫描器和这些常量搬到退役工具自己的模块（`retirement_clearance` 或一个独立的消费方扫描模块），验证全部条目的 `ats retirement zero/decide` 输出与搬移前逐条一致；`intake_verification` 剩下的隔离接入核验部分，留到第 4 步再删。

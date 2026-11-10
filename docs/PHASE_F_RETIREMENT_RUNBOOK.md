@@ -48,11 +48,11 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot` | 7.3（**2026-11-08 已退役**，用户批准整个删除：`ats journal reconcile/mark/episodes/score` 与 `ats trader snapshot` 不保留单步调试，账本只经 `ats clerk run`） |
 | `journal.report.render_ledger` | 7.4（**2026-11-08 已退役**，用户批准，代码不变：台账只读 `journal_entries`，不读 trades/fills 原始表） |
 | `risk.checks.pre_trade_adapter` | 7.5（**2026-11-08 已退役**，用户批准方案 A：`ats risk check` 改调 `review_revision`，拿不到账户时驳回而非放行；`paired_business` 旧风控一侧返回 retired；`pre_trade` 删除） |
-| `migration.batch_read_cutover` | 8.5 |
-| `migration.schedule_cutover` | 8.6 |
-| `migration.intake`、`migration.analysis_verification` | 8.7（2026-11-08 用户决定：`isolated_entry` 整个删除） |
-| `migration.dispatch_dedup` | 8.8（必须在 8.6 之后） |
-| `migration.trade_cutover_tooling` | 8.4（`boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`ats cutover`；`joint_cutover` 按 11-08 调用图核对移到 9.3） |
+| `migration.batch_read_cutover` | 8.5（**2026-11-10 已退役**，用户批准：删 `batch_manifest`、`read_cutover`、`read_deployment`，`ats batch`、`ats read` 改提示桩） |
+| `migration.schedule_cutover` | 8.6（**2026-11-10 已退役**，用户批准：删 `schedule_cutover`、`cutover_acceptance`，其检查经 8.3 判定已有长期等价覆盖；`ats dispatch` 的所有权与回滚去重子命令改提示桩，`ledger` 留到 8.8） |
+| `migration.intake`、`migration.analysis_verification` | 8.7（**2026-11-10 已退役**，用户批准：删 `intake`、`intake_verification`、`scoped_intake`、`analysis_verification`、`consumer_disposition`、`isolated_entry`（11-08 定整删），`ats intake` 改提示桩；退役工具的扫描器已于 8.1 迁到 `consumer_scan`） |
+| `migration.dispatch_dedup` | 8.8（**2026-11-10 已退役**，用户批准：覆盖核验改名 `ats dispatch coverage-expected/coverage-compare`，搬移前后输出一致；删 `dispatch_claims` 与 `ats dispatch` 的 `runtime-*`、`ledger` 等迁移期子命令） |
+| `migration.trade_cutover_tooling` | 8.4（**2026-11-10 已退役**，用户批准：删 `boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`execution/shadow_execution`，`ats drill`、`ats cutover`、`ats shadow` 改提示桩；写账前的隔离根检查迁到 `execution/trade_publication`；`joint_cutover` 按 11-08 调用图核对移到 9.3） |
 | `migration.read_route_and_qualification` | 9.2–9.3（读路由与资格机制收窄：`consumer_api.read_input` 收窄为「查声明 → 查数据产品 → 读」，再删路由表、资格账本、指纹绑定与边界接线证据） |
 
 **第 6、7 组复验 V4–V6（2026-11-10，tasks 6.6、7.6）：** 两组合入后的首次定时运行都正常。chief-daily 11-09 22:45（`chief-20261109-144500`）到 `pending_approval`，风控评审 approved，风控读取全部经 `read_input`，新周期不写旧 `cycles`/`decisions` 表；clerk-daily 11-10 07:00 completed，六步均有结果。全量测试对照见 `docs/TEST_BASELINE.md` 第 6、7 组两行。

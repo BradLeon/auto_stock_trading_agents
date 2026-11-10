@@ -116,7 +116,7 @@ ats dispatch owner-log [--workflow <workflow_id>]
 停用的工作流不会被任何定时任务或日历事件运行；要补跑，先 `resume`，再用 `ats workflow run`。
 
 停用期间到点的触发不会丢得无声无息：定时、手动、日历三条路径对每个被跳过的触发各写一条 `skipped_owner_legacy` 记录（同一触发只记一次，在 `ats dispatch runtime-state` 输出的 history 里可查）。
-覆盖核验（`ats dispatch runtime-expected` 与 `runtime-compare`）会把停用区间内到点的触发标为 `skipped_by_pause`，不算遗漏；因停用而作废的触发标为 `voided_by_pause`。
+覆盖核验（`ats dispatch coverage-expected` 与 `coverage-compare`，r5 8.8 前叫 `runtime-expected` / `runtime-compare`）会把停用区间内到点的触发标为 `skipped_by_pause`，不算遗漏；因停用而作废的触发标为 `voided_by_pause`。
 只有 `pause` 开出的区间才算停用：从未迁移的工作流虽然负责人也是 `legacy`，它的触发仍按遗漏处理。
 旧名 `owner-rollback` / `owner-switch` 已改名，运行它们会提示新命令且不改任何状态。
 
@@ -272,8 +272,8 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 2. 实盘路由 `live_trader` 为 `disabled`；
 3. `ats live gate` 没有有效的实盘授权引用。授权库里那行 `LIVE-X`（占位字段、来源未核实）按你 2026-10-21 的确认作废，作废记录追加、原记录保留，实盘门不会再把它当授权。
 
-**`ats cutover state` 里的六个边界开关不是权威状态。** 它们从未接线（`wired: false`），切换后仍显示 `legacy` / `disabled`
-（其中五个是 `legacy`，只有 `live_trader` 是 `disabled`），与事实不符，R5 会删除它们。真实的状态看：读路由用 `ats data health`，
+**切换期的边界开关已不再可查。** `ats cutover` 已随 r5 8.4 退役（只剩提示桩）；它显示的六个边界开关从未接线，本就不是权威状态，
+控制库里的开关行由 R5d 删除。真实的状态看：读路由用 `ats data health`，
 调度负责人用 `ats dispatch owner-log`，切换发生在哪个提交见 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`。
 
 **怎么读 `ats dispatch owner-log`。** 它是"每个工作流的定时触发由谁负责"的审计日志：负责人要么是 `legacy`（旧的 launchd 触发），要么是 `dispatcher`。
@@ -342,7 +342,10 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 
 ## 12. 诊断工具
 
-- 新旧结果差异诊断：`ats shadow`，用法见 [`SHADOW_COMPARISON_RUNBOOK.md`](SHADOW_COMPARISON_RUNBOOK.md)（只作诊断，不是验收标准）。
+- 切换期工具已退役（switch-trade r5 第 8 组，2026-11-10）：`ats drill`、`ats cutover`、`ats shadow`、`ats batch`、`ats read`、`ats intake`
+  与 `ats dispatch` 的所有权、回滚去重子命令只剩提示桩；删除前的用法存档在
+  [`archive/R5C_MIGRATION_COMMANDS.md`](archive/R5C_MIGRATION_COMMANDS.md)，影子比较手册归档在
+  [`archive/SHADOW_COMPARISON_RUNBOOK.md`](archive/SHADOW_COMPARISON_RUNBOOK.md)。实盘路由演练仍用 `ats live drill` / `ats live rollback-drill`。
 - 历史手册（切换期间的逐 scope 授权、批次切换、持久部署许可、旧上线 checklist）已归档在
   [`archive/`](archive/)：`PHASE_F_OPERATIONS.md`、`PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`、
   `PHASE_F_PERSISTENT_RUNTIME.md`、`GO_LIVE.md`。

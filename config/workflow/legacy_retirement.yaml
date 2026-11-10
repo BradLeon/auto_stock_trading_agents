@@ -566,10 +566,11 @@ retired:
     replaced_by: >-
       无（研究侧读路由已固定为 target）
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `workflow/batch_manifest.py`、`read_cutover.py`、`read_deployment.py`、命令 `ats batch`、`ats read` 及其测试。
     missing_condition: >-
+      2026-11-10 退役（用户批准，tasks 8.5，提交 6e5a570）。删除 batch_manifest、read_cutover、read_deployment，`ats batch`、`ats read` 改提示桩；V1 src 内无导入；V2 研究侧读窗口自退役 change 4.1 起不再依赖；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
       2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`boundary_drill`（`ats drill` 的读边界回退演练）用 `CutoverBatch`、`READ_BOUNDARIES`、`_switch_chain`；批次类别含 internal_state_approval、live_trader 等交易批次。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
@@ -584,10 +585,11 @@ retired:
     replaced_by: >-
       无（调度批次切换已完成，旧调度器已删除）
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `schedule_cutover.py`、`cutover_acceptance.py` 及其测试。
     missing_condition: >-
+      2026-11-10 退役（用户批准，tasks 8.6，提交 5750e94）。删除 schedule_cutover、cutover_acceptance（其检查经 8.3 判定已有长期等价覆盖）；`ats dispatch` 的 ownership/executed/record-execution/rollback-plan/rollback-history 改退役提示，ledger 留到 8.8。V1 src 内无导入；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
       2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`boundary_drill`（调度批次 dry-run）依赖；它又直接使用 `dispatch_claims` 的处置常量，所以 `dispatch_claims` 一并留下。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
@@ -602,10 +604,11 @@ retired:
     replaced_by: >-
       无（接入核验与逐消费者处置属切换期工具）
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `intake.py`、`intake_verification.py`、`scoped_intake.py`、命令 `ats intake` 及其测试。
     missing_condition: >-
+      2026-11-10 退役（用户批准，tasks 8.7，提交 90cf5c1）。删除 intake、intake_verification、scoped_intake，`ats intake` 改提示桩；`ats retirement` 的消费方扫描已于 8.1 迁到 consumer_scan（a5cbc7e），输出逐字一致。V1 src 内无导入；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
       2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`paired_business` 用 `intake_verification.isolated_verification`；`ats retirement zero/decide` 用 `scan_consumer_access`；`consumer_disposition` 被 `ats intake` 与 Phase F 验收测试使用。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
@@ -621,10 +624,11 @@ retired:
     replaced_by: >-
       无
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `analysis_verification.py`、`consumer_disposition.py`、`isolated_entry.py` 及其测试，与 `intake_verification` 绑定一起走。
     missing_condition: >-
+      2026-11-10 退役（用户批准，tasks 8.7，提交 90cf5c1）。删除 analysis_verification、consumer_disposition、isolated_entry（用户 11-08 决定整删，隔离模拟由 simulation 承担）；测试夹具改用长期的 isolation.isolated_run。V1 src 内无导入；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
       2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`analysis_verification` 被 `test_phase_f_opinion_execution`（研究、决策、执行、恢复验收）使用；`isolated_entry` 被 `test_phase_f_shadow_business`、`test_phase_f_safe_reads` 用来在隔离环境跑交易侧角色；随 `migration.intake` 一起走。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
@@ -639,10 +643,11 @@ retired:
     replaced_by: >-
       无（新旧调度去重；旧调度器已删除）
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
       删除 `dispatch_claims.py` 与 `ats dispatch` 的 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`。
     missing_condition: >-
+      2026-11-10 退役（用户批准，tasks 8.8）。先把调度覆盖核验搬到保留命令 `ats dispatch coverage-expected` / `coverage-compare`（原 runtime-expected / runtime-compare），同一窗口 11-02 00:00 至 11-10 12:00（台北）搬移前后输出逐字节一致；再删除 dispatch_claims 与 `ats dispatch` 的 runtime-*、ownership、ledger、executed、record-execution、rollback-plan、rollback-history（保留一个版本的提示桩，不在 --help 中列出）。`ats dispatch --help` 只列 pause、resume、owner-log 与 coverage-*。V1 src 内无导入；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
       2026-10-27 复核：原归 R2，实际与交易侧相连，整组转入 R5（门 trade_path_cutover）。`schedule_cutover` 直接使用 `dispatch_claims` 的处置常量；`cutover_acceptance`（交易订单可追溯与“未经批准的订单”验收）也属交易侧影子期验收。研究侧已解耦（tasks 4.1）：Dispatcher 与研究侧读窗口不再依赖这些工具。
     consumers: []
     consumer_zero_criterion: >-
@@ -715,7 +720,7 @@ retired:
     target_phase: retire-legacy-and-migration-tooling
     status: pending
     exit_condition: >-
-      `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`cutover_guards`、`assurance_surface` 与指纹清单收窄。
+      `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`cutover_guards`、`assurance_surface` 与指纹清单收窄。 另含 `joint_cutover`（2026-11-08 调用图核对后自 migration.trade_cutover_tooling 移入：被读路由与 Dispatcher 的空操作门禁导入）。
     missing_condition: >-
       交易链路（Chief、Clerk、Risk、Trader、Boss）尚未在新路径上充分验证；外部门 trade_path_cutover 未满足，本 change 只登记。
     consumers: []
@@ -731,15 +736,16 @@ retired:
     replaced_by: >-
       无
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
-      `joint_cutover`、`boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`exit_requirements`、`business_replay_inputs`；命令 `ats cutover`、`ats drill`、`ats shadow`、`ats live drill` 退役。
+      `boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`execution/shadow_execution`；命令 `ats cutover`、`ats drill`、`ats shadow` 退役（joint_cutover、exit_requirements、business_replay_inputs 剩余部分归 R5d）。
     missing_condition: >-
+      2026-11-10 退役（用户批准，switch-trade-path-and-retire-r5 tasks 8.4，提交 b8e396a、2fcf6d9）。删除 boundary_drill、paired_business、acceptance_runner/reports/matrix/assertions/disposition、shadow_compare/inputs/matrix/replay/reports/ledger 与 execution/shadow_execution；`ats drill`、`ats cutover`、`ats shadow` 改提示桩。先拆引用：写 trades/fills 前的隔离根检查迁到 execution/trade_publication.py（Clerk 改捕获 TradePublicationRefused），Trader 与主理人决策图去掉影子传输，consumer_api 去掉回放磁带调用，implementation_hashes 迁到 assurance_surface，read_windows 去掉交易消费者批次报告校验，cutover 的激活检查改为一律拒绝。范围更正（8.2 调用图核对，用户 11-08 批准）：joint_cutover（被读路由与 Dispatcher 的空操作门禁导入）、exit_requirements、business_replay_inputs 的剩余部分移到 migration.read_route_and_qualification（R5d）；`ats live drill` 是长期保留的实盘路由演练，不在本条。V1 src 内对已删模块无导入；V2 定时运行的路径不再经过已删模块；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
       交易路径切换前不动；`shadow_ledger` 被 Clerk 引用、`exit_requirements` 被 `data/assurance.py` 引用、`business_replay_inputs` 被 `consumer_api`/`route_switch` 引用，需先拆开。
     consumers: []
     consumer_zero_criterion: >-
       交易路径切换后无调用方。
-    location: src/ats/workflow/joint_cutover.py, boundary_drill.py, acceptance_*.py, paired_business.py, shadow_*.py
+    location: src/ats/workflow/boundary_drill.py, acceptance_*.py, paired_business.py, shadow_*.py, src/ats/execution/shadow_execution.py
 
 
 # 干跑用的清除影响范围声明（未确认时只报告，不执行）

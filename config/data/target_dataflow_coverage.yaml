@@ -894,7 +894,6 @@ qualification_policy:
     - src/ats/workflow/architecture_guards.py
     - src/ats/workflow/cutover_guards.py
     - src/ats/workflow/cutover_wiring.py
-    - src/ats/workflow/dispatch_claims.py
     - src/ats/workflow/exit_requirements.py
     - src/ats/workflow/consumer_scan.py
     - src/ats/workflow/joint_cutover.py

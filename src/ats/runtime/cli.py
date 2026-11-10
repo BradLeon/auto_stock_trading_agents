@@ -523,90 +523,53 @@ def live_command(args, *, parser) -> int:
 
 
 def dispatch_command(args, *, parser) -> int:
-    """`ats dispatch`: pause/resume a workflow, the owner log, and the schedule runtime (`runtime-*`).
+    """`ats dispatch`: pause/resume a workflow, the owner log, and the schedule coverage check.
 
-    The migration-period ownership / rollback-dedup reports were retired with schedule_cutover (r5 8.6).
+    The coverage check (`coverage-expected` / `coverage-compare`, formerly `runtime-expected` / `runtime-compare`)
+    lists the triggers that should have fired in a window and compares them with the trigger ledger, classifying the
+    ones skipped or voided while a workflow was paused. The migration-period schedule switch tools (`runtime-*`
+    freeze/handover, the claims ledger and the ownership / rollback-dedup reports) were retired in r5 8.6 and 8.8.
     """
-    if args.action.startswith("runtime-"):
-        from ..workflow import schedule_runtime as runtime
+    if args.action in DISPATCH_OWNER_MOVED:
+        # A prompt stub, not a silent alias: the old names spoke of "switching owners", the workflow is now paused/resumed.
+        print(f"❌ `ats dispatch {args.action}` 已改名：{DISPATCH_OWNER_MOVED[args.action]}")
+        return 2
+    if args.action in DISPATCH_RETIRED:
+        print(f"❌ `ats dispatch {args.action}` 已退役：{DISPATCH_RETIRED[args.action]}")
+        return 2
+
+    from ..workflow import schedule_runtime as runtime
+
+    if args.action in {"coverage-expected", "coverage-compare"}:
         from datetime import datetime
 
-        if getattr(args, "isolation_root", ""):
-            from ..workflow.isolation import isolated_run
-            import copy
-
-            child = copy.copy(args)
-            child.isolation_root = ""
-            with isolated_run("schedule-control-cli", root=args.isolation_root):
-                return dispatch_command(child, parser=parser)
-        action = args.action.removeprefix("runtime-")
         try:
-            scope = json.loads(args.business_scope) if getattr(args, "business_scope", "") else None
-            if action == "state":
-                result = runtime.snapshot()
-            elif action == "reload":
-                result = runtime.reload_authority()
-            elif action == "prepare":
-                from ..workflow.isolation import verified_isolation_root
-                if verified_isolation_root() is None:
-                    raise runtime.ScheduleAuthorityError("scope preparation requires isolated drill")
-                result = runtime.check_owner(args.workflow, scope, args.owner)
-            elif action == "freeze":
-                result = {"token": runtime.freeze(args.workflow, scope, actor=args.actor, reason=args.reason)}
-            elif action == "inventory":
-                result = runtime.frozen_inventory(args.token)
-            elif action == "handover":
-                runtime.handover(args.token, to_owner=args.owner,
-                    dispositions=json.loads(args.dispositions), actor=args.actor, reason=args.reason)
-                result = runtime.snapshot()
-            elif action == "cancel-freeze":
-                runtime.cancel_freeze(args.token, actor=args.actor, reason=args.reason)
-                result = runtime.snapshot()
-            else:
-                expected = runtime.expected_triggers(datetime.fromisoformat(args.from_time), datetime.fromisoformat(args.to_time))
-                result = expected if action == "expected" else runtime.compare_triggers(expected)
+            if not args.from_time or not args.to_time:
+                raise ValueError("--from-time and --to-time are both required (ISO, with time zone)")
+            expected = runtime.expected_triggers(datetime.fromisoformat(args.from_time),
+                                                 datetime.fromisoformat(args.to_time))
+            result = expected if args.action == "coverage-expected" else runtime.compare_triggers(expected)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         except (runtime.ScheduleAuthorityError, ValueError) as exc:
             print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
             return 2
 
-    if args.action in DISPATCH_OWNER_MOVED:
-        # A prompt stub, not a silent alias: the old names spoke of "switching owners", the workflow is now paused/resumed.
-        print(f"❌ `ats dispatch {args.action}` 已改名：{DISPATCH_OWNER_MOVED[args.action]}")
-        return 2
-
-    if args.action in {"pause", "resume", "owner-log"}:
-        from ..workflow import schedule_runtime as runtime
-
-        try:
-            if args.action == "owner-log":
-                result = runtime.owner_log(args.workflow or None)
-            else:
-                # The stored owner value for a paused workflow is still "legacy" (a deliberate, recorded shortcut:
-                # renaming it touches the stored rows and the dispatcher-runtime spec). Only the user-facing words changed.
-                result = runtime.owner_switch(
-                    args.workflow, to_owner="dispatcher" if args.action == "resume" else "legacy",
-                    actor=args.actor, reason=args.reason, approval=args.approval,
-                    void_unfinished=args.void_unfinished)
-            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-            return 0
-        except runtime.ScheduleAuthorityError as exc:
-            print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
-            return 2
-
-    if args.action in DISPATCH_RETIRED:
-        print(f"❌ `ats dispatch {args.action}` 已退役：{DISPATCH_RETIRED[args.action]}")
-        return 2
-
-    action = args.action
-    if action == "ledger":
-        from ..workflow import dispatch_claims as claims
-
-        print(json.dumps(list(claims.claims(path=args.state or None)), ensure_ascii=False, indent=2))
+    try:
+        if args.action == "owner-log":
+            result = runtime.owner_log(args.workflow or None)
+        else:
+            # The stored owner value for a paused workflow is still "legacy" (a deliberate, recorded shortcut:
+            # renaming it touches the stored rows and the dispatcher-runtime spec). Only the user-facing words changed.
+            result = runtime.owner_switch(
+                args.workflow, to_owner="dispatcher" if args.action == "resume" else "legacy",
+                actor=args.actor, reason=args.reason, approval=args.approval,
+                void_unfinished=args.void_unfinished)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0
-
-    parser.error(f"unknown action {action!r}")
+    except runtime.ScheduleAuthorityError as exc:
+        print(json.dumps({"status": "refused", "reason": str(exc)}, ensure_ascii=False))
+        return 2
 
 
 _WORKFLOW_RUN = "ats workflow run --task {task} --scope-kind {kind} --scope-id {id}"
@@ -654,11 +617,17 @@ RETIRED_MIGRATION_COMMANDS = {
 }
 
 
-# The schedule ownership / rollback-dedup reports read the migration-period switch ledger (schedule_cutover), retired in
-# r5 8.6. `ledger` stays until the claims ledger itself goes (8.8); pause/resume/owner-log and runtime-* are kept.
+# The migration-period schedule switch tools: the ownership / rollback-dedup reports read the switch ledger
+# (schedule_cutover, retired r5 8.6); the claims ledger and the runtime-* freeze/handover drill went in r5 8.8. The
+# coverage check moved to coverage-expected / coverage-compare. One release keeps these stubs.
+_DISPATCH_SWITCH_RETIRED = "切换期调度工具已删除（r5 8.6/8.8）；停用/恢复用 pause/resume，负责人日志用 owner-log"
 DISPATCH_RETIRED = {
-    action: "切换期调度所有权与回滚去重报告已删除（r5 8.6）；停用/恢复用 pause/resume，覆盖核验用 runtime-expected/runtime-compare"
-    for action in ("ownership", "executed", "record-execution", "rollback-plan", "rollback-history")
+    **{action: _DISPATCH_SWITCH_RETIRED for action in (
+        "ownership", "ledger", "executed", "record-execution", "rollback-plan", "rollback-history",
+        "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze", "runtime-inventory",
+        "runtime-handover", "runtime-cancel-freeze")},
+    "runtime-expected": "已改名为 `ats dispatch coverage-expected`（r5 8.8），参数不变",
+    "runtime-compare": "已改名为 `ats dispatch coverage-compare`（r5 8.8），参数不变",
 }
 
 
@@ -3543,25 +3512,19 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser(
         "dispatch",
-        help="调度所有权核验与回滚去重（交易路径切换前保留）（pause/resume 停用或恢复一个研究工作流；其余只读账本）")
+        help="研究与交易工作流的停用/恢复（pause/resume）、负责人日志（owner-log）与调度覆盖核验（coverage-expected/coverage-compare）")
     sp.add_argument("action", choices=[
-        "runtime-state", "runtime-reload", "runtime-prepare", "runtime-freeze",
-        "runtime-inventory", "runtime-handover", "runtime-cancel-freeze", "runtime-expected", "runtime-compare",
-        "ownership", "ledger", "executed", "record-execution",
-        "rollback-plan", "rollback-history", "pause", "resume", "owner-switch", "owner-rollback", "owner-log"])
+        "pause", "resume", "owner-log", "coverage-expected", "coverage-compare",
+        # one-release stubs that answer with the replacement
+        *DISPATCH_OWNER_MOVED, *DISPATCH_RETIRED],
+        metavar="{pause,resume,owner-log,coverage-expected,coverage-compare}")
+    sp.add_argument("--workflow", default="", help="pause/resume/owner-log: 工作流 ID")
     sp.add_argument("--approval", default="", help="resume: 用户批准原文或其引用（恢复必填，停用不需要）")
     sp.add_argument("--void-unfinished", default="", help="pause/resume: 作废未完成认领的理由（有未完成认领时必填，running 不可作废）")
-    sp.add_argument("--state", default="", help="ledger: 认领账本库（8.8 前保留）")
     sp.add_argument("--actor", default="", help="执行人")
-    sp.add_argument("--isolation-root", default="", help="runtime-* 隔离演练根目录；不修改生产 owner")
-    sp.add_argument("--workflow", default="", help="runtime-* workflow ID")
-    sp.add_argument("--business-scope", default="", help="runtime-* 精确 scope JSON")
-    sp.add_argument("--owner", default="legacy", choices=["legacy", "shadow", "dispatcher"])
     sp.add_argument("--reason", default="")
-    sp.add_argument("--token", default="", help="freeze 返回的 token")
-    sp.add_argument("--dispositions", default="{}", help="逐 trigger key 处置 JSON")
-    sp.add_argument("--from-time", default="", help="预期集合窗口 ISO 起点（带时区）")
-    sp.add_argument("--to-time", default="", help="预期集合窗口 ISO 终点（带时区）")
+    sp.add_argument("--from-time", default="", help="coverage-*: 窗口 ISO 起点（带时区）")
+    sp.add_argument("--to-time", default="", help="coverage-*: 窗口 ISO 终点（带时区）")
 
     rc_parser = sub.add_parser("read", help="已退役（switch-trade r5 8.5）：研究侧读切流的批次执行与部署授权工具已删除")
     rc_parser.add_argument("rest", nargs=argparse.REMAINDER)

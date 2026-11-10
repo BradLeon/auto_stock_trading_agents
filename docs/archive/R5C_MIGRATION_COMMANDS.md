@@ -10,7 +10,8 @@
 | `ats cutover` | 8.4 | 无（切换控制平面随 R5d 收窄；读路由恢复仍用 `ats consumer-cutover restore`） |
 | `ats shadow` | 8.4 | 无 |
 | `ats batch`、`ats read` | 8.5 | 无 |
-| `ats dispatch` 的 `ownership`、`executed`、`record-execution`、`rollback-plan`、`rollback-history` | 8.6 | 无（`ledger` 等随 8.8 处理；`pause`、`resume`、`owner-log`、`runtime-*` 保留） |
+| `ats dispatch` 的 `ownership`、`executed`、`record-execution`、`rollback-plan`、`rollback-history` | 8.6 | 无 |
+| `ats dispatch` 的 `ledger` 与 `runtime-*` | 8.8 | `runtime-expected` / `runtime-compare` 改名为 `coverage-expected` / `coverage-compare`（参数不变）；其余无。保留 `pause`、`resume`、`owner-log` |
 | `ats intake` | 8.7 | 退役消费方核验用 `ats retirement zero/decide` |
 
 ## 删除前的 `--help` 输出

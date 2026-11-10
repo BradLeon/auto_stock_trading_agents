@@ -204,9 +204,10 @@ def test_owner_reload_restart_and_missing_authority_fail_closed(isolated, tmp_pa
 
 
 def test_actual_runtime_cli_queries_existing_isolated_ledger(isolated, capsys):
-    assert cli.main(["dispatch","runtime-state"]) == 0
-    state=json.loads(capsys.readouterr().out)
-    assert state["owners"] and "history" in state
+    # `runtime-state` was retired in r5 8.8; the owner log is the kept read of the same authority.
+    assert cli.main(["dispatch","owner-log"]) == 0
+    assert isinstance(json.loads(capsys.readouterr().out), list)
+    assert rt.snapshot()["owners"]
 
 
 def test_history_append_only_and_corrupt_records_are_not_repaired(isolated):

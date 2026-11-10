@@ -307,17 +307,20 @@ def test_preflight_changes_nothing(plane):
     assert after == before
 
 
-def test_a_disabled_live_trader_does_not_block_a_research_activation(plane, simulated_enforcement):
-    """5.9's second case: research services start with trading off."""
+def test_an_activation_is_refused_now_that_the_report_tools_are_retired(plane, simulated_enforcement):
+    """Activation had to cite a signed shadow batch report; those tools were retired (switch-trade r5 8.4),
+    so both the preflight and the recording path fail closed instead of skipping the check."""
     _wire_all(plane)
     request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro", actor="op")
 
     result = co.preflight(boundary=co.PROJECTION_READ, request=request, path=plane)
-
-    assert result.ok is True, result.problems
-    assert any("live trader is 'disabled'" in warning for warning in result.warnings)
+    assert result.ok is False
+    assert co.ACTIVATION_RETIRED in result.problems
+    with pytest.raises(co.CutoverError, match="report tools were retired"):
+        co.record_activation(request=request, path=plane)
+    assert co.active_scopes(co.PROJECTION_READ, plane) == []
 
 
 def test_the_activation_gate_does_not_retroactively_deny_the_legacy_route(plane):
@@ -331,20 +334,6 @@ def test_the_activation_gate_does_not_retroactively_deny_the_legacy_route(plane)
     assert state.route == co.ROUTE_LEGACY
     result = co.preflight(path=plane)
     assert result.ok is True, result.problems
-
-
-def test_a_released_scope_warns_that_reactivation_needs_a_fresh_report(plane, simulated_enforcement):
-    _wire_all(plane)
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
-                                   scope={"consumer": "macro"},
-                                   consumer_id="macro", actor="op")
-    co.record_activation(request=request, path=plane)
-    co.release_activation(boundary=co.PROJECTION_READ,
-                          scope_hash=request.scope_hash(), actor="op",
-                          reason="qualification revoked", path=plane)
-
-    result = co.preflight(boundary=co.PROJECTION_READ, request=request, path=plane)
-    assert any("requires a fresh report" in w for w in result.warnings)
 
 
 def test_an_activation_requires_wiring(plane):
@@ -365,12 +354,17 @@ def test_only_the_target_route_is_activated_through_this_path(plane):
         co.record_activation(request=request, route=co.ROUTE_LEGACY, path=plane)
 
 
-def test_active_scopes_excludes_released_ones(plane, simulated_enforcement):
-    _wire_all(plane)
-    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="unit-report-adapter",
+def test_active_scopes_excludes_released_ones(plane):
+    """Activations recorded before the retirement stay readable and releasable."""
+    import sqlite3
+    request = co.ActivationRequest(boundary=co.PROJECTION_READ, report_id="historic-report",
                                    scope={"consumer": "macro"},
                                    consumer_id="macro")
-    co.record_activation(request=request, path=plane)
+    with sqlite3.connect(plane) as conn:
+        conn.execute("INSERT INTO cutover_activations (activation_id, boundary, scope_hash, route, report_id,"
+                     " activated_by, activated_at) VALUES (?,?,?,?,?,?,?)",
+                     ("historic-1", co.PROJECTION_READ, request.scope_hash(), co.ROUTE_TARGET,
+                      request.report_id, "op", "2026-10-20T00:00:00+00:00"))
     assert len(co.active_scopes(co.PROJECTION_READ, plane)) == 1
 
     co.release_activation(boundary=co.PROJECTION_READ,

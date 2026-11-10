@@ -150,7 +150,7 @@ def test_runtime_history_cannot_expand_business_entities(runtime, monkeypatch):
 
 
 def test_refreshing_qualification_does_not_clear_latched_stop_or_revoke_permission(runtime):
-    from test_phase_f_read_executor import policy
+    from test_phase_f_snapshot_dependencies import policy
     from ats.workflow.read_recovery import ReadStopped
     who, _, reference, _ = deploy(runtime, "technical", "technical-review")
     policy(who, runtime.root)

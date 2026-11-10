@@ -287,24 +287,6 @@ def events_calendar_command(args, *, parser) -> int:
     return events_list(days=args.days if args.action == "upcoming" else None)
 
 
-def _cutover_boundary_names() -> list[str]:
-    """The six boundary names, read from the module rather than duplicated here.
-
-    A CLI list that drifts from the code's list makes `--boundary` accept values the
-    plane rejects, which reads as a bug in the plane rather than in the CLI.
-    """
-    from ..workflow.cutover import SIX_BOUNDARIES
-
-    return list(SIX_BOUNDARIES)
-
-
-def _batch_class_names() -> list[str]:
-    """The five batch classes, read from the module rather than duplicated here."""
-    from ..workflow.batch_manifest import BATCH_CLASSES
-
-    return list(BATCH_CLASSES)
-
-
 def _require(value: str, flag: str, parser) -> str:
     """Refuse a missing required flag instead of proceeding with an empty value.
 
@@ -314,131 +296,6 @@ def _require(value: str, flag: str, parser) -> str:
     if not value:
         parser.error(f"{flag} is required")
     return value
-
-
-def batch_command(args, *, parser) -> int:
-    """Phase F 8.1–8.5: the per-batch manifest and its dry-run.
-
-    Separate from `cutover` because this one CANNOT change a route — that is its
-    defining property, and putting it next to the mutating commands would invite an
-    operator to assume otherwise. `dry-run` in particular is meant to be run in a
-    loop before deciding.
-    """
-    from ..workflow import batch_manifest as bm
-    from ..workflow.read_deployment import projection_check
-
-    manifest = args.db or None
-    cutover = args.cutover_db or None
-    action = args.action
-
-
-
-    def _reader(consumer_id, scope):
-        """Read live qualification for one consumer. Absent reader -> ineligible."""
-        from ..workflow.intake import _consumer_scope
-        from ..data.assurance import qualification as _qualification
-        from ..workflow.cutover_routing import _consumer_contract
-
-        try:
-            contract = _consumer_contract(consumer_id)
-        except Exception as exc:  # noqa: BLE001 - reported as ineligible
-            return {"status": "ineligible",
-                    "reasons": [f"consumer contract unreadable: {exc}"]}
-        return _qualification(
-            domain_id=contract["domain_id"], consumer_id=consumer_id,
-            contract_version=contract["contract_version"],
-            scope=scope or _consumer_scope(consumer_id, {
-                "id": consumer_id, "domain": contract["domain_id"],
-                "contract_version": contract["contract_version"],
-                "products": list(contract["scope"].get("products", ())),
-            }))
-
-    if action == "list":
-        batches = bm.list_batches(batch_class=args.batch_class or None,
-                                  path=manifest)
-        if args.json:
-            print(json.dumps([b.as_row() for b in batches], ensure_ascii=False,
-                             indent=2, default=str))
-        else:
-            print(bm.render_manifest(batches))
-        return 0
-
-    if action == "declare":
-        scope = {}
-        if args.scope_json:
-            try:
-                scope = json.loads(args.scope_json)
-            except json.JSONDecodeError as exc:
-                parser.error(f"--scope-json is not valid JSON: {exc}")
-        try:
-            record = bm.declare_batch(bm.CutoverBatch(
-                batch_id=_require(args.batch_id, "--batch-id", parser),
-                batch_class=_require(args.batch_class, "--batch-class", parser),
-                owner=args.owner, old_route=args.old_route, new_route=args.new_route,
-                scope=scope,
-                observation_window=args.observation_window,
-                success_criteria=args.success_criteria,
-                stop_conditions=args.stop_reason,
-                fallback_route=args.fallback_route,
-                fallback_proof=args.fallback_proof,
-                fallback_retired=args.fallback_retired,
-                fallback_available=args.fallback_available,
-                fallback_drill_ref=args.fallback_drill,
-                shadow_report_id=args.report_id,
-                direct_verification=args.direct_verification,
-                declared_by=args.actor), path=manifest)
-        except bm.BatchError as exc:
-            # A refusal the operator asked for, reported as one. Letting it raise
-            # would print a traceback for a plain "you left a field blank", which
-            # is how an operator learns to ignore the output.
-            print(json.dumps({"declared": False, "error": str(exc)},
-                             ensure_ascii=False, indent=2))
-            return 1
-        print(json.dumps(record.as_row(), ensure_ascii=False, indent=2,
-                         default=str))
-        return 0
-
-    if action == "show":
-        batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
-                              path=manifest)
-        from ..workflow.shadow_reports import check_batch_report
-
-        result = bm.dry_run_batch(batch, qualification_reader=_reader,
-                                  projection_checker=projection_check,
-                                  report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
-                                  path=manifest, cutover_path=cutover)
-        print(json.dumps({"batch": batch.as_row(), "dry_run": result.as_row()},
-                         ensure_ascii=False, indent=2, default=str))
-        # Non-zero unless switchable, so a gate script cannot pass on a blocked batch.
-        return 0 if result.switchable else 1
-
-    if action == "dry-run":
-        from ..workflow.shadow_reports import check_batch_report
-
-        results = bm.dry_run(qualification_reader=_reader, path=manifest,
-                             projection_checker=projection_check,
-                             report_checker=lambda b: check_batch_report(b, path=args.report_db or None),
-                             cutover_path=cutover)
-        if args.json:
-            print(json.dumps([r.as_row() for r in results], ensure_ascii=False,
-                             indent=2, default=str))
-        else:
-            print(bm.render_report(results,
-                                   batches=bm.list_batches(path=manifest)))
-        return 0 if all(r.switchable for r in results) else 1
-
-    if action == "drift":
-        batch = bm.read_batch(_require(args.batch_id, "--batch-id", parser),
-                              path=manifest)
-        response = bm.respond_to_drift(
-            batch, qualification_status=args.qualification_status or "(unstated)",
-            serving_traffic=(True if args.serving == "yes"
-                             else False if args.serving == "no" else None))
-        print(json.dumps(response.as_row(), ensure_ascii=False, indent=2))
-        return 0 if response.action == bm.HOLD else 1
-
-    parser.error(f"unhandled batch action {action!r}")
-    return 2
 
 
 def intake_verification_command(args, *, parser) -> int:
@@ -926,167 +783,6 @@ def schedule_cutover_command(args, *, parser) -> int:
     parser.error(f"unknown action {action!r}")
 
 
-def read_cutover_command(args, *, parser) -> int:
-    """Phase F 9.1–9.5: read-path batch switching.
-
-    Separate from `batch` because this one CAN move a route. That is why every
-    action here requires an explicit `--authorisation` reference, and why the
-    deciding mode (`switch` without `--apply`) is the default: 9.1's runbook has
-    an operator re-run this in a loop before deciding.
-    """
-    from ..workflow import read_cutover as rc
-
-    manifest = args.db or None
-    cutover = args.cutover_db or None
-    action = args.action
-
-    def _reader(consumer_id, scope):
-        from ..data.assurance import qualification
-        from ..workflow.cutover_routing import _consumer_contract
-        contract = _consumer_contract(consumer_id)
-        return qualification(domain_id=contract["domain_id"], consumer_id=consumer_id,
-                             contract_version=contract["contract_version"], scope=scope)
-
-    from ..workflow.read_deployment import authorize, projection_check
-
-    def _report_ok(batch):
-        """Delegates to the shadow report's own applicability check (3.6).
-
-        Returns the `(usable, problems)` shape the executor expects rather than
-        re-deriving any of the four checks here — a second implementation would
-        eventually disagree with the one 3.6 already tests.
-        """
-        from ..workflow import shadow_reports as reports
-
-        return reports.check_batch_report(batch, path=args.report_db or None)
-
-    if action == "authorize":
-        auth = rc.DeploymentAuthorization(
-            reference=_require(args.authorisation, "--authorisation", parser),
-            authorised_by=_require(args.authorised_by, "--authorised-by", parser),
-            issued_by=_require(args.issued_by, "--issued-by", parser),
-            scope=tuple(s.strip() for s in (args.scope or "").split(",")
-                        if s.strip()),
-            valid_until=_require(args.valid_until, "--valid-until", parser),
-            note=args.note or "")
-        try:
-            previous = rc.read_authorisation(auth.reference, path=manifest)
-            if previous is not None and previous != auth:
-                raise rc.DeploymentAuthorizationError('deployment authorisation reference is immutable')
-            if args.batch_id:
-                batch = bm_read(args.batch_id, parser, manifest)
-                if cutover and Path(cutover).resolve() != Path(rc.plane.default_cutover_db_path()).resolve():
-                    raise rc.DeploymentAuthorizationError("authorize must use active runtime authority")
-                authorize(batch, auth, actor=args.actor or auth.issued_by)
-            rc.write_authorisation(auth, path=manifest, actor=args.actor)
-        except (rc.DeploymentAuthorizationError, rc.plane.CutoverError, KeyError, ValueError) as exc:
-            print(str(exc))
-            return 1
-        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
-        return 0
-
-    if action == "show-auth":
-        auth = rc.read_authorisation(args.authorisation or "", path=manifest)
-        if auth is None:
-            print(f"no such authorisation: {args.authorisation!r}")
-            return 1
-        print(json.dumps(auth.as_row(), ensure_ascii=False, indent=2))
-        return 0
-
-    if action == "plan":
-        auth = rc.read_authorisation(args.authorisation or "", path=manifest)
-        if auth is None and args.authorisation:
-            print(f"no such authorisation: {args.authorisation!r}. Record it with "
-                  "`read authorize` first — an authorisation passed only on the "
-                  "command line would not be readable by whoever asks who allowed it")
-            return 1
-        if not args.batch_id:
-            results = [rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
-                authorisation=auth, actor=args.actor, path=manifest,
-                cutover_path=cutover) for batch in _all_batches(manifest)]
-        else:
-            batch = bm_read(args.batch_id, parser, manifest)
-            results = [rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
-                authorisation=auth, actor=args.actor, path=manifest,
-                cutover_path=cutover)]
-        print(rc.render_report(results))
-        return 0 if results and all(r.outcome in {rc.BATCH_SWITCHED, rc.BATCH_NOOP} for r in results) else 1
-
-    if action == "switch":
-        if not args.authorisation:
-            # Still runs the executor, so the refusal is recorded. Shortcutting
-            # here would leave nothing in the history, and "we looked and could
-            # not" is the reading an operator needs when the authorisation later
-            # arrives (8.2 makes the same promise for the dry-run).
-            batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
-                            manifest)
-            result = rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
-                authorisation=None, actor=args.actor or "cli", path=manifest,
-                cutover_path=cutover, apply=args.apply)
-            print(rc.render_report([result]))
-            print("refusing: --authorisation is required. Passing the gates is not "
-                  "permission to cut over; the authorisation is a separate artifact "
-                  "on purpose")
-            return 1
-        auth = rc.read_authorisation(args.authorisation, path=manifest)
-        if auth is None:
-            # Same reasoning: an unrecorded reference is still an attempt worth
-            # recording, and it is the attempt most likely to be queried later.
-            batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser,
-                            manifest)
-            result = rc.execute_batch(
-                batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
-                authorisation=None, actor=args.actor or "cli", path=manifest,
-                cutover_path=cutover, apply=args.apply)
-            print(rc.render_report([result]))
-            print(f"refusing: no recorded authorisation {args.authorisation!r}. "
-                  "An authorisation that cannot be read back cannot be audited")
-            return 1
-        batch = bm_read(_require(args.batch_id, "--batch-id", parser), parser, manifest)
-        result = rc.execute_batch(
-            batch, qualification_reader=_reader, report_checker=_report_ok, projection_checker=projection_check,
-            authorisation=auth, actor=args.actor or "cli", path=manifest,
-            cutover_path=cutover, apply=args.apply)
-        print(rc.render_report([result]))
-        # Exit non-zero unless everything switched: a partial switch is not the
-        # requested outcome and must not read as success in a script.
-        return 0 if result.outcome in {rc.BATCH_SWITCHED, rc.BATCH_NOOP} else 2
-
-    if action == "history":
-        rows = rc.run_history(args.batch_id or "", path=manifest)
-        if args.json:
-            print(json.dumps(rows, ensure_ascii=False, indent=2, default=str))
-        else:
-            for row in rows:
-                print(f"{row['recorded_at']}  {row['batch_id']:24} "
-                      f"{row['outcome']:22} changed={row['changed']} "
-                      f"actor={row['actor'] or '-'}")
-        return 0
-
-    parser.error(f"unknown action {action!r}")
-
-
-def _all_batches(manifest):
-    from ..workflow import batch_manifest as bm
-
-    return list(bm.list_batches(path=manifest))
-
-
-def bm_read(batch_id, parser, manifest):
-    from ..workflow import batch_manifest as bm
-
-    try:
-        return bm.read_batch(batch_id, path=manifest)
-    except bm.BatchError as exc:
-        parser.error(str(exc))
-
-
-# Research analysts are run by the Dispatcher (`ats workflow run`); the commands that used to run them by hand are retired.
-# They answer with the replacement instead of silently doing nothing. The functions behind them (run_macro_review, ...)
-# stay for now: `boundary_evidence` and the Phase F acceptance tests name them as business entries (R5).
 _WORKFLOW_RUN = "ats workflow run --task {task} --scope-kind {kind} --scope-id {id}"
 RESEARCH_MANUAL_MOVED = {
     ("macro", "review"): _WORKFLOW_RUN.format(task="macro-review", kind="portfolio", id="portfolio"),
@@ -1126,6 +822,8 @@ RETIRED_MIGRATION_COMMANDS = {
     "cutover": "切换控制平面的批次登记与报告校验已随交易路径切换完成删除（r5 8.4）",
     "shadow": "影子比较、验收与影子账本工具已删除（r5 8.4）",
     "drill": "切换边界演练已删除（r5 8.4）；实盘路由演练用 `ats live drill` / `ats live rollback-drill`",
+    "read": "研究侧读切流的批次执行与部署授权工具已删除（r5 8.5）",
+    "batch": "切流批次清单工具已删除（r5 8.5）",
 }
 
 
@@ -4050,65 +3748,10 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--from-time", default="", help="预期集合窗口 ISO 起点（带时区）")
     sp.add_argument("--to-time", default="", help="预期集合窗口 ISO 终点（带时区）")
 
-    rc_parser = sub.add_parser(
-        "read",
-        help="读路径分批切换（交易路径切换前保留；**会改路由**，须提供 --authorisation）")
-    rc_parser.add_argument("action", choices=[
-        "plan", "switch", "authorize", "show-auth", "history"])
-    rc_parser.add_argument("--batch-id", default="", help="switch: 批次 ID")
-    rc_parser.add_argument("--db", default="", help="批次清单与运行记录库")
-    rc_parser.add_argument("--cutover-db", default="", help="切流控制状态库")
-    rc_parser.add_argument("--report-db", default="", help="独立影子报告库路径")
-    rc_parser.add_argument("--authorisation", default="",
-                           help="已登记的部署授权引用；switch 必填")
-    rc_parser.add_argument("--authorised-by", default="", help="authorize: 授权人")
-    rc_parser.add_argument("--issued-by", default="", help="authorize: 签发人")
-    rc_parser.add_argument("--scope", default="", help="authorize: 逗号分隔的消费者范围")
-    rc_parser.add_argument("--valid-until", default="", help="authorize: 授权有效期")
-    rc_parser.add_argument("--note", default="", help="authorize: 备注")
-    rc_parser.add_argument("--actor", default="", help="执行人")
-    rc_parser.add_argument("--apply", action="store_true",
-                           help="switch: 真正改路由；缺省只决定不改动")
-    rc_parser.add_argument("--json", action="store_true", help="history: JSON 输出")
-
-    bt = sub.add_parser(
-        "batch",
-        help="逐批切换清单与 dry-run（交易路径切换前保留；**不改任何路由**）")
-    bt.add_argument("action", choices=[
-        "list", "declare", "show", "dry-run", "drift"])
-    bt.add_argument("--batch-id", default="", help="declare/show/drift: 批次 ID")
-    bt.add_argument("--batch-class", default="", choices=[""] + _batch_class_names())
-    bt.add_argument("--owner", default="", help="declare: 责任方")
-    bt.add_argument("--old-route", default="", help="declare: 旧路由")
-    bt.add_argument("--new-route", default="", help="declare: 新路由")
-    bt.add_argument("--scope-json", default="{}", help="declare: 批次范围")
-    bt.add_argument("--observation-window", default="", help="declare: 观察窗口")
-    bt.add_argument("--success-criteria", default="", help="declare: 成功判据")
-    bt.add_argument("--stop-reason", default="", help="declare: 停止条件")
-    bt.add_argument("--fallback-route", default="", help="declare: 回退目标")
-    bt.add_argument("--fallback-proof", default="",
-                    choices=["", "valid", "missing"])
-    bt.add_argument("--fallback-retired", default="",
-                    choices=["", "yes", "no"])
-    bt.add_argument("--fallback-available", default="",
-                    choices=["", "yes", "no"])
-    bt.add_argument("--fallback-drill", default="", help="declare: 已演练回退的引用")
-    bt.add_argument("--report-id", default="", help="declare: 引用的影子报告 ID")
-    bt.add_argument("--direct-verification", action="store_true",
-                    help="declare: 已在生产运行、直接核验接收（不重复切换）")
-    bt.add_argument("--qualification-status", default="",
-                    help="drift: 当前资格状态")
-    bt.add_argument("--serving", default="", choices=["", "yes", "no"],
-                    help="drift: 该批次是否正在承载流量")
-    bt.add_argument("--actor", default="", help="declare: operator identity")
-    bt.add_argument("--json", action="store_true", help="输出 JSON 而非 Markdown")
-    bt.add_argument("--db", default="", help="覆盖批次清单库路径")
-    bt.add_argument("--cutover-db", default="", help="覆盖切流控制库路径")
-    bt.add_argument("--report-db", default="", help="独立影子报告库路径")
-
-    # Named `drill`, not `rollback`: the actions cover the shadow-period
-    # acceptance checks as well as the three boundary rollbacks, and a command
-    # named `rollback` that also verifies traceability would be misread.
+    rc_parser = sub.add_parser("read", help="已退役（switch-trade r5 8.5）：研究侧读切流的批次执行与部署授权工具已删除")
+    rc_parser.add_argument("rest", nargs=argparse.REMAINDER)
+    bt = sub.add_parser("batch", help="已退役（switch-trade r5 8.5）：切流批次清单工具已删除")
+    bt.add_argument("rest", nargs=argparse.REMAINDER)
     dr = sub.add_parser("drill", help="已退役（switch-trade r5 8.4）：切换边界演练已删除；实盘路由演练用 ats live drill / rollback-drill")
     dr.add_argument("rest", nargs=argparse.REMAINDER)
     wf = sub.add_parser("workflow", help="工作流运行及 Trigger Ledger 运维")
@@ -4597,11 +4240,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "dispatch":
         return schedule_cutover_command(args, parser=parser)
 
-    if args.command == "read":
-        return read_cutover_command(args, parser=parser)
-
-    if args.command == "batch":
-        return batch_command(args, parser=parser)
     if args.command == "workflow":
         return workflow_command(args, parser=parser)
     if args.command == "thetadata":

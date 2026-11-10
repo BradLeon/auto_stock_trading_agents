@@ -327,25 +327,6 @@ def test_blank_baseline_label_resolves_only_matching_known_calendar_without_rewr
     assert routine._change_metric_number('[2026-10-10] no numeric reading') is None
 
 
-def test_information_deployment_accepts_configured_read_universe_but_requires_target_output(monkeypatch):
-    from ats.workflow.runtime_reads import consumer_entities, business_identity
-    from ats.workflow.read_deployment import projection_check
-    from ats.workflow.cutover import CutoverError
-    entities = consumer_entities('information', 'entity', 'MRVL')
-    who = business_identity('information', kind='entity', scope_id='MRVL', entities=entities,
-                            as_of='2026-10-10T03:00:00+00:00')
-    monkeypatch.setattr('ats.memory.get_store', lambda: object())
-    monkeypatch.setattr('ats.workflow.consumer_reads.read_projection', lambda *a, **kw: {'input_refs':['doc@version']})
-    def reference(entity):
-        return {'projection_id':'unit-projection', 'content_hash':'unit-hash', 'role':'information_brief',
-                'scope_kind':'entity', 'scope_id':entity}
-    assert projection_check(who, refs=[reference('MRVL')])['available']
-    with pytest.raises(CutoverError, match='escapes business entities'):
-        projection_check(who, refs=[reference('NVDA')])
-    with pytest.raises(CutoverError, match='escapes'):
-        projection_check(who, refs=[reference('UNCONFIGURED')])
-
-
 def test_information_missing_confidence_or_opinion_update_is_not_a_success(monkeypatch):
     from ats.agents.information import documents
     from ats.agents.pead.outputs import ContextUpdateView

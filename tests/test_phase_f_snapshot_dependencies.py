@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from test_phase_f_read_executor import policy
 from test_phase_f_research_gate import business_inputs as _business_inputs
 from test_phase_f_research_gate import decision_run
 from test_phase_f_research_gate import research_isolation as _isolated
@@ -19,6 +18,18 @@ from ats.workflow.isolation import verified_isolation_root
 
 business_inputs=_business_inputs
 isolated=_isolated
+
+
+def policy(who, root):
+    """Register an explicit safe-stop recovery policy (moved from test_phase_f_read_executor, r5 8.5)."""
+    import hashlib
+    from ats.workflow import read_recovery as recovery
+    path = root / (who.key + '-stop.json')
+    path.write_text(json.dumps({"version": recovery.VERSION, "identity": who.as_row(), "strategy": "stop",
+        "dependency_hashes": recovery.dependency_hashes(who.consumer_id),
+        "valid_until": (datetime.now(UTC)+timedelta(hours=1)).isoformat()}))
+    recovery.register(who, reference=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+                      actor='fixture', reason='pre-run explicit safe stop')
 
 
 @pytest.fixture

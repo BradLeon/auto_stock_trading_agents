@@ -894,7 +894,6 @@ qualification_policy:
     - src/ats/trader/reconcile.py
     - src/ats/workflow/__init__.py
     - src/ats/workflow/architecture_guards.py
-    - src/ats/workflow/batch_manifest.py
     - src/ats/workflow/cutover_guards.py
     - src/ats/workflow/cutover_wiring.py
     - src/ats/workflow/dispatch_claims.py
@@ -903,8 +902,6 @@ qualification_policy:
     - src/ats/workflow/intake_verification.py
     - src/ats/workflow/isolated_entry.py
     - src/ats/workflow/joint_cutover.py
-    - src/ats/workflow/read_cutover.py
-    - src/ats/workflow/read_deployment.py
     - src/ats/workflow/read_recovery.py
     - src/ats/workflow/routing.py
     - src/ats/workflow/schedule_cutover.py

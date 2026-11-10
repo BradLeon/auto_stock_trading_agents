@@ -14,46 +14,10 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import acceptance_reports as reports
 from . import cutover as plane
 from . import legacy_retirement as registry
 from . import schedule_runtime as scheduling
 from .scoped_routes import RouteIdentity
-
-
-def verify_new_coverage(requirements, *, report_reader=None):
-    """Requirements are named before execution; only actual report remeasurement counts."""
-    if not requirements or len({r['use'] for r in requirements}) != len(requirements):
-        raise ValueError('nonempty unique new requirement uses required')
-    rows = []
-    for requirement in requirements:
-        row = {'use': requirement['use'], 'consumer': requirement['consumer'],
-               'scope': requirement['scope'], 'status': 'missing', 'problems': []}
-        try:
-            state = (report_reader or reports.read)(requirement['report_id'], path=requirement.get('report_db'))
-            body = state['body']
-            reports._validate(body)  # opens original new/replay stores and measures fixed assertions
-            value, runs, _ = reports._executions(body['proof'], body['input_hash'])
-            if body['scope'] != requirement['scope']:
-                raise ValueError('required business scope differs')
-            batch = type('CoverageBatch', (), {'scope': requirement['scope'],
-                'batch_class': requirement['batch_class'], 'consumers': (requirement['consumer'],),
-                'required_surfaces': tuple(requirement['dimensions']),
-                'shadow_report_id': requirement['report_id']})()
-            ok, problems = reports.check_batch_report(batch, path=requirement.get('report_db'))
-            if not ok:
-                raise ValueError('; '.join(problems))
-            row.update(status='passed', body_hash=state['body_hash'],
-                history_refs=[ref for execution in body['executions'] for ref in execution['output_refs']],
-                actual_new_reads=[read for run in runs for read in run['reads']],
-                actual_governed_inputs=[read for read in value.reads
-                    if read['request']['consumer']==requirement['consumer']],
-                production_zero_claim=False)
-        except (OSError, sqlite3.Error, KeyError, TypeError, ValueError) as exc:
-            row['problems'].append(str(exc))
-        rows.append(row)
-    return {'status': 'passed' if all(r['status']=='passed' for r in rows) else 'pending',
-            'requirements': rows, 'criterion': 'new contract coverage/admission/lineage/history; no old oracle'}
 
 
 def required_plan_uses(plan):
@@ -72,51 +36,6 @@ def required_plan_uses(plan):
              "task_id": task.task_id, "task_scope": task.scope.model_dump(mode="json"),
              "role": TASK_ROLE[task.task_id], "schema": task.output_schema,
              "dependencies": list(task.dependencies)} for task in plan.tasks]
-
-
-def verify_plan_coverage(plan, bindings):
-    """Require every predeclared task scope; an executed subset cannot define coverage.
-
-    Bindings supply report references, never the required use list. Each report
-    is remeasured through original stores, then its measured task scope is
-    compared to the independently expanded selected plan.
-    """
-    required = required_plan_uses(plan)
-    expected = {r["use"] for r in required}
-    if not isinstance(bindings, dict):
-        raise ValueError("report bindings must be keyed by required use")
-    missing = sorted(expected - set(bindings))
-    extra = sorted(set(bindings) - expected)
-    if missing or extra:
-        return {"status": "pending", "required_uses": required,
-                "missing_uses": missing, "unexpected_uses": extra,
-                "criterion": "ARCHITECTURE 8.2 and 15.3 selected dependency closure"}
-    requirements = [{**bindings[r["use"]], **r} for r in required]
-    checked = verify_new_coverage(requirements)
-    for requirement, row in zip(requirements, checked["requirements"]):
-        if row["status"] != "passed":
-            continue
-        try:
-            body = reports.read(requirement["report_id"], path=requirement.get("report_db"))["body"]
-            measured = [a for a in body["matrix"]["assertions"] if a["required"] and
-                a["dimension"] == "analysis" and
-                a["expected"]["task"]["task_id"] == requirement["task_id"] and
-                a["expected"]["task"]["scope"] == requirement["task_scope"]]
-            if len(measured) != 1:
-                raise ValueError("required task scope was not measured by this report")
-            task = measured[0]["expected"]["task"]
-            if task["output_schema"] != requirement["schema"]:
-                raise ValueError("required task schema differs from measured report")
-            row.update(task_id=task["task_id"], task_scope=task["scope"],
-                       required_by="ARCHITECTURE 8.2/15.3")
-        except (OSError, sqlite3.Error, KeyError, TypeError, ValueError) as exc:
-            row["status"] = "missing"
-            row["problems"].append(str(exc))
-    checked["required_uses"] = required
-    checked["coverage_scope"] = "selected analysis task dependency closure only"
-    checked["decision_approval_trade_or_production_claim"] = False
-    checked["status"] = "passed" if all(r["status"] == "passed" for r in checked["requirements"]) else "pending"
-    return checked
 
 
 def verify_recovery_window(*, start, end, observations, required_drills, stopped, history_readable, now=None):

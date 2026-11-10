@@ -317,22 +317,6 @@ def test_equivalent_content_reuses_cached_original_despite_title_and_source_chan
     assert {r.article.id for r in chosen} == {'z-cached', 'update'}
 
 
-@pytest.mark.parametrize('entity', ['MRVL', 'MSFT', 'NVDA', 'TSM'])
-def test_independent_research_capture_trigger_ids_preserve_same_flow_identity(entity):
-    import importlib.util
-    from ats.config import REPO_ROOT
-    spec = importlib.util.spec_from_file_location('research_capture_trigger',
-                                                 REPO_ROOT / 'scripts/capture_phase_f_research.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    research_trigger_id = module.research_trigger_id
-    information = research_trigger_id(entity, with_routine=False)
-    routine = research_trigger_id(entity, with_routine=True)
-    assert information != routine
-    assert information == research_trigger_id(entity, with_routine=False)
-    assert routine == research_trigger_id(entity, with_routine=True)
-
-
 def test_identical_syndication_consumes_one_read_and_numeric_update_remains_available():
     rows=[selection.Candidate(article('a',source='ibkr_news',body='Microsoft capacity increased 10%.'),0,'target_title'),
           selection.Candidate(article('b',source='trendforce_news',body='Microsoft capacity increased 10%.'),0,'target_title'),

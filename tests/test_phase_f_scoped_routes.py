@@ -582,15 +582,6 @@ def test_enforcement_artifact_drift_closes_previously_verified_scope(authority, 
         artifact.write_bytes(original)
 
 
-def test_real_cli_cannot_switch_bootstrap_declarations(authority, capsys):
-    from ats.runtime.cli import main
-    assert main(["cutover", "set-route", "--boundary", "projection_read", "--route", "target",
-                 "--actor", "test", "--reason", "attempt", "--db", str(authority)]) == 1
-    result = json.loads(capsys.readouterr().out)
-    assert result["changed"] is False and "shadow report ID is required" in result["problem"]
-    assert co.read_boundary(co.PROJECTION_READ, authority).route == "legacy"
-
-
 def test_event_and_time_changes_are_independent_scopes():
     base = identity(event_id="earnings", event_version="1")
     assert base.key != identity(event_id="earnings", event_version="2").key
@@ -641,14 +632,3 @@ def test_fake_mode_label_cannot_reuse_isolated_test_as_production(authority, rea
     bundle["mode"] = "production"
     with pytest.raises(co.CutoverError, match="executed test entry/scope/mode"):
         be.record_enforcement(co.LIVE_TRADER, identity("trader"), mode="production", bundle=bundle, path=authority)
-
-
-def test_scope_inventory_is_visible_in_real_cli(authority, fake_enforcement, capsys):
-    from ats.runtime.cli import main
-    move(authority, identity())
-    assert main(["cutover", "state", "--db", str(authority)]) == 0
-    result = json.loads(capsys.readouterr().out)
-    scopes = result[co.PROJECTION_READ]["scoped_routes"]
-    assert len(scopes) == 1 and scopes[0]["identity"] == identity().as_row()
-    assert result[co.PROJECTION_READ]["route"] == "legacy"
-    assert all(not result[b]["scoped_routes"] for b in co.SIX_BOUNDARIES if b != co.PROJECTION_READ)

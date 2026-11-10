@@ -266,7 +266,7 @@ def test_runtime_code_and_data_verifiers_stay_qualification_bound(surface):
     for path in ("src/ats/data/assurance.py", "src/ats/workflow/assurance_surface.py",
                  "src/ats/workflow/exit_requirements.py", "src/ats/workflow/read_recovery.py",
                  "src/ats/workflow/consumer_reads.py", "src/ats/workflow/cutover_wiring.py",
-                 "src/ats/workflow/scoped_routes.py", "src/ats/workflow/acceptance_reports.py"):
+                 "src/ats/workflow/scoped_routes.py"):
         assert set(surface.consumers_touched_by(path)) == set(surface.consumers), path
 
 

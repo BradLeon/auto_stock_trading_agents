@@ -23,9 +23,6 @@ tests:
 - tests/test_information_target_selection.py
 - tests/test_information_visibility_revisions.py
 - tests/test_workflow_planning.py
-- tests/test_phase_f_acceptance_assertions.py
-- tests/test_phase_f_acceptance_matrix.py
-- tests/test_phase_f_acceptance_reports.py
 - tests/test_phase_f_batch_executor.py
 - tests/test_phase_f_broker_enforcement.py
 - tests/test_phase_f_business_wiring.py
@@ -33,12 +30,9 @@ tests:
 - tests/test_phase_f_entry_evidence.py
 - tests/test_phase_f_entry_evidence_assembly.py
 - tests/test_phase_f_exit_requirements.py
-- tests/test_phase_f_independent_runner.py
-- tests/test_phase_f_integration_evidence.py
 - tests/test_phase_f_isolated_authority.py
 - tests/test_phase_f_joint_cutover.py
 - tests/test_phase_f_opinion_execution.py
-- tests/test_phase_f_paired_business.py
 - tests/test_phase_f_persistent_runtime.py
 - tests/test_phase_f_read_executor.py
 - tests/test_phase_f_read_recovery.py
@@ -61,9 +55,6 @@ tests:
 - tests/test_phase_f_trader_a.py
 scripts:
 - scripts/assemble_phase_f_entry_evidence.py
-- scripts/capture_phase_f_research.py
-- scripts/capture_phase_f_technical.py
-- scripts/inspect_phase_f_exit.py
 - scripts/prepare_information_capture.py
 - scripts/prepare_phase_f_batches.py
 - scripts/prepare_phase_f_stage_one.py
@@ -74,12 +65,9 @@ scripts:
 - scripts/review_information_selection.py
 - scripts/run_information_capture.py
 - scripts/verify_dataflow_qualification.py
-- scripts/verify_phase_f_integration.py
 src_tools:
 - path: src/ats/workflow/analysis_verification.py
   reason: offline analysis verification harness; imported by no module
-- path: src/ats/workflow/boundary_drill.py
-  reason: isolated boundary drill; reached only from the cli drill command
 - path: src/ats/workflow/consumer_disposition.py
   reason: consumer disposition report; reached only from the cli
 - path: src/ats/workflow/cutover_acceptance.py
@@ -91,7 +79,7 @@ src_tools:
 - path: src/ats/workflow/pytest_optional_deps_plugin.py
   reason: pytest plugin; test runs only
 - path: src/ats/workflow/retirement_clearance.py
-  reason: legacy retirement clearance report; reached from the cli and boundary_drill only
+  reason: legacy retirement clearance report; reached from the cli only
 - path: src/ats/workflow/test_baseline.py
   reason: test baseline bookkeeping; imported by no module
 - path: src/ats/trader/statement_import.py

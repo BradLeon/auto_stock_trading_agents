@@ -430,7 +430,6 @@ qualification_policy:
     - src/ats/agents/sector/cross_section.py
     - src/ats/workflow/business_replay_inputs.py
     - src/ats/workflow/evaluation_clock.py
-    - src/ats/workflow/paired_business.py
     - src/ats/workflow/shadow_replay.py
     - config/settings.yaml
     - config/watchlist.yaml
@@ -894,11 +893,6 @@ qualification_policy:
     - src/ats/trader/portfolio.py
     - src/ats/trader/reconcile.py
     - src/ats/workflow/__init__.py
-    - src/ats/workflow/acceptance_assertions.py
-    - src/ats/workflow/acceptance_disposition.py
-    - src/ats/workflow/acceptance_matrix.py
-    - src/ats/workflow/acceptance_reports.py
-    - src/ats/workflow/acceptance_runner.py
     - src/ats/workflow/architecture_guards.py
     - src/ats/workflow/batch_manifest.py
     - src/ats/workflow/cutover_guards.py

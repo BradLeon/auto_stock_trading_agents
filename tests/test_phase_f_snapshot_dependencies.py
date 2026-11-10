@@ -110,7 +110,6 @@ def multi_routine_basis(business_inputs, isolated):
     """Real role compute/publish and Chief binding; external transports are fixtures."""
     from ats.data import document_assets
     from ats.data.stores.unstructured import get_platform_unstructured_store
-    from ats.workflow import acceptance_matrix as matrix
     repository = get_platform_unstructured_store()
     point = datetime.now(UTC)
     try:
@@ -124,10 +123,7 @@ def multi_routine_basis(business_inputs, isolated):
         repository.close()
     captured = {}
     def before(plan):
-        task = next(t for t in plan.tasks if t.task_id == 'fundamental-routine')
         captured['plan'] = plan
-        captured['matrix'] = matrix.freeze(plan, workflow_id='multi-routine',
-            identity=reads.task_identity(plan, task), batch_class='decision', model_execution=True)
     def runner(snapshot, manifest):
         captured['basis'] = snapshot.to_payload()
         captured['manifest'] = manifest
@@ -139,17 +135,13 @@ def multi_routine_basis(business_inputs, isolated):
     return SimpleNamespace(store=isolated, result=result, outcome=outcome, **captured)
 
 
-def test_actual_multi_routine_preserves_all_updates_in_checker_chief_and_reuse(multi_routine_basis, record_property):
+def test_actual_multi_routine_preserves_all_updates_in_chief_and_reuse(multi_routine_basis, record_property):
     from ats.agents.chief import assemble
-    from ats.workflow import acceptance_assertions as checks, decision_requirements as dr
+    from ats.workflow import decision_requirements as dr
     from ats.workflow.dispatcher import Dispatcher
     from ats.workflow.store import WorkflowStore
     s = multi_routine_basis
-    assertion = next(a for a in s.matrix.body['assertions']
-                     if a['id'] == 'analysis.'+s.outcome.instance_key)
-    actual, refs = checks._analysis(s.matrix.body, assertion,
-                                  {'store':s.store, 'dispatch':s.result.as_dict()})
-    assert len(actual['outputs']) == 3 and set(s.outcome.projection_refs) <= set(refs)
+    # The acceptance checker's re-measurement went with acceptance_* (r5 8.4); the Chief-side checks below remain.
     items = [i for i in s.basis['items'] if i['agent_role'] == 'fundamental_expectation_update']
     assert {i['projection_id'] for i in items} == set(s.outcome.projection_refs)
     dr.validate_chief(s.store, s.basis, at=datetime.fromisoformat(s.plan.as_of))
@@ -251,9 +243,9 @@ def test_standalone_chief_refuses_incomplete_routine_producer_bundle(multi_routi
 
 
 @pytest.mark.parametrize('damage', ['omit', 'duplicate', 'hash', 'lineage', 'vintage', 'scope', 'schema', 'expired', 'producer', 'narrative_number'])
-def test_multi_routine_member_damage_refuses_actual_checker_and_chief(multi_routine_basis, damage):
+def test_multi_routine_member_damage_refuses_chief(multi_routine_basis, damage):
     import copy
-    from ats.workflow import acceptance_assertions as checks, decision_requirements as dr
+    from ats.workflow import decision_requirements as dr
     s = multi_routine_basis
     actual = copy.deepcopy(s.result.as_dict())
     basis = copy.deepcopy(s.basis)
@@ -302,9 +294,6 @@ def test_multi_routine_member_damage_refuses_actual_checker_and_chief(multi_rout
         column, value = columns[damage]
         s.store.conn.execute('UPDATE task_projection_envelopes SET '+column+'=? WHERE projection_id=?',(value,ref))
         s.store.conn.commit()
-    assertion = next(a for a in s.matrix.body['assertions'] if a['id']=='analysis.'+s.outcome.instance_key)
-    with pytest.raises((ValueError, RouteUnavailable)):
-        checks._analysis(s.matrix.body, assertion, {'store':s.store,'dispatch':actual})
     with pytest.raises((RouteUnavailable, ValueError)):
         dr.validate_chief(s.store, basis, at=datetime.fromisoformat(s.plan.as_of))
 

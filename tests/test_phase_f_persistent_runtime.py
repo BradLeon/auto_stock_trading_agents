@@ -277,7 +277,7 @@ def test_event_task_binds_actual_trigger_and_refuses_conflicting_metadata(runtim
         reads.task_identity(bad, bad.tasks[0])
 
 
-from test_phase_f_paired_business import isolated_run as isolated, input_fixture as business_inputs
+from test_phase_f_research_gate import business_inputs, research_isolation as isolated  # noqa: F401  (fixtures)
 
 
 def test_stable_trader_permission_reads_real_governed_quote_and_rejects_other_cycle(runtime, monkeypatch):

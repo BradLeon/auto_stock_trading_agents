@@ -130,7 +130,8 @@
   - 记录（2026-11-10）：89c87fb。覆盖核验改名 `ats dispatch coverage-expected` / `coverage-compare`（参数不变），台北 11-02 00:00 至 11-10 12:00 窗口下主仓库旧命令与本分支新命令输出逐字节一致；删 `dispatch_claims` 与 `runtime-*`、`ownership`、`ledger`、`executed`、`record-execution`、`rollback-plan`、`rollback-history`（旧名保留一个版本的提示，`runtime-expected/compare` 提示改用 `coverage-*`）；`ats dispatch --help` 只列 pause、resume、owner-log、coverage-expected、coverage-compare。
 - [x] 8.9 登记处把本组条目（含原 R2 的 5 条）标为 retired 并附清零证明；更新 OPERATIONS 与 TEST_BASELINE，写明删除了哪些测试、其中多少原本失败（含 10-19 登记的 41 个旧失败）。验证：`ats retirement decide` 显示本组 retired，TEST_BASELINE 有本批记录
   - 记录（2026-11-10）：42c1d90、edaa936。登记处六条（`trade_cutover_tooling`、`batch_read_cutover`、`schedule_cutover`、`intake`、`analysis_verification`、`dispatch_dedup`）改 retired 并附证据，`decide` 判可退出、`tombstone` 一致；OPERATIONS 与退役 runbook 已同步。全量见 TEST_BASELINE「交易路径切换第 8 组全量」：删除 826 个测试，其中 63 个原本失败（含 10-19 登记的 41 个旧失败，所在四个文件整份删除）；新增变红 13 个中 4 个属本组已修（edaa936），9 个属 worktree 环境（8 个链接主 venv 后通过，`test_chief_loop` 1 个合入后在主仓库复验）。
-- [ ] 8.10 本批复验 V4–V6：全量测试与基线逐项对照；重启 `com.ats.dispatcher`，观察下一次定时触发、数据刷新、日历消费，以及 `chief-daily` 与 `clerk-daily`；确认旧表与台账可读。验证：复验结果写进 inventory.md 的本批记录
+- [x] 8.10 本批复验 V4–V6：全量测试与基线逐项对照；重启 `com.ats.dispatcher`，观察下一次定时触发、数据刷新、日历消费，以及 `chief-daily` 与 `clerk-daily`；确认旧表与台账可读。验证：复验结果写进 inventory.md 的本批记录
+  - 记录（2026-11-11，用户批准）：复验结果见 inventory.md「8.10 本批复验」。定时 chief-daily、clerk-daily 因用户断网（TWS 未登录、Yahoo 取价失败）未成功，以手动 clerk（completed）与手动 chief（读取与决策通过，规范化遇隔夜报价偶发超时）替代，用户判定与退役无关；`trade_publication` 检查待首笔真实成交时观察。
 
 ## 9. R5d 读路由与资格机制收窄
 

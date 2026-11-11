@@ -92,3 +92,16 @@
 - `cutover_acceptance`（`ats drill traceability / unapproved-orders / acceptance`）：8.6 删除，不迁。
 - `analysis_verification`、`scoped_intake`、`consumer_disposition`：只服务迁移期资格认定，8.7 删除。
 - `isolated_entry`：8.7 整删（11-08 已定）。
+
+## 8.10 本批复验（2026-11-11，用户批准按现有证据勾选）
+
+| 项 | 结果 |
+|---|---|
+| 全量测试与基线对照 | 35 failed / 4138 passed，新增变红 13 个已归因（4 个本组已修 edaa936，9 个 worktree 环境、主仓库复验通过）；见 TEST_BASELINE「交易路径切换第 8 组全量」与 `var/test_runs/switch-8-vs-7.txt` |
+| 重启 | 11-10 14:15 台北合入 de854d8 后重启 dispatcher（PID 42111）、serve（PID 42129），`/health` ok，7 个工作流注册 |
+| 下一次定时触发 | 11-10 台北 21:00 information-brief complete、21:31 fundamental-routine complete、21:33 technical-review incomplete、22:45 chief-daily failed、23:58 fills-capture 与 11-11 07:00 clerk-daily failed，均按时触发。失败原因与本批无关：technical-review 16/18 标的 Yahoo 取价超时（经 Clash fake-IP 连接时断时续），chief 因此缺技术面输入被 `decision_requirements` 拒；fills-capture、clerk 因 TWS 未登录（用户断网） |
+| 日历消费、数据刷新 | `phase_e:calendar-consume` 每 30 分钟正常结束；data-refresh 进程持续运行（既有 misfire 遗留与本批无关） |
+| clerk-daily | 11-11 09:39 台北手动补跑 11-10 窗口 `run_44108d5511b0fc9144bbdae2` completed（无新成交、持仓 18、Flex 补漏一致），Clerk 日报与风控日报已发布；与定时路径调用同一 `clerk_run` + `clerk_report.publish` + 风控日报 |
+| chief-daily | 技术面逐标的手动补齐 18/18 后，11-11 10:04 台北手动 `ats chief run --live --channel pending`（`chief-20261111-020407`）：全部输入读取通过（本批去掉了 `consumer_api` 磁带调用），模型出决策（卖 DRAM 214、NVDX 400）；订单规范化时 IBKR 隔夜逐笔报价 10 秒未到（`execution_quote_source_timestamp_missing`），周期停在 manual_review。约 40 秒后只读复测 DRAM、NVDX、NVDA 隔夜报价均取到实时买卖价，属偶发行情问题，与退役无关（用户判定） |
+| 旧表与台账可读 | `var/phase_f_cutover.sqlite`（11 表）、`var/phase_f_batches.sqlite`（5 表）只读打开正常；`ats retirement decide --drill-reference "verification.md 3.9 回退演练（2026-10-29）"` 38 条全部可退出，第 8 组六条为 retired |
+| 未覆盖 | `execution/trade_publication.py`（trades/fills 写入前检查）本次无新成交未被调用，待首笔真实成交时观察 |

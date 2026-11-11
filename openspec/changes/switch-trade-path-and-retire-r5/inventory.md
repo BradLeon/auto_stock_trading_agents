@@ -105,3 +105,27 @@
 | chief-daily | 技术面逐标的手动补齐 18/18 后，11-11 10:04 台北手动 `ats chief run --live --channel pending`（`chief-20261111-020407`）：全部输入读取通过（本批去掉了 `consumer_api` 磁带调用），模型出决策（卖 DRAM 214、NVDX 400）；订单规范化时 IBKR 隔夜逐笔报价 10 秒未到（`execution_quote_source_timestamp_missing`），周期停在 manual_review。约 40 秒后只读复测 DRAM、NVDX、NVDA 隔夜报价均取到实时买卖价，属偶发行情问题，与退役无关（用户判定） |
 | 旧表与台账可读 | `var/phase_f_cutover.sqlite`（11 表）、`var/phase_f_batches.sqlite`（5 表）只读打开正常；`ats retirement decide --drill-reference "verification.md 3.9 回退演练（2026-10-29）"` 38 条全部可退出，第 8 组六条为 retired |
 | 未覆盖 | `execution/trade_publication.py`（trades/fills 写入前检查）本次无新成交未被调用，待首笔真实成交时观察 |
+
+# R5d 调用图核对（tasks 9.1 起，2026-11-11）
+
+## 结论与用户决定（2026-11-11 用户批准 D1–D5 全按建议）
+
+第 9 组删 14 个模块（约 4,850 行），涉及 39 个测试文件、3 个脚本（`verify_dataflow_qualification`、`verify_dataflow_tasks5`、`verify_information_closeout`）。中枢 `runtime_reads` 被 30 个生产模块使用，既有长期的 scope 绑定与隔离检查，也有迁移期的路由代次、联合门禁、读停止、读窗口、调用绑定与资格判定。
+
+生产库只读核对（`var/phase_f_cutover.sqlite`）：10 个消费者路由均为 target；六个边界 5 个 legacy、`live_trader` disabled（从未接线）；`cutover_activations` 0 行；无 `joint_cutover_*` 表；`read_recovery_events` 240 行，涉及 8 个 identity，最后一条 2026-10-15（资格演练），之后生产读取全部通过，没有现役 scope 处于停止；`production_consumer_receipts` 4105 行，只被 `exit_requirements` 读；`data.sqlite` 的 `dataflow_assurance_events` 384 行。
+
+不能直接删、需要保留或搬移的五处：
+1. `consumer_reads.read_projection`（主理人与分析师读投影）、`record_read`：搬到新模块。
+2. `scoped_routes.RouteIdentity`、`cutover_routing.RouteUnavailable`：搬到新模块并改名（D1）。
+3. `cutover_wiring.assert_write_destination` 的隔离写入检查：长期安全检查，搬到 `isolation`。
+4. `cutover.assert_runtime_startup`（CLI、dispatcher、serve 启动时调用）：按 cutover-control 增量改为基于 `route_registry` 的交易路由启动检查。
+5. `schedule_runtime` 的 resume 前提读 `consumer_cutover` 路由、数据健康历史存在 `consumer_cutover` 表：去掉路由前提，健康历史归 `consumer_health`（D3）。
+
+用户决定：
+- D1：新模块 `workflow/read_scope.py`，`RouteIdentity`→`ReadScope`、`RouteUnavailable`→`ReadUnavailable`，不留旧名别名。
+- D2：保留每次读取的 `consumer_read` 日志行（去掉路由、代次、联合 epoch 字段）；停写 `production_consumer_receipts`；测试用 `trace_reads` 保留。
+- D3：`ats dispatch resume` 只查数据健康，不再查路由；“legacy 负责人”技术债不动。
+- D4：整删 `read_recovery`；长期停止手段是交易路由冻结与 `dispatch pause`。
+- D5：`ats data assurance` 改已退役提示，删除资格判定，`dataflow_assurance_events` 保留只读；删除 `required_fingerprint_paths`；冻结面中架构守卫所需部分与 `route_switch` 的 `implementation_hashes` 保留；`ats consumer-cutover restore` 改已退役提示。
+
+证据：`var/test_runs/switch-9.1/`（`g9_callgraph.py`、`callgraph.json`、`surface.txt`）。

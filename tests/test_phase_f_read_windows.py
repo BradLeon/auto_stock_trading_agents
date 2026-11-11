@@ -17,8 +17,8 @@ from ats.workflow import read_windows as windows
 from ats.workflow import runtime_reads as reads
 from ats.workflow import schedule_runtime as scheduling
 from ats.workflow import scoped_routes as scopes
-from ats.workflow.consumer_reads import record_read, trace_reads
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import record_read, trace_reads
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.isolation import isolated_run
 from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
@@ -96,9 +96,9 @@ def test_inclusive_boundaries(deployed, position):
 @pytest.mark.parametrize("position", ["before", "after"])
 def test_outside_window_refuses(deployed, position):
     point = deployed.start - timedelta(microseconds=1) if position == "before" else deployed.end + timedelta(microseconds=1)
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         windows.bind_plan(make_plan(point))
-    with pytest.raises(RouteUnavailable, match="outside"):
+    with pytest.raises(ReadUnavailable, match="outside"):
         reads.bind_read(deployed.who, as_of=point).__enter__()
 
 
@@ -106,7 +106,7 @@ def test_outside_window_refuses(deployed, position):
 def test_authorization_revoked_between_ticks(deployed):
     windows.bind_plan(make_plan(deployed.now))
     joint.revoke_authorization("fixture-deployment", actor="fixture", reason="revoked before next tick")
-    with pytest.raises(RouteUnavailable, match="authorization"):
+    with pytest.raises(ReadUnavailable, match="authorization"):
         windows.bind_plan(make_plan(deployed.now + timedelta(minutes=1)))
 
 
@@ -114,7 +114,7 @@ def test_authorization_revoked_between_ticks(deployed):
 def test_qualification_revoked_between_ticks(deployed, monkeypatch):
     windows.bind_plan(make_plan(deployed.now))
     monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "ineligible", "reasons": ["revoked"]})
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         windows.bind_plan(make_plan(deployed.now + timedelta(minutes=1)))
 
 
@@ -134,13 +134,13 @@ def test_binding_cannot_escape_business_identity(deployed, change):
         plan = replace(plan, task_inputs={"read_scopes": {plan.tasks[0].instance_key: explicit}})
     else:
         plan = replace(plan, task_inputs={"event_id": "release", "event_version": "v2"})
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         windows.bind_plan(plan)
 
 
 def test_overlapping_windows_refuse_unless_explicit(deployed):
     s = deployed
-    other = scopes.RouteIdentity(s.who.domain_id, s.who.consumer_id, s.who.contract_version,
+    other = scopes.ReadScope(s.who.domain_id, s.who.consumer_id, s.who.contract_version,
         {**s.who.scope, "time_range": {"start": s.start.isoformat(), "end": (s.end + timedelta(minutes=1)).isoformat()}})
     req = {**s.request, "batch_id": "window-two", "members": [{"boundary": plane.PROJECTION_READ,
         "identity": other.as_row(), "route": "target", "expected_generation": 0}]}
@@ -150,7 +150,7 @@ def test_overlapping_windows_refuse_unless_explicit(deployed):
         "valid": True, "reference": "second-deployment"}}
     joint.execute(req, gates=adapter, actor="fixture", reason="overlap", mode="isolated")
     plan = make_plan(s.now)
-    with pytest.raises(RouteUnavailable, match="ambiguous"):
+    with pytest.raises(ReadUnavailable, match="ambiguous"):
         windows.bind_plan(plan)
     explicit = replace(plan, task_inputs={"read_scopes": {plan.tasks[0].instance_key: s.who.as_row()}})
     bound = windows.bind_plan(explicit)
@@ -164,7 +164,7 @@ def test_old_worker_cannot_refresh_after_stop(deployed):
         req = {**s.request, "batch_id": "stop-window", "members": [{"boundary": plane.PROJECTION_READ,
             "identity": s.who.as_row(), "route": "disabled", "expected_generation": 1}]}
         joint.execute(req, gates=s.gates, actor="fixture", reason="stop", mode="isolated")
-        with pytest.raises(RouteUnavailable):
+        with pytest.raises(ReadUnavailable):
             with reads.bind_read(s.who, as_of=s.now):
                 pytest.fail("stale worker regained read authority")
 
@@ -172,7 +172,7 @@ def test_old_worker_cannot_refresh_after_stop(deployed):
 @pytest.mark.parametrize("deployed", ["finite", "persistent"], indirect=True)
 def test_nested_binding_cannot_replace_cutoff(deployed):
     with reads.bind_read(deployed.who, as_of=deployed.now):
-        with pytest.raises(RouteUnavailable, match="cannot change"):
+        with pytest.raises(ReadUnavailable, match="cannot change"):
             with reads.bind_read(deployed.who, as_of=deployed.now + timedelta(seconds=1)):
                 pytest.fail("cutoff replaced")
 
@@ -215,10 +215,10 @@ def test_persistent_permission_crosses_days_without_changing_input_cutoff(deploy
     assert who == s.who and "time_range" not in who.scope
     with reads.bind_read(who, as_of=plan.as_of) as context:
         assert context.cutoff == future
-        with pytest.raises(RouteUnavailable, match="input time"):
+        with pytest.raises(ReadUnavailable, match="input time"):
             reads.guard_input("technical", {"entity": "COHR"}, as_of=s.now)
     joint.revoke_authorization("fixture-deployment", actor="fixture", reason="explicit stop")
-    with pytest.raises(RouteUnavailable, match="authorization"):
+    with pytest.raises(ReadUnavailable, match="authorization"):
         windows.bind_plan(make_plan(future + timedelta(minutes=1)))
 
 
@@ -229,7 +229,7 @@ def test_legacy_finite_permission_is_not_promoted(deployed, monkeypatch):
         def now(cls, tz=None):
             return future.astimezone(tz) if tz else future.replace(tzinfo=None)
     monkeypatch.setattr(joint, "datetime", LaterClock)
-    with pytest.raises(RouteUnavailable, match="expired"):
+    with pytest.raises(ReadUnavailable, match="expired"):
         windows.bind_plan(make_plan(deployed.now))
 
 
@@ -237,5 +237,5 @@ def test_persistent_request_cannot_silently_reinterpret_fixed_scope(deployed):
     with pytest.raises(plane.CutoverError, match="per-invocation"):
         joint._validate({**deployed.request, "deployment_policy": "until_stopped"})
     with pytest.raises(ValueError, match="fixed time_range"):
-        scopes.RouteIdentity(deployed.who.domain_id, deployed.who.consumer_id,
+        scopes.ReadScope(deployed.who.domain_id, deployed.who.consumer_id,
             deployed.who.contract_version, {**deployed.who.scope, "time_policy": "per_invocation"})

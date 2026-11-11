@@ -13,21 +13,21 @@ from ats.config import REPO_ROOT
 
 
 def test_cached_probe_uses_invocation_time_and_never_window_end():
-    from ats.workflow.scoped_routes import RouteIdentity
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadScope
+    from ats.workflow.read_scope import ReadUnavailable
     probe_spec = importlib.util.spec_from_file_location("phase_f_cached_probe", REPO_ROOT / "scripts/verify_dataflow_qualification.py")
     probe = importlib.util.module_from_spec(probe_spec)
     probe_spec.loader.exec_module(probe)
-    who = RouteIdentity("runtime_market", "technical", "target-dataflow-v1", {
+    who = ReadScope("runtime_market", "technical", "target-dataflow-v1", {
         "kind": "entity", "id": "COHR", "entities": ["COHR"], "time_policy": "per_invocation"})
     with pytest.raises(ValueError, match="independent"):
         probe.probe_time(who)
     assert probe.probe_time(who, "2026-10-10T03:00:00+00:00").isoformat() == "2026-10-10T03:00:00+00:00"
-    bounded = RouteIdentity(who.domain_id, who.consumer_id, who.contract_version, {
+    bounded = ReadScope(who.domain_id, who.consumer_id, who.contract_version, {
         "kind": "entity", "id": "COHR", "entities": ["COHR"],
         "time_range": {"start": "2026-10-10T02:00:00+00:00", "end": "2026-10-10T04:00:00+00:00"}})
     assert probe.probe_time(bounded, "2026-10-10T03:00:00+00:00").hour == 3
-    with pytest.raises(RouteUnavailable, match="outside"):
+    with pytest.raises(ReadUnavailable, match="outside"):
         probe.probe_time(bounded, "2026-10-10T05:00:00+00:00")
 
 
@@ -60,7 +60,7 @@ def test_information_target_scope_is_configured_frozen_and_role_specific(tmp_pat
     from ats.workflow.run_contracts import TriggerContext
     from ats.agent.task_projection import ProjectionScope
     from ats.workflow.runtime_reads import task_identity, consumer_entities, guard_input, ReadContext, _CURRENT
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
     shutil.copytree(REPO_ROOT / 'config', tmp_path / 'config')
     root = tmp_path / 'config'
     plan = build_plan(requested_tasks=['fundamental-routine'], scope=ProjectionScope(kind='entity', id='MRVL'),
@@ -74,13 +74,13 @@ def test_information_target_scope_is_configured_frozen_and_role_specific(tmp_pat
     assert consumer_entities('information', 'entity', 'MRVL', config_dir=root) == who.scope['entities']
     token = _CURRENT.set(ReadContext(who, mode='isolated'))
     try:
-        with pytest.raises(RouteUnavailable, match='entity escapes'):
+        with pytest.raises(ReadUnavailable, match='entity escapes'):
             guard_input('information', {'entity': 'UNCONFIGURED'})
     finally:
         _CURRENT.reset(token)
     source = root / 'pead/MRVL.yaml'
     source.write_text(source.read_text() + '\n# changed relationship config\n')
-    with pytest.raises(RouteUnavailable, match='configuration drifted'):
+    with pytest.raises(ReadUnavailable, match='configuration drifted'):
         task_identity(plan, info)
 
 

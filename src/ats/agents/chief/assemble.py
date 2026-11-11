@@ -51,7 +51,7 @@ def build(*, projection_manifest=None, query_plan=None, account=None,
     """
     from ...data.consumer_api import read_input
     from ...memory import get_store
-    from ...workflow.cutover_routing import RouteUnavailable
+    from ...workflow.read_scope import ReadUnavailable
     from ...workflow.evaluation_clock import now as evaluation_now
     from ...workflow.runtime_reads import current_read_context
 
@@ -68,7 +68,7 @@ def build(*, projection_manifest=None, query_plan=None, account=None,
         store, at=read.cutoff if read else ctx.as_of, projection_manifest=projection_manifest,
         query_plan=query_plan)
     if not snapshot.complete:
-        raise RouteUnavailable("required Chief projections unavailable: " + gap_report(snapshot, detail))
+        raise ReadUnavailable("required Chief projections unavailable: " + gap_report(snapshot, detail))
     ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail, focus=fundamental_focus)
     ctx.blocks["战绩反馈"] = _track_record_block(store, history)
     return ctx
@@ -280,7 +280,7 @@ def _envelope_from_row(row: dict, scope) -> Any:
 
 def _latest_row(store, *, role: str, scope, projection_id: str = "",
                 content_hash: str = "") -> dict | None:
-    from ...workflow.consumer_reads import read_projection
+    from ...workflow.read_scope import read_projection
 
     return read_projection(store, consumer="chief", role=role, scope=scope,
                            projection_id=projection_id, content_hash=content_hash,
@@ -298,7 +298,7 @@ def scan_projection_scopes(store, *, at=None,
     """
     from ...agent.task_projection import reuse_decision
     from ...workflow.decision_requirements import routine_producer_refs, validate_routine_value_contract
-    from ...workflow.cutover_routing import RouteUnavailable
+    from ...workflow.read_scope import ReadUnavailable
 
     manifest = None
     if projection_manifest is not None:
@@ -340,7 +340,7 @@ def scan_projection_scopes(store, *, at=None,
                 if plan["role"] == "fundamental_expectation_update":
                     try:
                         validate_routine_value_contract(envelope.payload)
-                    except RouteUnavailable as exc:
+                    except ReadUnavailable as exc:
                         detail.append({"task_id":task_id, "role":plan["role"], "scope":scope.key,
                             "status":"value_unconfirmed", "projection_id":envelope.projection_id,
                             "content_hash":envelope.content_hash, "as_of":envelope.as_of,

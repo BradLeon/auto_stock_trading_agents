@@ -11,7 +11,7 @@ from pathlib import Path
 from . import cutover as plane
 from .cutover_routing import FallbackUnsafe
 from .evaluation_clock import now
-from .scoped_routes import RouteIdentity, canonical_json, resolve_route
+from .scoped_routes import ReadScope, canonical_json, resolve_route
 
 STOP = "stop"
 NEW_VERSION = "new_version"
@@ -100,7 +100,7 @@ def _proof(identity, policy, *, path=None):
             if not all(proof.get(k) for k in ("target_version", "target_identifier",
                         "implementation_sha256", "accepted_report_ref", "target_identity")):
                 raise ValueError("accepted target proof incomplete")
-            target = RouteIdentity(**proof["target_identity"])
+            target = ReadScope(**proof["target_identity"])
             if (target.scope != identity.scope or target.consumer_id != identity.consumer_id
                     or target.domain_id != identity.domain_id):
                 raise ValueError("target scope differs")
@@ -154,7 +154,7 @@ def recover(identity, policy, *, readers, usable, refs, path=None):
         if (proof["strategy"] == NEW_VERSION and proof["target_identifier"] !=
                 reader.__module__ + "." + reader.__qualname__):
             raise ReadStopped("actual reader differs from accepted recovery implementation")
-        target = RouteIdentity(**proof["target_identity"])
+        target = ReadScope(**proof["target_identity"])
 
         def check_target():
             _proof(identity, policy, path=path)

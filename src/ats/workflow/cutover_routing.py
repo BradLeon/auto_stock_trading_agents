@@ -35,13 +35,10 @@ from typing import Any, Callable
 from . import cutover as cutover_module
 
 
-class RouteUnavailable(RuntimeError):
-    """The read cannot be served by any route. Never silently degraded."""
-
-    reason_code = "no_safe_route"
+from .read_scope import ReadUnavailable, consumer_contract  # noqa: E402,F401
 
 
-class FallbackUnsafe(RouteUnavailable):
+class FallbackUnsafe(ReadUnavailable):
     """The nominal fallback target cannot be used."""
 
     def __init__(self, reason: str, *, reason_code: str, detail: dict[str, Any] | None = None
@@ -112,17 +109,17 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
     from .scoped_routes import resolve_route
 
     if fallback_route != cutover_module.ROUTE_LEGACY:
-        raise RouteUnavailable("fallback must name the legacy route")
+        raise ReadUnavailable("fallback must name the legacy route")
     if identity is None and target_boundary_active is not False:
-        raise RouteUnavailable("exact business identity required; global target flag is not a route")
+        raise ReadUnavailable("exact business identity required; global target flag is not a route")
     if identity is not None and identity.consumer_id != consumer_id:
-        raise RouteUnavailable("runtime route consumer identity mismatch")
+        raise ReadUnavailable("runtime route consumer identity mismatch")
     if identity is not None:
         from .joint_cutover import assert_scope_open
         try:
             assert_scope_open(identity,path=path)
         except cutover_module.CutoverError as exc:
-            raise RouteUnavailable(str(exc)) from exc
+            raise ReadUnavailable(str(exc)) from exc
     resolved = (resolve_route(cutover_module.PROJECTION_READ, identity, path=path)
                 if identity is not None else None)
     route = resolved["route"] if resolved is not None else fallback_route
@@ -132,7 +129,7 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
     if recovery and recovery["stopped"]:
         raise ReadStopped("business scope remains stopped; explicit recovery registration required")
     if route == cutover_module.ROUTE_DISABLED:
-        raise RouteUnavailable("projection_read boundary disabled")
+        raise ReadUnavailable("projection_read boundary disabled")
     if route != cutover_module.ROUTE_TARGET:
         return RouteDecision(
             consumer_id=consumer_id, domain_id=identity.domain_id if identity else "",
@@ -143,10 +140,10 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
 
     from ..data.assurance import qualification as _qualification
 
-    contract = _consumer_contract(consumer_id)
+    contract = consumer_contract(consumer_id)
     if (identity.domain_id != contract["domain_id"]
             or identity.contract_version != contract["contract_version"]):
-        raise RouteUnavailable("runtime route domain/contract mismatch")
+        raise ReadUnavailable("runtime route domain/contract mismatch")
     if resolved.get("consumer_wide"):
         # 2026-10-15 simplification (G1/G2): a consumer switched as a whole was
         # approved after a passing data-product health check; its products are
@@ -197,7 +194,7 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
         **assess_fallback(fallback_route, consumer_id=consumer_id, path=path),
         "identity": identity.as_row()})
     if verdict.get("identity") != identity.as_row():
-        raise RouteUnavailable("fallback proof business scope mismatch")
+        raise ReadUnavailable("fallback proof business scope mismatch")
     decision.fallback = verdict["verdict"]
     decision.fallback_reason_code = verdict.get("reason_code", "")
     decision.gap = verdict.get("reason", "")
@@ -218,34 +215,10 @@ def read_route(*, consumer_id: str, target_boundary_active: bool | None = None,
 
     decision.route = verdict.get("recovery_route", fallback_route)
     if decision.route not in {cutover_module.ROUTE_TARGET, cutover_module.ROUTE_LEGACY}:
-        raise RouteUnavailable("unknown recovery route")
+        raise ReadUnavailable("unknown recovery route")
     if decision.route == cutover_module.ROUTE_TARGET:
         decision.qualification = verdict["qualification"]
     return decision
-
-
-def _consumer_contract(consumer_id: str) -> dict[str, Any]:
-    """The consumer's declared domain, contract version and scope.
-
-    Read from the same manifest `qualification()` reads, so the gate cannot be
-    called with a domain that disagrees with the one it validates against.
-    """
-    from ..config import REPO_ROOT
-    from .yaml_cache import load_yaml
-
-    coverage = REPO_ROOT / "config" / "data" / "target_dataflow_coverage.yaml"
-    manifest = load_yaml(coverage)
-    for consumer in manifest.get("consumers", []):
-        if consumer.get("id") == consumer_id:
-            products = sorted(consumer.get("products", ()))
-            return {
-                "domain_id": str(consumer.get("domain")),
-                "contract_version": str(consumer.get("contract_version")),
-                "scope": {"consumer": consumer_id, "products": products},
-            }
-    raise RouteUnavailable(
-        f"consumer {consumer_id!r} has no contract in the coverage manifest; a "
-        f"reader cannot be qualified for a consumer that is not declared")
 
 
 # --------------------------------------------------------------------------- #
@@ -379,7 +352,7 @@ def reverify_downstream(*, consumer_id: str, scope: dict[str, Any],
     since been revoked or has drifted, the claim is stale — and the requirement is
     explicit that this must refuse, not merely log.
     """
-    contract = _consumer_contract(consumer_id)
+    contract = consumer_contract(consumer_id)
     checked = now or datetime.now(timezone.utc)
     result = Reverification(approved=False, checked_at=checked.isoformat())
 
@@ -431,7 +404,7 @@ def assert_downstream_current(*, consumer_id: str, scope: dict[str, Any],
         consumer_id=consumer_id, scope=scope, snapshot_as_of=snapshot_as_of,
         max_age_seconds=max_age_seconds, now=now, path=path)
     if not result.approved:
-        raise RouteUnavailable(
+        raise ReadUnavailable(
             f"{consumer_id} may not proceed: " + "; ".join(result.reasons))
     return result
 

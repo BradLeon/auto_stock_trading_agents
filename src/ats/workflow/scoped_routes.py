@@ -20,69 +20,7 @@ from typing import Any
 from . import cutover as plane
 
 
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-
-
-def _stamp(value: str) -> str:
-    stamp = datetime.fromisoformat(value)
-    if stamp.tzinfo is None:
-        raise ValueError("business time window must have a timezone")
-    return stamp.astimezone(UTC).isoformat()
-
-
-@dataclass(frozen=True, init=False)
-class RouteIdentity:
-    domain_id: str
-    consumer_id: str
-    contract_version: str
-    scope_json: str
-
-    def __init__(self, domain_id: str, consumer_id: str, contract_version: str,
-                 scope: dict[str, Any]):
-        for key, value in (("domain_id", domain_id), ("consumer_id", consumer_id),
-                           ("contract_version", contract_version)):
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{key} is required")
-            object.__setattr__(self, key, value)
-        # Copy before normalizing: callers cannot mutate a persisted identity.
-        normalized = json.loads(canonical_json(scope))
-        if not isinstance(normalized, dict) or not normalized.get("kind") or not normalized.get("id"):
-            raise ValueError("business scope requires kind/id")
-        entities = normalized.get("entities")
-        if not isinstance(entities, list) or not entities or any(
-                not isinstance(e, str) or not e.strip() for e in entities):
-            raise ValueError("business scope requires explicit entities")
-        normalized["entities"] = sorted(set(entities))
-        window = normalized.get("time_range")
-        independent = normalized.get("time_policy") == "per_invocation"
-        if independent and "time_range" in normalized:
-            raise ValueError("per-invocation scope cannot contain a fixed time_range")
-        if "time_policy" in normalized and not independent:
-            raise ValueError("unknown business scope time_policy")
-        if not independent and (not isinstance(window, dict) or set(window) != {"start", "end"}):
-            raise ValueError("business scope requires time_range start/end")
-        if not independent:
-            window["start"], window["end"] = _stamp(window["start"]), _stamp(window["end"])
-            if datetime.fromisoformat(window["start"]) > datetime.fromisoformat(window["end"]):
-                raise ValueError("business time window is reversed")
-        if bool(normalized.get("event_id")) != bool(normalized.get("event_version")):
-            raise ValueError("event_id and event_version must be supplied together")
-        from .invocation_bindings import validate_policy
-        validate_policy(normalized, consumer_id)
-        object.__setattr__(self, "scope_json", canonical_json(normalized))
-
-    @property
-    def scope(self) -> dict[str, Any]:
-        return json.loads(self.scope_json)
-
-    def as_row(self) -> dict[str, Any]:
-        return {"domain_id": self.domain_id, "consumer_id": self.consumer_id,
-                "contract_version": self.contract_version, "scope": self.scope}
-
-    @property
-    def key(self) -> str:
-        return hashlib.sha256(canonical_json(self.as_row()).encode()).hexdigest()
+from .read_scope import ReadScope, _stamp, canonical_json  # noqa: E402,F401
 
 
 _SCHEMA = """
@@ -116,7 +54,7 @@ def _validate_boundary(boundary):
         raise plane.CutoverError(f"unknown boundary {boundary!r}")
 
 
-def resolve_route(boundary: str, identity: RouteIdentity, *, path=None,
+def resolve_route(boundary: str, identity: ReadScope, *, path=None,
                   exact_only: bool = False) -> dict[str, Any]:
     """Read-only resolution; an absent row never inherits a global target flag.
 
@@ -165,10 +103,10 @@ def resolve_route(boundary: str, identity: RouteIdentity, *, path=None,
     return result
 
 
-Gate = Callable[[RouteIdentity], dict[str, Any]]
+Gate = Callable[[ReadScope], dict[str, Any]]
 
 
-def transition_route(boundary: str, identity: RouteIdentity, route: str, *, actor: str,
+def transition_route(boundary: str, identity: ReadScope, route: str, *, actor: str,
                      reason: str, expected_generation: int, qualification: Gate | None = None,
                      report: Gate | None = None, fallback: Gate | None = None,
                      mode: str = "production", path=None) -> dict[str, Any]:
@@ -247,7 +185,7 @@ def transition_route(boundary: str, identity: RouteIdentity, route: str, *, acto
     return resolve_route(boundary, identity, path=target, exact_only=True)
 
 
-def route_history(boundary: str, identity: RouteIdentity, *, path=None) -> list[dict[str, Any]]:
+def route_history(boundary: str, identity: ReadScope, *, path=None) -> list[dict[str, Any]]:
     resolve_route(boundary, identity, path=path)
     target = Path(path or plane.default_cutover_db_path())
     with closing(sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True)) as conn:

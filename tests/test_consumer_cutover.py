@@ -221,19 +221,19 @@ def native_gate(consumer="information", symbol="MRVL"):
 
 
 def test_native_input_is_refused_before_the_switch_which_is_the_original_deadlock(production_semantics):
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
-    with pytest.raises(RouteUnavailable, match="native target input requires an enabled exact business scope"):
+    with pytest.raises(ReadUnavailable, match="native target input requires an enabled exact business scope"):
         native_gate()
 
 
 def test_native_input_is_served_after_the_consumer_wide_switch(production_semantics):
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     switch(production_semantics)
     for symbol in ("MRVL", "MSFT", "NVDA", "TSM"):
         assert native_gate(symbol=symbol).consumer_wide is True
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         native_gate("fundamental")  # a different consumer is not switched
 
 
@@ -301,7 +301,7 @@ def test_a_decision_node_is_refused_until_its_consumer_is_on_the_read_route(prod
     from ats.graph.chief_state import ChiefDecisionState
     from ats.schemas.decision import TradeDecision
     from ats.workflow import decision_requirements as dr
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
     from ats.workflow.planning import build_plan
     from ats.workflow.run_contracts import TriggerContext
 
@@ -321,7 +321,7 @@ def test_a_decision_node_is_refused_until_its_consumer_is_on_the_read_route(prod
     def node(s):
         return {"ran": True}
 
-    with pytest.raises(RouteUnavailable, match="no explicitly authorized read window"):
+    with pytest.raises(ReadUnavailable, match="no explicitly authorized read window"):
         node(state)
     switch(production_semantics, "risk")
     assert node(state) == {"ran": True}

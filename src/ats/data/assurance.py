@@ -244,12 +244,12 @@ def _rollback_failures(consumer, details, policy, *, now, scope) -> list[str]:
         # the real read gate. Old native comparison remains historical evidence.
         from ats.workflow import read_recovery
         from ats.workflow.exit_requirements import _artifact_verified
-        from ats.workflow.scoped_routes import RouteIdentity
+        from ats.workflow.read_scope import ReadScope
         try:
             proofs = details['recovery']
             if len(proofs) != 1:
                 raise ValueError('one exact recovery proof required')
-            identity = RouteIdentity(consumer['domain'], consumer['id'], consumer['contract_version'], scope)
+            identity = ReadScope(consumer['domain'], consumer['id'], consumer['contract_version'], scope)
             registered = read_recovery.current_policy(identity)
             if registered is None or registered['stopped'] or any(
                 registered[key] != proofs[0][key] for key in ('reference','sha256')

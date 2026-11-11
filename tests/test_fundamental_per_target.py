@@ -18,7 +18,7 @@ from ats.graph.chief import assemble_context, route_after_assemble
 from ats.graph.chief_state import ChiefDecisionState
 from ats.memory.store import TradingMemory
 from ats.workflow import decision_requirements as dr
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.planning import TASK_ROLE, build_plan, task_config_hashes
 from ats.workflow.run_contracts import ContractError, TriggerContext
 from phase_d_frozen_harness import freeze_config, producer_inputs
@@ -230,11 +230,11 @@ def test_a_routine_cycle_still_blocks_when_no_name_has_usable_fundamental_or_pas
     tmp_path, store = universe
     _publish(tmp_path, store, [_routine("COHR", age=timedelta(days=4)), _routine("LITE", age=timedelta(days=4))],
              _state())
-    with pytest.raises(RouteUnavailable, match="fundamental-routine:entity:.*freshness_unconfirmed"):
+    with pytest.raises(ReadUnavailable, match="fundamental-routine:entity:.*freshness_unconfirmed"):
         assemble_context(_state())                                  # nothing usable at all is an outage
     monkeypatch.setattr(dr, "MAX_UNCOVERED_FUNDAMENTAL", 0)
     _publish(tmp_path, store, [_routine("COHR"), _routine("LITE", age=timedelta(days=4))], _state())
-    with pytest.raises(RouteUnavailable, match="fundamental-routine:entity:LITE.*freshness_unconfirmed"):
+    with pytest.raises(ReadUnavailable, match="fundamental-routine:entity:LITE.*freshness_unconfirmed"):
         assemble_context(_state())                                  # more uncovered than the bound allows
 
 
@@ -335,5 +335,5 @@ def test_the_layer_review_is_stale_only_when_every_layer_is_older_than_the_windo
     tmp_path, store = universe
     _publish(tmp_path, store, [_routine("COHR"), _routine("LITE")], _state(),
              layer_ages={"L1_app": timedelta(days=9), "L3_optics": timedelta(days=8)})
-    with pytest.raises(RouteUnavailable, match="layer-review.*freshness_unconfirmed"):
+    with pytest.raises(ReadUnavailable, match="layer-review.*freshness_unconfirmed"):
         assemble_context(_state())

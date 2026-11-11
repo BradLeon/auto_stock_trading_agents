@@ -109,7 +109,7 @@ def assert_schedule_open(workflow, scope, *, path=None):
                         continue
                     current = conn.execute(
                         'SELECT route FROM scoped_cutover_routes WHERE boundary=? AND identity_key=?',
-                        (plane.DISPATCHER_SCHEDULE, scopes.RouteIdentity(**member['identity']).key),
+                        (plane.DISPATCHER_SCHEDULE, scopes.ReadScope(**member['identity']).key),
                     ).fetchone()
                     if current and current['route'] == plane.ROUTE_DISABLED:
                         raise plane.CutoverError('joint schedule disabled: ' + row['batch_id'])
@@ -175,7 +175,7 @@ def _validate(request):
         raise plane.CutoverError("persistent deployment requires explicit purpose")
     seen = set()
     for member in request["members"]:
-        who = scopes.RouteIdentity(**member["identity"])
+        who = scopes.ReadScope(**member["identity"])
         member["identity"] = who.as_row()
         key = (member["boundary"], who.key)
         if (
@@ -192,7 +192,7 @@ def _validate(request):
             raise plane.CutoverError("expected generation required")
         seen.add(key)
     for member in request["members"]:
-        who = scopes.RouteIdentity(**member["identity"])
+        who = scopes.ReadScope(**member["identity"])
         if member["boundary"] == plane.DISPATCHER_SCHEDULE and not any(
             s["workflow"] == request["workflow"]
             and s["scope"] == {"kind": who.scope["kind"], "id": who.scope["id"]}
@@ -301,7 +301,7 @@ def _gates(request, gates, path, mode):
 
     checked = []
     for member in request["members"]:
-        who = scopes.RouteIdentity(**member["identity"])
+        who = scopes.ReadScope(**member["identity"])
         auth = gates["authorization"](member, request["workflow"])
         if (
             auth.get("member") != member
@@ -334,7 +334,7 @@ def _gates(request, gates, path, mode):
     # The executor supplies actual workflow read/publish dependencies; global
     # pairings cannot establish schema compatibility for an individual scope.
     for index, member in enumerate(request["members"]):
-        who = scopes.RouteIdentity(**member["identity"])
+        who = scopes.ReadScope(**member["identity"])
         routes = {b: scopes.resolve_route(b, who, path=path)["route"] for b in plane.SIX_BOUNDARIES}
         for other in request["members"]:
             if other["identity"] == who.as_row():
@@ -424,7 +424,7 @@ def preflight(request, *, gates, mode="production", path=None):
                     raise plane.CutoverError("overlapping joint operation already frozen")
     checked = _gates(request, gates, target, mode)
     for member in request['members']:
-        current = scopes.resolve_route(member['boundary'], scopes.RouteIdentity(**member['identity']), path=target)
+        current = scopes.resolve_route(member['boundary'], scopes.ReadScope(**member['identity']), path=target)
         before = current['generation'] == member['expected_generation']
         after = (current['generation'] == member['expected_generation'] + 1
                  and current['route'] == member['route'])
@@ -474,7 +474,7 @@ def execute(request, *, gates, actor, reason, mode="production", path=None, chec
     digest = hashlib.sha256(scopes.canonical_json(request).encode()).hexdigest()
     batch = request["batch_id"]
     for m in request["members"]:
-        scopes.resolve_route(m["boundary"], scopes.RouteIdentity(**m["identity"]), path=target)
+        scopes.resolve_route(m["boundary"], scopes.ReadScope(**m["identity"]), path=target)
     with closing(_write(target)) as conn:
         conn.executescript(SCHEMA + scopes._SCHEMA)
         conn.execute("BEGIN IMMEDIATE")
@@ -506,7 +506,7 @@ def execute(request, *, gates, actor, reason, mode="production", path=None, chec
                 for m in request["members"]:
                     if (
                         scopes.resolve_route(
-                            m["boundary"], scopes.RouteIdentity(**m["identity"]), path=target
+                            m["boundary"], scopes.ReadScope(**m["identity"]), path=target
                         )["generation"]
                         != m["expected_generation"]
                     ):
@@ -578,7 +578,7 @@ def execute(request, *, gates, actor, reason, mode="production", path=None, chec
             try:
                 evidence = _gates(request, gates, target, mode)
                 for m, e in zip(request["members"], evidence):
-                    who = scopes.RouteIdentity(**m["identity"])
+                    who = scopes.ReadScope(**m["identity"])
                     row = conn.execute(
                         "SELECT * FROM scoped_cutover_routes WHERE boundary=? AND identity_key=?",
                         (m["boundary"], who.key),
@@ -651,7 +651,7 @@ def execute(request, *, gates, actor, reason, mode="production", path=None, chec
                 for m in request["members"]:
                     row = conn.execute(
                         "SELECT route,generation FROM scoped_cutover_routes WHERE boundary=? AND identity_key=?",
-                        (m["boundary"], scopes.RouteIdentity(**m["identity"]).key),
+                        (m["boundary"], scopes.ReadScope(**m["identity"]).key),
                     ).fetchone()
                     if (
                         row is None

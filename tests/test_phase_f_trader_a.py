@@ -472,7 +472,7 @@ def test_later_handoff_failure_preserves_first_receipt(execution, monkeypatch):
 
 
 def test_price_native_api_cannot_borrow_production_legacy_or_isolated_candidate(execution, monkeypatch):
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     seen = []
     def legacy(identity):
@@ -483,7 +483,7 @@ def test_price_native_api_cannot_borrow_production_legacy_or_isolated_candidate(
     order = TradeDecision(symbol="AAPL", action="buy", qty=1)
     with prices.price_request("trader", [order], cycle_id="unqualified",
                               purpose="preapproval_normalization"), pytest.raises(
-                                  RouteUnavailable, match="enabled exact business scope"):
+                                  ReadUnavailable, match="enabled exact business scope"):
         prices.read_price("trader", order)
     assert execution.calls == []
     assert all(i.consumer_id == "trader" and i.contract_version == "target-dataflow-v2"
@@ -608,12 +608,12 @@ def test_price_request_window_is_its_own_not_the_nodes_entry_instant(execution, 
     from types import SimpleNamespace
 
     from ats.workflow import runtime_reads
-    from ats.workflow.scoped_routes import RouteIdentity
+    from ats.workflow.read_scope import ReadScope
 
     order = TradeDecision(symbol="AAPL", action="buy", qty=1)
     entered = datetime.now(UTC) - node_age
-    contract = runtime_reads._consumer_contract("risk")
-    parent = SimpleNamespace(identity=RouteIdentity(
+    contract = runtime_reads.consumer_contract("risk")
+    parent = SimpleNamespace(identity=ReadScope(
         contract["domain_id"], "risk", contract["contract_version"],
         {"kind": "decision", "id": "pending", "entities": ["AAPL"],
          "time_range": {"start": entered.isoformat(), "end": entered.isoformat()}}))

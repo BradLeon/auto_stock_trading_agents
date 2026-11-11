@@ -24,7 +24,7 @@ from ats.workflow import scoped_routes as sr
 
 
 def identity(consumer="layer", **scope):
-    return sr.RouteIdentity("ai_hardware", consumer, "v1", {
+    return sr.ReadScope("ai_hardware", consumer, "v1", {
         "kind": "sector", "id": "ai_hardware", "entities": ["NVDA", "AMD"],
         "time_range": {"start": "2026-10-07T00:00:00Z", "end": "2026-10-08T00:00:00Z"},
         **scope})
@@ -288,7 +288,7 @@ def test_fake_business_evidence_cannot_hide_missing_guard(authority, monkeypatch
 def test_route_identity_includes_domain_consumer_version(changes):
     args = identity().as_row()
     args.update(changes)
-    assert sr.RouteIdentity(**args).key != identity().key
+    assert sr.ReadScope(**args).key != identity().key
 
 
 @pytest.mark.parametrize("scope", [{"entities": []}, {"time_range": {}},
@@ -302,14 +302,14 @@ def test_incomplete_or_ambiguous_business_scopes_refuse(scope):
 
 def test_products_list_is_not_business_scope():
     with pytest.raises(ValueError, match="kind/id"):
-        sr.RouteIdentity("ai_hardware", "layer", "v1", {"products": ["LAYER_ANALYSIS"]})
+        sr.ReadScope("ai_hardware", "layer", "v1", {"products": ["LAYER_ANALYSIS"]})
 
 
 def test_normalization_and_caller_mutation():
     original = identity().as_row()
     original["scope"]["entities"] = ["NVDA", "AMD", "NVDA"]
     original["scope"]["time_range"]["start"] = "2026-10-07T08:00:00+08:00"
-    normalized = sr.RouteIdentity(**original)
+    normalized = sr.ReadScope(**original)
     assert normalized.key == identity().key
     original["scope"]["entities"].append("MU")
     returned = normalized.scope
@@ -327,8 +327,9 @@ def test_partial_qualification_moves_only_layer_and_persists(authority, fake_enf
     assert co.read_boundary(co.PROJECTION_READ, authority).route == "legacy"
     assert co.read_boundary(co.DISPATCHER_SCHEDULE, authority).route == "legacy"
     code = """import json,sys
-from ats.workflow.scoped_routes import RouteIdentity,resolve_route
-i=RouteIdentity(**json.loads(sys.argv[2]))
+from ats.workflow.scoped_routes import resolve_route
+from ats.workflow.read_scope import ReadScope
+i=ReadScope(**json.loads(sys.argv[2]))
 print(json.dumps(resolve_route('projection_read',i,path=sys.argv[1])))
 """
     child = subprocess.run([sys.executable, "-c", code, str(authority), json.dumps(identity().as_row())],
@@ -386,7 +387,7 @@ def test_failure_of_history_write_rolls_back_state(authority, fake_enforcement):
 def test_global_target_cannot_promote_absent_scopes(authority):
     co.set_route(co.PROJECTION_READ, "target", actor="test", reason="old flag", path=authority)
     assert sr.resolve_route(co.PROJECTION_READ, identity(), path=authority)["route"] == "legacy"
-    with pytest.raises(cr.RouteUnavailable, match="global target flag"):
+    with pytest.raises(cr.ReadUnavailable, match="global target flag"):
         cr.read_route(consumer_id="layer", target_boundary_active=True, path=authority)
 
 
@@ -403,7 +404,7 @@ def test_missing_or_corrupt_authority_is_not_created(tmp_path):
 def test_disable_stops_persisted_target_scope(authority, fake_enforcement):
     move(authority, identity())
     co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop", path=authority)
-    with pytest.raises(cr.RouteUnavailable, match="disabled"):
+    with pytest.raises(cr.ReadUnavailable, match="disabled"):
         cr.read_route(consumer_id="layer", identity=identity(), path=authority)
 
 
@@ -414,13 +415,13 @@ def test_runtime_resolver_uses_scope_and_rechecks_qualification(authority, fake_
         seen.append(kwargs)
         return {"status": "eligible"}
     monkeypatch.setattr("ats.data.assurance.qualification", qualification)
-    monkeypatch.setattr(cr, "_consumer_contract", lambda _: {"domain_id": "ai_hardware", "contract_version": "v1"})
+    monkeypatch.setattr(cr, "consumer_contract", lambda _: {"domain_id": "ai_hardware", "contract_version": "v1"})
     assert cr.read_route(consumer_id="layer", identity=identity(), path=authority).route == "target"
     assert seen[0]["scope"] == identity().scope
     assert cr.read_route(consumer_id="sector", identity=identity("sector"), path=authority).route == "legacy"
     assert len(seen) == 1
     monkeypatch.setattr("ats.data.assurance.qualification", lambda **_: {"status": "ineligible"})
-    with pytest.raises(cr.RouteUnavailable, match="fallback proof business scope mismatch"):
+    with pytest.raises(cr.ReadUnavailable, match="fallback proof business scope mismatch"):
         cr.read_route(consumer_id="layer", identity=identity(), path=authority,
                       fallback_check=lambda: {"verdict": "ok"})
     decision = cr.read_route(consumer_id="layer", identity=identity(), path=authority,
@@ -587,7 +588,7 @@ from ats.workflow.cutover import CutoverError
 from ats.execution.broker_write_guard import prohibit_broker_writes,REASON_ISOLATED
 prohibit_broker_writes(reason_code=REASON_ISOLATED)
 be.assert_enforced=lambda *a,**k: None  # separate evidence adapter explicitly simulated
-i=sr.RouteIdentity(**json.loads(sys.argv[2]))
+i=sr.ReadScope(**json.loads(sys.argv[2]))
 g=lambda i:{'identity':i.as_row(),'status':'eligible','valid':True,'reference':'isolated'}
 try:
     sr.transition_route('projection_read',i,'target',actor='child',reason='isolated race',

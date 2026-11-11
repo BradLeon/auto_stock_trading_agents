@@ -98,8 +98,8 @@ def cached_fallback_drills(data_path, internal_path, business_scopes, *, as_of=N
             scopes = {}
             business_scope = business_scopes.get(consumer["id"])
             if business_scope:
-                from ats.workflow.scoped_routes import RouteIdentity
-                identity = RouteIdentity(consumer["domain"], consumer["id"],
+                from ats.workflow.read_scope import ReadScope
+                identity = ReadScope(consumer["domain"], consumer["id"],
                     consumer["contract_version"], business_scope)
                 business_scope = identity.scope
                 now = probe_time(identity, invocation)

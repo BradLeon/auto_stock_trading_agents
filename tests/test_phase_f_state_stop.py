@@ -25,7 +25,7 @@ from ats.workflow import joint_cutover as joint
 from ats.workflow import runtime_reads as reads
 from ats.workflow import scoped_routes as scopes
 from ats.workflow.assurance_surface import implementation_hashes
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.cutover_wiring import BoundaryWriteRefused
 from ats.workflow.isolation import verified_isolation_root
 
@@ -349,7 +349,7 @@ def test_joint_recovery_failure_keeps_actual_writes_frozen(execution, accepted, 
     before = snapshot(execution.store)
     with pytest.raises(plane.CutoverError):
         approval(execution, state)
-    with pytest.raises(RouteUnavailable, match="joint batch frozen"):
+    with pytest.raises(ReadUnavailable, match="joint batch frozen"):
         reconcile(execution, datetime.now(UTC))
     bad = copy.copy(checks)
     bad["report"] = lambda i: {"identity": i.as_row(), "valid": False, "reference": "withdrawn"}
@@ -421,7 +421,7 @@ def test_clerk_inflight_actual_fill_survives_stop_and_recovery(execution, accept
 
     monkeypatch.setitem(clerk._STEPS, "reconcile", stop_after_real_step)
     interrupted_at = datetime.now(UTC)
-    with reads.bind_read(who[1]), pytest.raises(RouteUnavailable, match="authority changed"):
+    with reads.bind_read(who[1]), pytest.raises(ReadUnavailable, match="authority changed"):
         reconcile(execution, interrupted_at)
     partial = snapshot(execution.store)
     assert len(partial["fills"]) == 2 and partial["clerk_runs"][-1]["status"] == "running"
@@ -458,10 +458,10 @@ from ats.workflow import boundary_evidence as be
 be.assert_enforced=lambda *a,**k:None
 from ats.execution.broker_write_guard import prohibit_broker_writes,REASON_ISOLATED
 from ats.memory import get_store
-from ats.workflow.scoped_routes import RouteIdentity
+from ats.workflow.read_scope import ReadScope
 from pathlib import Path
 prohibit_broker_writes(reason_code=REASON_ISOLATED)
-req=json.loads(sys.argv[1]);who=[RouteIdentity(**m['identity']) for m in req['members']]
+req=json.loads(sys.argv[1]);who=[ReadScope(**m['identity']) for m in req['members']]
 checks=gates(SimpleNamespace(store=get_store()),who,Path(sys.argv[2]))
 run(req,checks,checkpoint=lambda phase:os._exit(73) if phase=='routes_committed' else None)
 """
@@ -487,7 +487,7 @@ run(req,checks,checkpoint=lambda phase:os._exit(73) if phase=='routes_committed'
     before = snapshot(execution.store)
     with pytest.raises(plane.CutoverError):
         approval(execution, state)
-    with pytest.raises(RouteUnavailable, match="joint batch frozen"):
+    with pytest.raises(ReadUnavailable, match="joint batch frozen"):
         reconcile(execution, datetime.now(UTC))
     assert snapshot(execution.store) == before
     result = run(recovery, checks)

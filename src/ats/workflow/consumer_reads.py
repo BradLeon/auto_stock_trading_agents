@@ -19,43 +19,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import cutover as plane
-from .cutover_routing import FallbackUnsafe, RouteUnavailable, is_retired, read_route
+from .cutover_routing import FallbackUnsafe, ReadUnavailable, is_retired, read_route
 from .scoped_routes import resolve_route, route_history
 
-_TRACE: ContextVar[list | None] = ContextVar("consumer_read_trace", default=None)
-_AUDITS: ContextVar[tuple] = ContextVar("consumer_entry_audits", default=())
-
-
-@contextmanager
-def trace_reads():
-    """Collect actual reads in this task; no shared research or production writes."""
-    rows = []
-    token = _TRACE.set(rows)
-    try:
-        yield rows
-    finally:
-        _TRACE.reset(token)
-
-
-def record_read(consumer, api, *, refs=(), status="complete", **detail):
-    row = {"consumer": consumer, "api": api, "refs": list(refs), "status": status, **detail}
-    from .runtime_reads import current_read_context
-
-    context = current_read_context()
-    if context is not None and context.identity.consumer_id == consumer:
-        row.update(business_identity=context.identity.as_row(), invocation_as_of=context.cutoff.isoformat(), bound_route=context.route,
-                   run_mode=context.mode, invocation=context.invocation, deployment=context.deployment,
-                   read_generation=context.read_generation, joint_epoch=context.joint_epoch)
-        row.setdefault('route', context.route)
-    logger = logging.getLogger("ats.consumer_reads")
-    (logger.warning if status in {"blocked", "unavailable"} else logger.info)(
-        "consumer_read %s", json.dumps(row, sort_keys=True, default=str))
-    rows = _TRACE.get()
-    if rows is not None:
-        rows.append(row)
-    for buffer in _AUDITS.get():
-        if buffer is not rows:
-            buffer.append(row)
+from .read_scope import _AUDITS, _TRACE, read_projection, record_read, trace_reads  # noqa: E402,F401
 
 
 @contextmanager
@@ -110,7 +77,7 @@ def audit_read_entry(context):
 def implementation_hash(reader):
     source = inspect.getsourcefile(reader)
     if not source:
-        raise RouteUnavailable("fallback implementation source unavailable")
+        raise ReadUnavailable("fallback implementation source unavailable")
     return hashlib.sha256(Path(source).read_bytes()).hexdigest()
 
 
@@ -229,11 +196,11 @@ def consume_read(identity, *, target_reader, legacy_reader, legacy_identifier,
         value = cached[0] if cached else (target_reader() if decision.route == "target"
                                         else legacy_reader())
         if not usable(value):
-            raise RouteUnavailable("business read unavailable")
+            raise ReadUnavailable("business read unavailable")
         current = resolve_route(plane.PROJECTION_READ, identity, path=path)
         if (current["generation"] != authority["generation"] or
                 current["route"] != authority["route"]):
-            raise RouteUnavailable("read route changed during consumption")
+            raise ReadUnavailable("read route changed during consumption")
         from .read_recovery import ReadStopped, _proof, current_policy
 
         policy = current_policy(identity, path=path)
@@ -255,71 +222,6 @@ def consume_read(identity, *, target_reader, legacy_reader, legacy_identifier,
             "fallback_proof_invalid", "fallback_proof_revoked", "fallback_target_unavailable"} else "blocked",
                     identity=identity.as_row(), reason_code=reason)
         raise
-
-
-def read_projection(store, *, consumer, role, scope, at=None, projection_id="", content_hash="",
-                    require_usable=True):
-    """Read only allowed, published, reusable opinions; preserve concrete refs."""
-    from ..agent.task_projection import PAYLOAD_SCHEMA_BY_ROLE, reuse_decision
-    from ..agent.task_projection import content_hash as hash_projection
-    from ..agents.chief.assemble import _envelope_from_row
-    from ..config import REPO_ROOT
-    from .yaml_cache import load_yaml
-
-    owners = {"information_brief": "information", "layer_analysis": "layer",
-              "sector_allocation": "sector", "fundamental_expectation_update": "fundamental",
-              "fundamental_event_review": "fundamental", "macro_review": "macro",
-              "technical_review": "technical"}
-    manifest = load_yaml(REPO_ROOT / "config/data/target_dataflow_coverage.yaml")
-    contract = next(row for row in manifest["consumers"] if row["id"] == consumer)
-    if owners.get(role) != consumer and owners.get(role) not in contract["allowed_projection_inputs"]:
-        record_read(consumer, "task_projection", status="blocked", producer=owners.get(role),
-                    role=role, scope=scope.model_dump(mode="json"), reason_code="undeclared_projection_input")
-        raise PermissionError("undeclared_projection_input")
-    from .runtime_reads import current_read_context, gate_read
-
-    context = current_read_context()
-    if context:
-        if context.identity.consumer_id != consumer:
-            raise RouteUnavailable("projection consumer escapes business request")
-        if scope.kind == "entity" and scope.id not in context.identity.scope["entities"]:
-            raise RouteUnavailable("projection entity escapes business request")
-        gate_read(context.identity)
-        at = at or context.cutoff
-        point = datetime.fromisoformat(at) if isinstance(at, str) else at
-        if point != context.cutoff:
-            raise RouteUnavailable("projection time escapes invocation cutoff")
-    row = store.get_task_projection(projection_id) if projection_id else None
-    if not projection_id:
-        rows = store.task_projection_envelopes(agent_role=role, scope_kind=scope.kind,
-                                               scope_id=scope.id, limit=1)
-        row = rows[0] if rows else None
-    if row and (row.get("agent_role") != role or row.get("scope_kind") != scope.kind
-                or row.get("scope_id") != scope.id or
-                (content_hash and row.get("content_hash") != content_hash)):
-        raise RouteUnavailable("projection reference scope/hash mismatch")
-    if row:
-        envelope = _envelope_from_row(row, scope)
-        schema = PAYLOAD_SCHEMA_BY_ROLE[role]
-        validated_payload = schema.model_validate(envelope.payload)
-        if (envelope.schema_name != schema.role_schema_name() or envelope.schema_version != "v1"
-                or envelope.content_hash != hash_projection(
-                    role=role, scope=scope, as_of=envelope.as_of,
-                    schema_name=envelope.schema_name, schema_version=envelope.schema_version,
-                    payload=validated_payload, input_refs=envelope.input_refs,
-                    data_vintage_refs=envelope.data_vintage_refs)):
-            record_read(consumer, "task_projection", status="blocked", refs=[envelope.projection_id])
-            raise RouteUnavailable("projection schema/content integrity mismatch")
-        ok, reason = reuse_decision(_envelope_from_row(row, scope), scope=scope, at=at)
-        if not ok:
-            record_read(consumer, "task_projection", status=reason, refs=[row["projection_id"]])
-            if require_usable:
-                return None
-    record_read(consumer, "task_projection", status="complete" if row else "missing",
-                producer=owners.get(role), role=role, scope=scope.model_dump(mode="json"),
-                refs=[row["projection_id"]] if row else [],
-                content_hash=row.get("content_hash", "") if row else "")
-    return row
 
 
 @dataclass(frozen=True)
@@ -356,14 +258,14 @@ def read_internal(store, *, consumer, symbol="", business_scope=None, recovery_r
         fallback = context.fallback_input
         if (context.identity.consumer_id != consumer or fallback.store is not store
                 or fallback.symbol != symbol or business_scope not in (None, context.identity)):
-            raise RouteUnavailable("state read escapes checked fallback")
+            raise ReadUnavailable("state read escapes checked fallback")
         return fallback.value
     if business_scope is not None or context:
         identity = business_scope or context.identity
         if identity.consumer_id != consumer or (context and context.identity != identity):
-            raise RouteUnavailable("state consumer escapes business request")
+            raise ReadUnavailable("state consumer escapes business request")
         if symbol and symbol not in identity.scope["entities"]:
-            raise RouteUnavailable("state entity escapes business request")
+            raise ReadUnavailable("state entity escapes business request")
         value = consume_read(identity, target_reader=reader, legacy_reader=reader,
                              legacy_identifier="store.direct_trade_reads",
                              usable=lambda state: state is not None, refs=refs,

@@ -183,7 +183,7 @@ class Dispatcher:
         startup(caller="Dispatcher.dispatch", mode=(
             "shadow" if any(task.instance_key.startswith("shadow:")
                             for task in plan.tasks) else ""))
-        from .cutover_routing import RouteUnavailable
+        from .read_scope import ReadUnavailable
         from .runtime_reads import check_plan_reads
         from . import schedule_runtime as scheduling
 
@@ -211,7 +211,7 @@ class Dispatcher:
             plan_hash=plan.plan_hash, status="planned")
         if existing["status"] in {"complete", "incomplete", "failed", "cancelled"}:
             if read_errors:
-                raise RouteUnavailable(f"saved run scope no longer readable: {read_errors}")
+                raise ReadUnavailable(f"saved run scope no longer readable: {read_errors}")
             saved = existing.get("result") or {}
             if saved:
                 return self._result_from_saved(saved)
@@ -334,12 +334,12 @@ class Dispatcher:
                                     for dep in dep_states
                                     for env in dep.projections}
                     input_refs, data_refs, task_inputs = self._task_inputs(plan, task, dependencies)
-                    from .cutover_routing import RouteUnavailable
+                    from .read_scope import ReadUnavailable
                     from .runtime_reads import gate_read, task_identity
 
                     try:
                         gate_read(task_identity(plan, task))
-                    except RouteUnavailable as exc:
+                    except ReadUnavailable as exc:
                         outcomes[key] = self._finish_without_execution(
                             task, plan, status="blocked", detail=str(exc),
                             code="read_scope_unavailable", attempt_no=attempt_counts.get(key, 0) + 1)
@@ -455,7 +455,7 @@ class Dispatcher:
                                             trigger_key=trigger_key,
                                             policy_version=policy_version)
                             made_progress = True
-                        except (DependencyUnavailable, RouteUnavailable) as exc:
+                        except (DependencyUnavailable, ReadUnavailable) as exc:
                             self.workflow_store.finish_attempt(
                                 state["attempt"]["agent_run_id"], status="blocked",
                                 error_code="dependency_unavailable", error_detail=str(exc))
@@ -637,10 +637,10 @@ class Dispatcher:
 
         if task.task_id == "fundamental-routine":
             from .decision_requirements import validate_routine_value_contract
-            from .cutover_routing import RouteUnavailable
+            from .read_scope import ReadUnavailable
             try:
                 validate_routine_value_contract(envelope.payload)
-            except RouteUnavailable:
+            except ReadUnavailable:
                 return False, "routine_value_contract_invalid"
         if envelope.agent_role != TASK_ROLE[task.task_id]:
             return False, "role_mismatch"
@@ -691,7 +691,7 @@ class Dispatcher:
 
     @staticmethod
     def _record_reused(context, envelopes):
-        from .consumer_reads import record_read
+        from .read_scope import record_read
         from .runtime_reads import current_read_context, gate_read
         from .payload_digest import digest
 
@@ -816,7 +816,7 @@ class Dispatcher:
         return expected_hash == envelope.content_hash
 
     def _chief_snapshot_gate(self, result: DispatchResult, plan, memory) -> DispatchResult:
-        from .cutover_routing import RouteUnavailable
+        from .read_scope import ReadUnavailable
         from .runtime_reads import bind_read, business_identity, configured_entities
 
         identity = business_identity(
@@ -829,7 +829,7 @@ class Dispatcher:
                            invocation=(plan.task_inputs.get("read_invocations") or {}).get("chief:portfolio"),
                            execution_plan_hash=plan.plan_hash):
                 return self._assemble_chief_snapshot(result, plan, memory)
-        except RouteUnavailable as exc:
+        except ReadUnavailable as exc:
             return DispatchResult(
                 run_id=result.run_id, status=result.status, outcomes=result.outcomes,
                 missing_requirements=result.missing_requirements,

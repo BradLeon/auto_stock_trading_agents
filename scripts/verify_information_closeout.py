@@ -19,7 +19,7 @@ from ats.agents.information.outputs import InformationInsightBatchView
 from ats.data.products.unstructured import admitted_documents
 from ats.data.stores.unstructured import PlatformUnstructuredRepository
 from ats.memory import get_store
-from ats.workflow.consumer_reads import read_projection, trace_reads
+from ats.workflow.read_scope import read_projection, trace_reads
 from ats.workflow.evaluation_clock import at
 from ats.workflow.isolation import isolated_run
 from ats.workflow.runtime_reads import bind_read, business_identity
@@ -122,8 +122,8 @@ def verify(prepared: Path, capture_file: Path, database: Path, root: Path):
                     assert brief['input_refs'] and brief['payload']['source_evidence']
                     try:read_projection(store,consumer='fundamental',role='information_brief',scope=ProjectionScope(kind='entity',id='OTHER'))
                     except Exception as exc:
-                        from ats.workflow.cutover_routing import RouteUnavailable
-                        if not isinstance(exc,RouteUnavailable):raise
+                        from ats.workflow.read_scope import ReadUnavailable
+                        if not isinstance(exc,ReadUnavailable):raise
                     else:raise AssertionError('wrong target projection escaped scope')
                 try:read_projection(store,consumer='sector',role='information_brief',scope=ProjectionScope(kind='entity',id=symbol))
                 except PermissionError:pass

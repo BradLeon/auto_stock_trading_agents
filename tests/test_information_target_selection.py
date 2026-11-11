@@ -6,7 +6,7 @@ import pytest
 from ats.agents.information import assemble, extract, selection, target_research
 from ats.schemas.research import Article
 from ats.workflow.runtime_reads import consumer_entities
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 
 NOW = datetime(2026, 10, 12, tzinfo=UTC)
 CONFIG = {'publisher_entities': ['SEMIANALYSIS', 'TRENDFORCE'], 'candidate_limit': 120,
@@ -232,7 +232,7 @@ def test_syndicated_equal_facts_do_not_inflate_confidence_or_fact_count(monkeypa
 
 def test_peer_cannot_be_used_as_another_output_target_under_current_scope(monkeypatch):
     bound(monkeypatch)
-    with pytest.raises(RouteUnavailable, match='output target differs'):
+    with pytest.raises(ReadUnavailable, match='output target differs'):
         selection.candidates(object(), 'NVDA', since=NOW-timedelta(days=7), config=CONFIG)
 
 

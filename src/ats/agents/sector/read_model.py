@@ -4,8 +4,8 @@ from html import escape
 from pathlib import Path
 
 from ...agent.task_projection import ProjectionScope
-from ...workflow.consumer_reads import read_projection
-from ...workflow.cutover_routing import RouteUnavailable
+from ...workflow.read_scope import read_projection
+from ...workflow.read_scope import ReadUnavailable
 from ...workflow.runtime_reads import current_read_context
 
 
@@ -24,13 +24,13 @@ def allocation(store, name, *, date=""):
             agent_role="sector_allocation", scope_kind="sector", scope_id=name, limit=10_000)
         selected = next((row for row in rows if str(row.get("as_of", ""))[:10] == date), None)
         if selected is None:
-            raise RouteUnavailable("required Sector projection missing for date: " + date)
+            raise ReadUnavailable("required Sector projection missing for date: " + date)
     row = read_projection(store, consumer="sector", role="sector_allocation",
         scope=ProjectionScope(kind="sector", id=name), at=context.cutoff if context else None,
         projection_id=selected["projection_id"] if selected else "",
         content_hash=selected["content_hash"] if selected else "")
     if row is None:
-        raise RouteUnavailable("required Sector allocation projection missing or unusable")
+        raise ReadUnavailable("required Sector allocation projection missing or unusable")
     return row
 
 
@@ -42,12 +42,12 @@ def layer_inputs(store, cfg, overrides=None):
         scope = ProjectionScope(kind="layer", id=layer.key)
         selected = overrides.get(layer.key) if overrides is not None else None
         if overrides is not None and selected is None:
-            raise RouteUnavailable("required Sector LayerAnalysis missing: " + layer.key)
+            raise ReadUnavailable("required Sector LayerAnalysis missing: " + layer.key)
         row = read_projection(store, consumer="sector", role="layer_analysis", scope=scope,
             projection_id=selected.projection_id if selected else "",
             content_hash=selected.content_hash if selected else "")
         if row is None:
-            raise RouteUnavailable("required Sector LayerAnalysis unavailable: " + layer.key)
+            raise ReadUnavailable("required Sector LayerAnalysis unavailable: " + layer.key)
         result[layer.key] = _envelope_from_row(row, scope)
     return result
 

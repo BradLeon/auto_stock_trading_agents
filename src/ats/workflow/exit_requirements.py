@@ -17,7 +17,7 @@ from pathlib import Path
 from . import cutover as plane
 from . import legacy_retirement as registry
 from . import schedule_runtime as scheduling
-from .scoped_routes import RouteIdentity
+from .scoped_routes import ReadScope
 
 
 def required_plan_uses(plan):
@@ -99,7 +99,7 @@ def _production_observation_verified(receipt):
         if path != Path(plane.default_cutover_db_path()).resolve():
             return False
         first, last = receipt['window']['start'], receipt['window']['end']
-        required = [RouteIdentity(**row) for row in receipt['identities']]
+        required = [ReadScope(**row) for row in receipt['identities']]
         if not required:
             return False
         with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as conn:
@@ -154,7 +154,7 @@ def production_inventory(*, cutover_path=None, schedule_path=None):
         with closing(sqlite3.connect(schedule.as_uri()+'?mode=ro',uri=True)) as conn:
             conn.row_factory = sqlite3.Row
             owners = [dict(r) for r in conn.execute('SELECT * FROM schedule_scope_owners')]
-        result.update(routes=[{**r,'identity':RouteIdentity(**json.loads(r['identity_json'])).as_row()} for r in routes],
+        result.update(routes=[{**r,'identity':ReadScope(**json.loads(r['identity_json'])).as_row()} for r in routes],
                       owners=owners)
     except (OSError,sqlite3.Error,ValueError,plane.CutoverError) as exc:
         result['problems']=[str(exc)]

@@ -37,12 +37,13 @@ from ats.data.consumer_api import read_input
 from ats.execution import broker_write_guard as broker_guard
 from ats.workflow import cutover as co
 from ats.workflow import runtime_reads as rr
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.dispatcher import Dispatcher, TaskAdapterResult
 from ats.workflow.isolation import build_environment, isolated_run, verified_isolation_root
 from ats.workflow.planning import build_plan
 from ats.workflow.run_contracts import TriggerContext
-from ats.workflow.scoped_routes import canonical_json, resolve_route, transition_route
+from ats.workflow.scoped_routes import resolve_route, transition_route
+from ats.workflow.read_scope import canonical_json
 from ats.workflow.store import WorkflowStore
 
 POINT = "2026-10-14T02:46:31.536419+00:00"
@@ -179,7 +180,7 @@ def record(record_property, site, who, kind, *, calls=0, changed=0, allowed=froz
 
 
 def raises_unavailable(call, match=None):
-    with pytest.raises(RouteUnavailable, match=match):
+    with pytest.raises(ReadUnavailable, match=match):
         call()
 
 
@@ -187,7 +188,7 @@ def blocked_or_unavailable(call, match=None):
     """The Dispatcher reports an ineligible scope as blocked work, not as an exception."""
     try:
         result = call()
-    except RouteUnavailable as exc:
+    except ReadUnavailable as exc:
         assert match is None or match in str(exc)
         return
     assert result.status != "complete" and result.outcomes
@@ -366,7 +367,7 @@ def test_portfolio_information_cli_refuses_an_entity_scope(
     monkeypatch.setattr(cli, "_run_managed_article_ingestion",
                         lambda **kwargs: pytest.fail("a refused request must not collect data"))
     before = fingerprint()
-    with pytest.raises(RouteUnavailable, match="does not match business request"):
+    with pytest.raises(ReadUnavailable, match="does not match business request"):
         cli.run_information_pass(use_llm=False, ingest_research=False, read_scope=who.scope, read_as_of=POINT)
     assert calls == [] and rr.current_read_context() is None and changed_tables(before) == []
     record(record_property, S_INFORMATION_CLI, who, "negative", calls=len(calls), changed=0)

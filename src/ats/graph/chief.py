@@ -179,7 +179,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     pf = risk_inputs.account() if state.use_broker else None
     from ..data.execution_prices import PriceUnavailable, normalize_orders, session_context
     from ..data.runtime.execution_prices import overnight_session_candidate
-    from ..workflow.cutover_routing import RouteUnavailable
+    from ..workflow.read_scope import ReadUnavailable
 
     normalization_notes, normalization_errors = [], []
     try:
@@ -202,7 +202,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
             overnight=overnight, slippage_pct=slip, venue=venue,
             net_liquidation=pf.net_liquidation if pf else 0, skip_unquotable=venue == "overnight",
             positions={p.symbol: p.qty for p in pf.positions if p.sec_type == "STK"})
-    except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:
+    except (PriceUnavailable, ReadUnavailable, PermissionError) as exc:
         from ..data.execution_prices import proposal_error, proposal_hint
 
         fixable = isinstance(exc, PriceUnavailable) and proposal_error(str(exc))

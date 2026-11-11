@@ -25,7 +25,7 @@ def snapshot() -> PortfolioSnapshot | None:
     """Live IBKR portfolio + account P&L. None (logged) if TWS is unreachable."""
     try:
         from ..data.runtime.broker import portfolio_snapshot
-        from ..workflow.consumer_reads import record_read
+        from ..workflow.read_scope import record_read
         from ..workflow.runtime_reads import current_read_context, gate_read
 
         context = current_read_context()

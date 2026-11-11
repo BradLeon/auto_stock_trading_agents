@@ -418,22 +418,22 @@ def test_projections_from_single_workflow_runs_pass_the_decision_gate(chief_env)
 
 
 def test_a_change_to_a_tasks_own_config_still_refuses_its_projection(chief_env, tmp_path):
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     _seed(chief_env)
     path = tmp_path / "config" / "technical.yaml"
     path.write_text(path.read_text() + "\n# changed after the projection was produced\n")
-    with pytest.raises(RouteUnavailable, match="lineage differs: .*technical-review"):
+    with pytest.raises(ReadUnavailable, match="lineage differs: .*technical-review"):
         assemble_context(_state())
 
 
 def test_a_change_to_another_tasks_config_does_not_refuse_technical(chief_env, tmp_path):
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     _seed(chief_env)
     path = tmp_path / "config" / "macro.yaml"
     path.write_text(path.read_text() + "\n# changed after the projections were produced\n")
-    with pytest.raises(RouteUnavailable) as refused:
+    with pytest.raises(ReadUnavailable) as refused:
         assemble_context(_state())
     # Only Macro, whose own config changed, is refused.
     assert "macro-review" in str(refused.value) and "technical-review" not in str(refused.value)
@@ -468,12 +468,12 @@ def test_a_routine_attempt_from_its_own_workflow_is_accepted(chief_env):
 
 
 def test_a_routine_attempt_for_another_scope_is_still_refused(chief_env):
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     rows = _seed(chief_env, fundamental="routine", fund_run=("wf-routine", "agent-run-1"))
     key = _routine_key("entity:COHR").replace("entity:COHR", "entity:NVDA")
     _routine_attempt(chief_env, key=key, projection_id=rows["fund:COHR"].projection_id)
-    with pytest.raises(RouteUnavailable, match="attempt not terminal or mismatched"):
+    with pytest.raises(ReadUnavailable, match="attempt not terminal or mismatched"):
         assemble_context(_state(fundamental_mode="routine"))
 
 

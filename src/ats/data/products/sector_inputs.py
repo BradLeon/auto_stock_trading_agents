@@ -145,7 +145,7 @@ def sector_price_history(symbols: list[str], period: str = "1y"):
     context = current_read_context()
     persistent = context is not None and context.invocation is not None
     if persistent:
-        from ...workflow.cutover_routing import RouteUnavailable
+        from ...workflow.read_scope import ReadUnavailable
 
         # Business securities stay within this invocation. The technical
         # strategy's two fixed volatility indicators are auxiliary inputs,
@@ -153,17 +153,17 @@ def sector_price_history(symbols: list[str], period: str = "1y"):
         entities = set(context.invocation["actual_identity"]["scope"]["entities"])
         auxiliary = {"^VIX", "^VIX3M"} if context.identity.consumer_id == "technical" else set()
         if not set(symbols) <= entities | auxiliary:
-            raise RouteUnavailable("runtime history entity escapes bound invocation")
+            raise ReadUnavailable("runtime history entity escapes bound invocation")
         gate_read(context.identity)
     rows = sector_snapshot.fetch_close_history(symbols, period=period)
     if persistent:
         import hashlib
         import json
         from dataclasses import asdict
-        from ...workflow.consumer_reads import record_read
+        from ...workflow.read_scope import record_read
 
         if not set(rows) <= set(symbols):
-            raise RouteUnavailable("runtime history response escapes requested symbols")
+            raise ReadUnavailable("runtime history response escapes requested symbols")
         gate_read(context.identity)
         record_read(context.identity.consumer_id, "ats.data.products.sector_inputs.sector_price_history",
             refs=[f"runtime-history:{r.source}:{r.symbol}:{r.bar_as_of}" for r in rows.values()],

@@ -156,7 +156,7 @@ def test_dispatcher_plans_bind_a_consumer_on_the_target_route_without_a_register
 
 
 def test_dispatcher_plans_still_refuse_a_consumer_on_the_old_route(world):
-    with pytest.raises(rr.RouteUnavailable, match="read window"):
+    with pytest.raises(rr.ReadUnavailable, match="read window"):
         rw.select(who("fundamental"), workflow="fundamental-routine", as_of=POINT, path=world, purpose="fundamental-routine")
 
 
@@ -170,7 +170,7 @@ def test_an_exact_registered_window_still_wins_over_the_consumer_wide_route(worl
     conn.execute("INSERT INTO scoped_cutover_routes VALUES (?,?,?,?,?,?)",
                  (co.PROJECTION_READ, point.key, sr.canonical_json(point.as_row()), "disabled", 5, "now"))
     conn.commit(); conn.close()
-    with pytest.raises(rr.RouteUnavailable):                                 # exact-but-unauthorized stays refused
+    with pytest.raises(rr.ReadUnavailable):                                 # exact-but-unauthorized stays refused
         rw.select(point, workflow="information-brief", as_of=POINT, path=world, purpose="information-brief")
     assert verified_isolation_root() is not None
 

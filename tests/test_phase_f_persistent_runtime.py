@@ -15,9 +15,9 @@ from test_phase_f_joint_cutover import gates
 from ats.config import REPO_ROOT
 from ats.workflow import cutover as plane, joint_cutover as joint, read_windows as windows
 from ats.workflow import runtime_reads as reads, invocation_bindings as bindings
-from ats.workflow.scoped_routes import RouteIdentity
-from ats.workflow.cutover_routing import RouteUnavailable
-from ats.workflow.consumer_reads import trace_reads, record_read
+from ats.workflow.read_scope import ReadScope
+from ats.workflow.read_scope import ReadUnavailable
+from ats.workflow.read_scope import trace_reads, record_read
 from ats.workflow.isolation import isolated_run
 from ats.workflow.run_contracts import TriggerContext
 from ats.workflow.planning import build_plan
@@ -33,8 +33,8 @@ def runtime(tmp_path, monkeypatch):
 
 
 def deploy(runtime, consumer, purpose, *, workflow=None, scope=None):
-    contract = reads._consumer_contract(consumer)
-    who = RouteIdentity(contract["domain_id"], consumer, contract["contract_version"], scope or {
+    contract = reads.consumer_contract(consumer)
+    who = ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope or {
         "kind": "entity", "id": "COHR", "entities": ["COHR"],
         "time_policy": "per_invocation", "deployment_purpose": purpose})
     workflow = workflow or purpose
@@ -67,7 +67,7 @@ def test_ten_consumers_cross_day_exact_input_binding_and_immutable_receipts(runt
             record_read(consumer, "isolated-read", refs=["input:"+point.isoformat()],
                         source_as_of=[point.isoformat()], queried_at=point.isoformat(), payload_hash="fixture-input")
             assert rows[0]["invocation"]["actual_identity"] == actual.as_row()
-            with pytest.raises(RouteUnavailable, match="entity"):
+            with pytest.raises(ReadUnavailable, match="entity"):
                 reads.guard_input(consumer, {"entity": "NVDA"}, as_of=point)
     with sqlite3.connect(plane.default_cutover_db_path()) as conn:
         receipts = [json.loads(r[0]) for r in conn.execute("SELECT receipt_json FROM read_invocation_receipts ORDER BY seq")]
@@ -83,12 +83,12 @@ def test_ten_consumers_cross_day_exact_input_binding_and_immutable_receipts(runt
 def test_purpose_ambiguity_and_relabeling_refuse(runtime):
     deploy(runtime, "fundamental", "fundamental-routine")
     point = reads.business_identity("fundamental", kind="entity", scope_id="COHR", entities=["COHR"], as_of=runtime.now)
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         windows.select(point, workflow="fundamental-routine", as_of=runtime.now, purpose="fundamental-event")
     # A second, different explicit Event rule cannot silently win selection.
     digest = hashlib.sha256((REPO_ROOT/"config/workflow/event_routes.yaml").read_bytes()).hexdigest()
     with pytest.raises(ValueError, match="fixed Event"):
-        RouteIdentity(point.domain_id, "fundamental", point.contract_version, {
+        ReadScope(point.domain_id, "fundamental", point.contract_version, {
             "kind": "entity", "id": "COHR", "entities": ["COHR"], "time_policy": "per_invocation",
             "deployment_purpose": "fundamental-event", "event_id": "x", "event_version": "1",
             "event_rule": {"route_kind": "earnings:release", "config_sha256": digest}})
@@ -105,7 +105,7 @@ def test_generic_fundamental_entry_uses_selected_mode_and_refuses_nested_borrowi
 
     with reads.bind_read(who, as_of=runtime.now):
         assert selected_pass(SimpleNamespace(symbol="COHR", mode=mode)) == purpose
-        with pytest.raises(RouteUnavailable, match="purpose"):
+        with pytest.raises(ReadUnavailable, match="purpose"):
             selected_pass(SimpleNamespace(symbol="COHR", mode="event" if mode == "routine" else "routine"))
 
 
@@ -120,13 +120,13 @@ def test_decision_cycle_mapping_limits_actual_order_entities(runtime):
         inv = bindings.invocation(who, actual, workflow="decision-workflow", purpose="trader", as_of=runtime.now, run_id=cycle)
         with reads.bind_read(who, as_of=runtime.now, invocation=inv):
             reads.guard_input("trader", {"entity": "COHR", "cycle_id": cycle})
-            with pytest.raises(RouteUnavailable, match="cycle"):
+            with pytest.raises(ReadUnavailable, match="cycle"):
                 reads.guard_input("trader", {"entity": "COHR", "cycle_id": "unrelated-cycle"})
-            with pytest.raises(RouteUnavailable, match="entity"):
+            with pytest.raises(ReadUnavailable, match="entity"):
                 reads.guard_input("trader", {"entity": "NVDA"})
     escaped = reads.business_identity("trader", kind="decision", scope_id="other", entities=["AAPL"], as_of=runtime.now)
-    with pytest.raises(RouteUnavailable): windows.select(escaped, workflow="decision-workflow", purpose="trader", as_of=runtime.now)
-    with pytest.raises(RouteUnavailable, match="dynamic"):
+    with pytest.raises(ReadUnavailable): windows.select(escaped, workflow="decision-workflow", purpose="trader", as_of=runtime.now)
+    with pytest.raises(ReadUnavailable, match="dynamic"):
         with reads.bind_read(who, as_of=runtime.now): pass
 
 
@@ -145,7 +145,7 @@ def test_runtime_history_cannot_expand_business_entities(runtime, monkeypatch):
     who, *_ = deploy(runtime, "technical", "technical-review")
     monkeypatch.setattr("ats.data.sector_snapshot.fetch_close_history", lambda *a, **kw: pytest.fail("escaped provider read"))
     with reads.bind_read(who, as_of=runtime.now):
-        with pytest.raises(RouteUnavailable, match="entity"):
+        with pytest.raises(ReadUnavailable, match="entity"):
             sector_price_history(["NVDA"])
 
 
@@ -173,7 +173,7 @@ def test_committed_permission_rechecked_before_actual_publication(runtime):
     with reads.bind_read(who, as_of=runtime.now):
         joint.revoke_authorization(reference, actor="fixture", reason="mid-run revoke")
         # Test real publication boundary even inside isolation.
-        with pytest.raises(RouteUnavailable, match="authorization"):
+        with pytest.raises(ReadUnavailable, match="authorization"):
             guard_write(plane.ANALYST_OUTPUT, what="late projection")
 
 
@@ -210,16 +210,16 @@ def test_real_calendar_versions_follow_one_declared_rule_and_stale_worker_refuse
     revised = calendar.publish_candidate(saved["candidate_id"])
     revised = calendar.confirm_release(revised["event_id"], expected_version=revised["event_version"],
         admitted_materials=[{"kind": "official_release", "status": "admitted", "ref": "bls:v2"}], source_id="bls")
-    with pytest.raises(RouteUnavailable, match="current"):
+    with pytest.raises(ReadUnavailable, match="current"):
         bindings.recheck(who, inv)
     later = datetime.now(UTC)
     new = reads.business_identity("macro", kind="portfolio", scope_id="portfolio", entities=entities,
         as_of=later, event_id=revised["event_id"], event_version=str(revised["event_version"]))
     assert windows.select(new, workflow="macro-review", purpose="macro-review", as_of=later) == who
-    with pytest.raises(RouteUnavailable): windows.select(new, workflow="other", purpose="macro-review", as_of=later)
+    with pytest.raises(ReadUnavailable): windows.select(new, workflow="other", purpose="macro-review", as_of=later)
     # Rule/version stability cannot override ordinary current qualification.
     runtime.monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "ineligible", "reasons": ["expired"]})
-    with pytest.raises(RouteUnavailable): windows.select(new, workflow="macro-review", purpose="macro-review", as_of=later)
+    with pytest.raises(ReadUnavailable): windows.select(new, workflow="macro-review", purpose="macro-review", as_of=later)
 
 
 def test_bounded_query_window_cannot_be_moved_past_input_cutoff(runtime):
@@ -228,7 +228,7 @@ def test_bounded_query_window_cannot_be_moved_past_input_cutoff(runtime):
     prior = {"start": (runtime.now-timedelta(days=30)).isoformat(), "end": runtime.now.isoformat()}
     inv = bindings.invocation(who, actual, workflow="technical-review", purpose="technical-review", as_of=runtime.now, query_window=prior)
     assert bindings.recheck(who, inv) == actual
-    with pytest.raises(RouteUnavailable, match="cutoff"):
+    with pytest.raises(ReadUnavailable, match="cutoff"):
         bindings.invocation(who, actual, workflow="technical-review", purpose="technical-review", as_of=runtime.now,
             query_window={**prior, "end": (runtime.now+timedelta(seconds=1)).isoformat()})
 
@@ -248,7 +248,7 @@ def test_nested_clerk_entry_cannot_relabel_its_query_window(runtime):
 
     with reads.bind_read(who, as_of=runtime.now, invocation=inv):
         assert bookkeeping(as_of=day) == window
-        with pytest.raises(RouteUnavailable, match="window"):
+        with pytest.raises(ReadUnavailable, match="window"):
             bookkeeping(as_of=day, window_start=(runtime.now-timedelta(days=1)).date().isoformat())
 
 
@@ -272,7 +272,7 @@ def test_event_task_binds_actual_trigger_and_refuses_conflicting_metadata(runtim
     assert identity.scope["event_id"] == "published" and identity.scope["event_version"] == "2"
     from dataclasses import replace
     bad = replace(plan, task_inputs={"event_id":"other", "event_version":"2"})
-    with pytest.raises(RouteUnavailable, match="actual trigger"):
+    with pytest.raises(ReadUnavailable, match="actual trigger"):
         reads.task_identity(bad, bad.tasks[0])
 
 
@@ -300,7 +300,7 @@ def test_stable_trader_permission_reads_real_governed_quote_and_rejects_other_cy
                 "cycle_id":"actual-cycle","purpose":"preapproval_normalization","currency":"USD"})
             assert result.status == "complete" and result.input_refs
         with prices.price_request("trader",orders,cycle_id="other-cycle",purpose="preapproval_normalization"):
-            with pytest.raises(RouteUnavailable,match="cycle"):
+            with pytest.raises(ReadUnavailable,match="cycle"):
                 read_input("trader","MARKET_DATA",scope={"kind":"execution_price","entity":"COHR",
                     "cycle_id":"other-cycle","purpose":"preapproval_normalization","currency":"USD"})
 

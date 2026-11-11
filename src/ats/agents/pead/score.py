@@ -26,15 +26,15 @@ log = logging.getLogger("ats.agents.pead")
 
 
 def _route_unavailable():
-    from ...workflow.cutover_routing import RouteUnavailable
+    from ...workflow.read_scope import ReadUnavailable
 
-    return RouteUnavailable
+    return ReadUnavailable
 
 
 class DocumentIdentityMismatch(_route_unavailable()):
     """The actuals model judged a supplied document to be another company's or period's.
 
-    A RouteUnavailable, so the workflow records the event review as blocked (nothing is
+    A ReadUnavailable, so the workflow records the event review as blocked (nothing is
     published) rather than failed-and-retried against the same bad document.
     """
 

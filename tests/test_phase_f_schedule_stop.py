@@ -61,7 +61,7 @@ def test_actual_new_dispatcher_stop_restore_keeps_completed_trigger(business_inp
         member['route']='target';member['expected_generation']=scopes.resolve_route(member['boundary'],who)['generation']
     restore['schedules'][0].update(from_owner='legacy',to_owner='dispatcher',expected_generation=owner_row()['generation'])
     with pytest.raises(plane.CutoverError,match='disabled'), rt.wake(context):cli.run_technical_review(write_report=False)
-    with pytest.raises((plane.CutoverError, reads.RouteUnavailable)):dispatcher.dispatch(replace(first_plan,run_id='during-stop'))
+    with pytest.raises((plane.CutoverError, reads.ReadUnavailable)):dispatcher.dispatch(replace(first_plan,run_id='during-stop'))
     # Withdrawn current acceptance cannot restore; stopped authority stays intact.
     invalid=gates();invalid['report']=lambda i:{'identity':i.as_row(),'valid':False,'reference':'withdrawn'}
     with pytest.raises(plane.CutoverError):apply(restore,gates=invalid)

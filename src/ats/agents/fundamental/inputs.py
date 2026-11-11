@@ -16,9 +16,9 @@ def governed_company_inputs(symbol):
     consensus = read_input("fundamental", "COMPANY_DATA", scope={"kind": "consensus", "entity": symbol})
     hierarchy = read_input("fundamental", "HIER_DATA", scope={"kind": "evidence", "entity": symbol})
     if financials.status != "complete":
-        from ...workflow.cutover_routing import RouteUnavailable
+        from ...workflow.read_scope import ReadUnavailable
 
-        raise RouteUnavailable("fundamental financial input unavailable: " + ";".join(financials.gaps))
+        raise ReadUnavailable("fundamental financial input unavailable: " + ";".join(financials.gaps))
     values = {}
     snapshot = consensus.payload or {}
     meta = {"known_at": snapshot.get("known_at") or "", "target_event_date": ""}

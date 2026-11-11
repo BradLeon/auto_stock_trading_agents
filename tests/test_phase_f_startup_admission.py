@@ -12,7 +12,7 @@ from test_phase_f_business_wiring import synthetic_target as _synthetic_target
 from ats.runtime import cli, dispatcher_daemon
 from ats.workflow import cutover as plane
 from ats.workflow import runtime_reads as reads
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 
 synthetic_target = _synthetic_target
 
@@ -67,7 +67,7 @@ def test_actual_main_target_admission_and_revocation(synthetic_target,monkeypatc
     run=lambda:cli.run_technical_review(live_data=False,write_report=False,read_scope=scope)
     assert run()==0 and calls==['target']
     monkeypatch.setattr('ats.data.assurance.qualification',lambda **k:{'status':'ineligible'})
-    with pytest.raises(RouteUnavailable):run()
+    with pytest.raises(ReadUnavailable):run()
     assert calls==['target']
 
 

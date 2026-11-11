@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ..config import REPO_ROOT
 from . import cutover as plane
-from .scoped_routes import RouteIdentity, canonical_json
+from .scoped_routes import ReadScope, canonical_json
 
 
 @dataclass(frozen=True)
@@ -125,7 +125,7 @@ _ENTRY_SCOPES = {
 }
 
 
-def entry_scope_contract(point: CallPoint, identity: RouteIdentity) -> dict:
+def entry_scope_contract(point: CallPoint, identity: ReadScope) -> dict:
     """Compute obligations from the entry and current config, never the bundle.
 
     This only decides which execution proofs are required. It grants no read
@@ -200,7 +200,7 @@ BEGIN SELECT RAISE(ABORT, 'boundary evidence is append-only'); END;
 """
 
 
-def _validate_bundle(boundary: str, identity: RouteIdentity, mode: str, bundle: dict):
+def _validate_bundle(boundary: str, identity: ReadScope, mode: str, bundle: dict):
     if boundary not in CALL_POINTS or mode not in MODE_SEMANTICS:
         raise plane.CutoverError("unknown boundary or mode")
     if bundle.get("identity") != identity.as_row() or bundle.get("mode") != mode:
@@ -274,7 +274,7 @@ def _validate_bundle(boundary: str, identity: RouteIdentity, mode: str, bundle: 
             raise plane.CutoverError(f"invalid enforcement evidence: {exc}") from exc
 
 
-def record_enforcement(boundary: str, identity: RouteIdentity, *, mode: str, bundle: dict, path=None):
+def record_enforcement(boundary: str, identity: ReadScope, *, mode: str, bundle: dict, path=None):
     _validate_bundle(boundary, identity, mode, bundle)
     payload = canonical_json(bundle)
     key = hashlib.sha256(payload.encode()).hexdigest()
@@ -285,7 +285,7 @@ def record_enforcement(boundary: str, identity: RouteIdentity, *, mode: str, bun
     return key
 
 
-def assert_enforced(boundary: str, *, identity: RouteIdentity | None, mode="production", path=None):
+def assert_enforced(boundary: str, *, identity: ReadScope | None, mode="production", path=None):
     if identity is None:
         raise plane.CutoverError("declared wiring is not enforced: exact business identity required")
     target = Path(path or plane.default_cutover_db_path())
@@ -306,7 +306,7 @@ def assert_enforced(boundary: str, *, identity: RouteIdentity | None, mode="prod
     raise plane.CutoverError(f"boundary {boundary!r} declared but not enforced for this scope/mode")
 
 
-def enforcement_report(identity: RouteIdentity, *, mode="production", path=None) -> dict:
+def enforcement_report(identity: ReadScope, *, mode="production", path=None) -> dict:
     result = {}
     for boundary in CALL_POINTS:
         try:

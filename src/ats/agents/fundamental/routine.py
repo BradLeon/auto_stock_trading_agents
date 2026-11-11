@@ -299,11 +299,11 @@ def publish_expectation_update(store, payload: dict, *, as_of: str = "",
     """
     assert_no_advice([payload.get("driver", "")], source_statement=source_statement)
     from ...workflow.decision_requirements import validate_routine_value_contract
-    from ...workflow.cutover_routing import RouteUnavailable
+    from ...workflow.read_scope import ReadUnavailable
     from ...agent.task_projection import EnvelopeValidationError
     try:
         validate_routine_value_contract(payload)
-    except RouteUnavailable as exc:
+    except ReadUnavailable as exc:
         raise EnvelopeValidationError(str(exc)) from exc
     from ..base import execution_versions
     versions = execution_versions("fundamental_analyst", "fundamental-routine", use_llm=use_llm,
@@ -351,7 +351,7 @@ def baseline_window(symbol: str, *, now: datetime | None = None) -> dict:
 
 
 def _brief_facts(store, symbol: str) -> tuple[list[str], str]:
-    from ...workflow.consumer_reads import read_projection
+    from ...workflow.read_scope import read_projection
 
     brief = read_projection(store, consumer="fundamental", role="information_brief",
                             scope=ProjectionScope(kind="entity", id=symbol))
@@ -443,7 +443,7 @@ def run_routine_pass(request) -> dict:
     baseline_state = ({"baseline": "skipped_in_isolation"} if verified_isolation_root() is not None
                       else ensure_baseline(store, request))
     baseline = load_baseline(store, request.symbol)
-    from ...workflow.consumer_reads import read_projection
+    from ...workflow.read_scope import read_projection
 
     brief = read_projection(store, consumer="fundamental", role="information_brief",
                             scope=ProjectionScope(kind="entity", id=request.symbol))

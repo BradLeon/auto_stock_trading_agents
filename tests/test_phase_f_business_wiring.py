@@ -15,7 +15,7 @@ from ats.execution.clerk import clerk_run
 from ats.memory.store import TradingMemory
 from ats.workflow import cutover as co
 from ats.workflow import runtime_reads as rr
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.cutover_wiring import BoundaryWriteRefused
 from ats.workflow.dispatcher import Dispatcher, TaskAdapterResult
 from ats.workflow.isolation import isolated_run
@@ -135,7 +135,7 @@ def test_native_input_uses_exact_identity_and_rechecks_revocation(synthetic_targ
     monkeypatch.setattr("ats.data.assurance.qualification", qualify)
     packet = read_input("risk", "RISK_RULES", scope={}, risk_config={"max": 10}, business_scope=identity)
     assert packet.status == "complete"
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         read_input("risk", "RISK_RULES", scope={}, risk_config={}, business_scope=identity)
     assert all(row["scope"] == identity.scope and row["domain_id"] == identity.domain_id and
                row["contract_version"] == identity.contract_version for row in seen)
@@ -160,11 +160,11 @@ def test_scope_changes_cannot_borrow_qualification(change, synthetic_target, mon
     if change == "contract":
         forged = first.as_row()
         forged["contract_version"] = "other"
-        with pytest.raises(RouteUnavailable, match="contract mismatch"):
+        with pytest.raises(ReadUnavailable, match="contract mismatch"):
             rr.business_identity("risk", kind="entity", scope_id="AMD", entities=["AMD"],
                                  as_of=POINT, explicit=forged)
     else:
-        with pytest.raises(RouteUnavailable):
+        with pytest.raises(ReadUnavailable):
             rr.gate_read(second)
         assert seen[-1]["scope"] == second.scope
 
@@ -174,10 +174,10 @@ def test_bound_native_input_refuses_entity_consumer_and_time_escape():
         for consumer, query, point in [("risk", {"entity": "NVDA"}, None),
                                        ("clerk", {}, None),
                                        ("risk", {}, datetime(2026, 10, 9, tzinfo=UTC))]:
-            with pytest.raises(RouteUnavailable, match="escapes"):
+            with pytest.raises(ReadUnavailable, match="escapes"):
                 rr.guard_input(consumer, query, as_of=point)
     assert rr.current_read_context() is None
-    with pytest.raises(RouteUnavailable, match="explicit business scope"):
+    with pytest.raises(ReadUnavailable, match="explicit business scope"):
         read_input("risk", "RISK_RULES", scope={}, risk_config={})
 
 
@@ -190,7 +190,7 @@ def test_disabled_actual_cli_entries_stop_before_provider(name, kwargs):
     from ats.runtime import cli
 
     co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
-    with pytest.raises(RouteUnavailable, match="disabled"):
+    with pytest.raises(ReadUnavailable, match="disabled"):
         getattr(cli, name)(**kwargs)
 
 
@@ -214,7 +214,7 @@ def test_actual_cli_checks_scoped_target_before_provider_and_clears_context(
     assert cli.run_technical_review(read_scope=scope) == 0
     assert calls == [identity] and rr.current_read_context() is None
     monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "ineligible"})
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         cli.run_technical_review(read_scope=scope)
     assert len(calls) == 1
 
@@ -224,7 +224,7 @@ def test_information_cli_obeys_its_configured_portfolio_contract(
         tmp_path, monkeypatch, record_property, request_kind):
     """Fake business leaf, real CLI/scope guard; never calls a model or collector."""
     from ats.runtime import cli
-    from ats.workflow.scoped_routes import canonical_json
+    from ats.workflow.read_scope import canonical_json
 
     config = tmp_path / "entry-config"
     config.mkdir()
@@ -253,7 +253,7 @@ def test_information_cli_obeys_its_configured_portfolio_contract(
             if request_kind == "portfolio_disabled":
                 co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
             reason = "disabled" if request_kind == "portfolio_disabled" else "does not match business request"
-            with pytest.raises(RouteUnavailable, match=reason):
+            with pytest.raises(ReadUnavailable, match=reason):
                 cli.run_information_pass(use_llm=False, ingest_research=False,
                                          read_scope=who.scope, read_as_of=POINT)
             assert calls == [] and store.conn.total_changes == before
@@ -309,7 +309,7 @@ def test_actual_dispatcher_rechecks_before_saved_result_reuse(tmp_path, syntheti
     assert dispatcher.dispatch(business_plan).status == "complete"
     assert calls == [identity]
     monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "ineligible"})
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         dispatcher.dispatch(business_plan)
     assert calls == [identity]
 
@@ -323,7 +323,7 @@ def test_actual_owned_workflow_gates_before_trigger_claim(tmp_path, monkeypatch)
         "workflows": {"technical-review": {"mode": "shadow", "task_ids": ["technical-review"]}}})
     monkeypatch.setenv("ATS_SHADOW_DB_PATH", str(tmp_path / "shadow.sqlite"))
     co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
-    with pytest.raises(RouteUnavailable, match="disabled"):
+    with pytest.raises(ReadUnavailable, match="disabled"):
         ownership.run_owned_workflow("technical-review", scope=business_plan.request_scope,
                                      trigger=TriggerContext(kind="manual", workflow_id="technical-review"),
                                      request={"requested_tasks": ["technical-review"], "as_of": POINT},
@@ -441,7 +441,7 @@ def test_native_isolated_candidate_read_does_not_require_production_qualificatio
 def test_partial_isolation_cannot_read_production_or_claim_candidate_permission(tmp_path, monkeypatch):
     with isolated_run("partial", root=tmp_path / "isolation"):
         monkeypatch.setenv("ATS_DATA_DB_PATH", str(tmp_path / "production.sqlite"))
-        with pytest.raises(RouteUnavailable, match="environment is incomplete"):
+        with pytest.raises(ReadUnavailable, match="environment is incomplete"):
             rr.gate_read(entity("risk"))
         assert not (tmp_path / "production.sqlite").exists()
 
@@ -450,7 +450,7 @@ def test_configuration_drift_does_not_reinterpret_frozen_plan_scope(tmp_path):
     business_plan = plan(tmp_path)
     before = rr.task_identity(business_plan, business_plan.tasks[0])
     (tmp_path / "config/pead.yaml").write_text("targets: [NVDA]\n")
-    with pytest.raises(RouteUnavailable, match="configuration drifted"):
+    with pytest.raises(ReadUnavailable, match="configuration drifted"):
         rr.task_identity(business_plan, business_plan.tasks[0])
     assert before.scope["entities"] == ["AMD"]
 

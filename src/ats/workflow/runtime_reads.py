@@ -15,13 +15,15 @@ from uuid import uuid4
 
 from ats.workflow.evaluation_clock import now as evaluation_now
 
-from .cutover_routing import RouteUnavailable, _consumer_contract, read_route
-from .scoped_routes import RouteIdentity
+from .cutover_routing import read_route
+
+from .read_scope import ReadUnavailable, consumer_contract
+from .read_scope import ReadScope
 
 
 @dataclass(frozen=True)
 class ReadContext:
-    identity: RouteIdentity
+    identity: ReadScope
     mode: str
     publication_path: str = ""
     route: str = "legacy"
@@ -46,37 +48,37 @@ def current_read_context():
 
 def business_identity(consumer, *, kind, scope_id, entities, as_of=None, explicit=None,
                       event_id="", event_version="", purpose=None):
-    contract = _consumer_contract(consumer)
+    contract = consumer_contract(consumer)
     point = as_of or evaluation_now(UTC)
     point = datetime.fromisoformat(point) if isinstance(point, str) else point
     if point.tzinfo is None:
-        raise RouteUnavailable("business as_of requires a timezone")
+        raise ReadUnavailable("business as_of requires a timezone")
     scope = {"kind": kind, "id": scope_id, "entities": sorted(set(entities)),
              "time_range": {"start": point.isoformat(), "end": point.isoformat()}}
     if event_id or event_version:
         scope.update(event_id=event_id, event_version=event_version)
     if explicit is not None:
-        supplied = explicit.as_row() if isinstance(explicit, RouteIdentity) else explicit
+        supplied = explicit.as_row() if isinstance(explicit, ReadScope) else explicit
         if "scope" in supplied:
             if any(supplied.get(k) != v for k, v in (
                     ("domain_id", contract["domain_id"]), ("consumer_id", consumer),
                     ("contract_version", contract["contract_version"]))):
-                raise RouteUnavailable("requested read contract mismatch")
+                raise ReadUnavailable("requested read contract mismatch")
             supplied = supplied["scope"]
-        identity = RouteIdentity(contract["domain_id"], consumer,
+        identity = ReadScope(contract["domain_id"], consumer,
                                  contract["contract_version"], supplied)
         actual = identity.scope
         from .invocation_bindings import matches
-        point_identity = RouteIdentity(contract["domain_id"], consumer, contract["contract_version"], scope)
+        point_identity = ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope)
         if (identity.scope.get("time_policy") != "per_invocation" and
                 any(actual.get(k) != scope.get(k) for k in ("kind", "id", "entities", "event_id", "event_version"))
                 or identity.scope.get("time_policy") == "per_invocation" and
                 not matches(point_identity, identity, purpose=purpose or consumer)):
-            raise RouteUnavailable("requested read scope does not match business request")
+            raise ReadUnavailable("requested read scope does not match business request")
         from .read_windows import check_time
         check_time(identity, point)
         return identity
-    return RouteIdentity(contract["domain_id"], consumer, contract["contract_version"], scope)
+    return ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope)
 
 
 def gate_read(identity):
@@ -85,14 +87,14 @@ def gate_read(identity):
     try:
         assert_scope_open(identity)
     except CutoverError as exc:
-        raise RouteUnavailable(str(exc)) from exc
+        raise ReadUnavailable(str(exc)) from exc
     if os.environ.get("ATS_RUN_MODE") == "isolated":
         from ..execution.broker_write_guard import startup
         from .isolation import verified_isolation_root
 
         startup(caller="business_read_gate", mode="isolated")
         if verified_isolation_root() is None:
-            raise RouteUnavailable("isolated read environment is incomplete")
+            raise ReadUnavailable("isolated read environment is incomplete")
     current = current_read_context()
     if current and current.identity == identity:
         from . import cutover as plane
@@ -100,7 +102,7 @@ def gate_read(identity):
         from .scoped_routes import resolve_route
         if (epoch(identity) != current.joint_epoch or
                 resolve_route(plane.PROJECTION_READ, identity)["generation"] != current.read_generation):
-            raise RouteUnavailable("bound worker read authority changed")
+            raise ReadUnavailable("bound worker read authority changed")
     if current and current.identity == identity and current.invocation:
         from .invocation_bindings import recheck
         recheck(identity, current.invocation)
@@ -124,39 +126,39 @@ def guard_input(consumer, query, *, as_of=None, business_scope=None):
     """Recheck the bound business identity before a native input can serve data."""
     current = current_read_context()
     if current and current.identity.consumer_id != consumer:
-        raise RouteUnavailable("input consumer escapes bound business request")
+        raise ReadUnavailable("input consumer escapes bound business request")
     if current:
         identity = current.identity
         if business_scope is not None:
-            supplied = business_scope.as_row() if isinstance(business_scope, RouteIdentity) else business_scope
+            supplied = business_scope.as_row() if isinstance(business_scope, ReadScope) else business_scope
             supplied = supplied.get("scope", supplied)
-            candidate = RouteIdentity(identity.domain_id, consumer, identity.contract_version, supplied)
+            candidate = ReadScope(identity.domain_id, consumer, identity.contract_version, supplied)
             if candidate != identity:
-                raise RouteUnavailable("input business scope escapes bound request")
+                raise ReadUnavailable("input business scope escapes bound request")
     elif business_scope is not None:
-        supplied = business_scope.as_row() if isinstance(business_scope, RouteIdentity) else business_scope
+        supplied = business_scope.as_row() if isinstance(business_scope, ReadScope) else business_scope
         scope = supplied.get("scope", supplied)
         identity = business_identity(consumer, kind=scope["kind"], scope_id=scope["id"],
                                      entities=scope["entities"], as_of=as_of, explicit=supplied)
     else:
-        raise RouteUnavailable("native input requires an explicit business scope or bound entry")
+        raise ReadUnavailable("native input requires an explicit business scope or bound entry")
     entities = query.get("entities") or ([query["entity"]] if query.get("entity") else [])
     if current is None and identity.scope.get("time_policy") == "per_invocation":
         from .isolation import verified_isolation_root
         if verified_isolation_root() is None:
-            raise RouteUnavailable("persistent native input requires a bound invocation")
+            raise ReadUnavailable("persistent native input requires a bound invocation")
     actual_scope = (current.invocation["actual_identity"]["scope"]
                     if current and current.invocation else identity.scope)
     if not set(entities) <= set(actual_scope["entities"]):
-        raise RouteUnavailable("input entity escapes bound business scope")
+        raise ReadUnavailable("input entity escapes bound business scope")
     if actual_scope.get("kind") == "decision" and query.get("cycle_id") is not None and str(query["cycle_id"]) != actual_scope["id"]:
-        raise RouteUnavailable("input cycle escapes bound business scope")
+        raise ReadUnavailable("input cycle escapes bound business scope")
     if as_of is not None:
         point = as_of.astimezone(UTC).isoformat()
         expected = (current.cutoff.isoformat() if current and current.cutoff else
                     as_of.astimezone(UTC).isoformat())
         if point != expected:
-            raise RouteUnavailable("input time escapes bound business scope")
+            raise ReadUnavailable("input time escapes bound business scope")
     decision = gate_read(identity)
     if decision.route != "target":
         from .isolation import verified_isolation_root
@@ -165,7 +167,7 @@ def guard_input(consumer, query, *, as_of=None, business_scope=None):
         # The native API has no legacy implementation: it must not silently serve
         # target data just because the old business route is still allowed.
         if verified_isolation_root() is None:
-            raise RouteUnavailable("native target input requires an enabled exact business scope")
+            raise ReadUnavailable("native target input requires an enabled exact business scope")
     return decision
 
 
@@ -195,13 +197,13 @@ def bind_read(identity, *, as_of=None, mode=None, publication_path="", fallback_
     if parent and parent.identity == identity:
         cutoff = parent.cutoff
         if as_of is not None and check_time(identity, as_of) != cutoff:
-            raise RouteUnavailable("nested entry cannot change invocation as_of")
+            raise ReadUnavailable("nested entry cannot change invocation as_of")
     else:
         cutoff = check_time(identity, as_of if as_of is not None else
                             end if window and start == end else evaluation_now(UTC))
     try:
         decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
-    except RouteUnavailable as exc:
+    except ReadUnavailable as exc:
         from .read_recovery import ReadStopped
 
         if isinstance(exc, ReadStopped):
@@ -212,7 +214,7 @@ def bind_read(identity, *, as_of=None, mode=None, publication_path="", fallback_
         from .cutover_routing import RouteDecision
 
         if not isinstance(fallback_input, InternalFallback):
-            raise RouteUnavailable("actual fallback adapter required")
+            raise ReadUnavailable("actual fallback adapter required")
         fallback_input = fallback_input.prepare(identity)  # Proof and actual readable data.
         decision = RouteDecision(identity.consumer_id, identity.domain_id,
                                  identity.contract_version, identity.scope, fallback_input.route)
@@ -224,7 +226,7 @@ def bind_read(identity, *, as_of=None, mode=None, publication_path="", fallback_
     if policy and policy["stopped"]:
         raise ReadStopped("scope stopped before context binding")
     if epoch(identity)!=joint_epoch or resolve_route(plane.PROJECTION_READ, identity)["generation"] != read_generation:
-        raise RouteUnavailable("joint authority changed during worker binding")
+        raise ReadUnavailable("joint authority changed during worker binding")
     deployment = None
     if identity.scope.get("time_policy") == "per_invocation":
         from .read_windows import _deployment
@@ -233,21 +235,21 @@ def bind_read(identity, *, as_of=None, mode=None, publication_path="", fallback_
         deployment = evidence["deployment"]
         if parent and parent.identity == identity:
             if invocation is not None and invocation != parent.invocation:
-                raise RouteUnavailable("nested entry cannot change invocation binding")
+                raise ReadUnavailable("nested entry cannot change invocation binding")
             invocation = parent.invocation
         if invocation is None:
             if identity.scope.get("event_rule") or identity.scope.get("invocation_rule"):
-                raise RouteUnavailable("explicit dynamic invocation binding required")
+                raise ReadUnavailable("explicit dynamic invocation binding required")
             scope = {k: v for k, v in identity.scope.items() if k not in
                      {"time_policy", "deployment_purpose"}}
             scope["time_range"] = {"start": cutoff.isoformat(), "end": cutoff.isoformat()}
-            actual = RouteIdentity(identity.domain_id, identity.consumer_id, identity.contract_version, scope)
+            actual = ReadScope(identity.domain_id, identity.consumer_id, identity.contract_version, scope)
             invocation = build_invocation(identity, actual, workflow=deployment["workflow"],
                 as_of=cutoff, purpose=identity.scope.get("deployment_purpose", identity.consumer_id),
                 run_id="read:" + uuid4().hex)
         recheck(identity, invocation)
         if invocation["workflow"] != deployment["workflow"] or invocation["as_of"] != cutoff.isoformat():
-            raise RouteUnavailable("invocation workflow or cutoff differs from committed permission")
+            raise ReadUnavailable("invocation workflow or cutoff differs from committed permission")
     context = ReadContext(identity, mode or os.environ.get("ATS_RUN_MODE", "production"),
                           str(publication_path), decision.route, cutoff, fallback_input,
                           policy["event_id"] if policy else 0,
@@ -290,7 +292,7 @@ def configured_entities(kind, scope_id, *, sector="", config_dir=None):
                 symbols += [cfg[k] for k in ("sector_etf", "benchmark") if cfg.get(k)]
             matches.append(sorted(set(symbols)))
         if len(matches) != 1 or not matches[0]:
-            raise RouteUnavailable(f"business {kind} scope is empty or ambiguous: {scope_id}")
+            raise ReadUnavailable(f"business {kind} scope is empty or ambiguous: {scope_id}")
         return matches[0]
     cfg = load_yaml(root / "pead.yaml") or {}
     return [str(s).upper() for s in cfg.get("targets", [])]
@@ -316,7 +318,7 @@ def task_identity(plan, task):
     for relative, expected in plan.source_config_hashes.items():
         source = root / relative.removeprefix("config/")
         if not source.is_file() or _file_hash(source) != expected:
-            raise RouteUnavailable(f"business plan configuration drifted: {relative}")
+            raise ReadUnavailable(f"business plan configuration drifted: {relative}")
     consumer = {"layer-review": "layer", "sector-review": "sector",
                 "information-brief": "information", "fundamental-routine": "fundamental",
                 "fundamental-event": "fundamental", "macro-review": "macro",
@@ -331,7 +333,7 @@ def task_identity(plan, task):
     if plan.trigger.get("kind") == "event":
         actual = (plan.trigger["event_id"], str(plan.trigger["event_version"]))
         if (event_id and event_id != actual[0]) or (event_version and str(event_version) != actual[1]):
-            raise RouteUnavailable("task Event metadata differs from actual trigger")
+            raise ReadUnavailable("task Event metadata differs from actual trigger")
         event_id, event_version = actual
     return business_identity(consumer, kind=task.scope.kind, scope_id=task.scope.id or "portfolio",
                              entities=entities, as_of=plan.as_of, explicit=explicit,
@@ -358,10 +360,10 @@ def check_plan_reads(plan, *, collect=False):
                 actual = recheck(identity, binding)
                 expected = task_identity(replace_plan_without_bindings(plan), task)
                 if actual != expected or binding["run_id"] != plan.run_id:
-                    raise RouteUnavailable("frozen plan invocation scope/run differs")
+                    raise ReadUnavailable("frozen plan invocation scope/run differs")
                 assert_current(identity, workflow=plan.trigger["workflow_id"])
             gate_read(identity)
-        except RouteUnavailable as exc:
+        except ReadUnavailable as exc:
             if not collect:
                 raise
             refused[task.instance_key] = str(exc)
@@ -452,16 +454,16 @@ def scoped_read(consumer):
                 if requested_mode is None:
                     requested_mode = "event" if "event" in function.__module__ or "event" in function.__name__ else "routine"
                 if requested_mode not in {"routine", "event"}:
-                    raise RouteUnavailable("unsupported Fundamental invocation mode")
+                    raise ReadUnavailable("unsupported Fundamental invocation mode")
                 purpose = "fundamental-" + requested_mode
             if current and current.identity.consumer_id == consumer and explicit is None:
                 if current.invocation and current.invocation["purpose"] != purpose:
-                    raise RouteUnavailable("nested entry purpose escapes bound invocation")
+                    raise ReadUnavailable("nested entry purpose escapes bound invocation")
                 if consumer == "clerk" and current.invocation and current.invocation["query_window"] != _clerk_query_window(values, as_of or current.cutoff):
-                    raise RouteUnavailable("Clerk query window escapes bound invocation")
+                    raise ReadUnavailable("Clerk query window escapes bound invocation")
                 scope = current.identity.scope
                 if scope["kind"] != kind or scope["id"] != scope_id or scope["entities"] != sorted(set(entities)):
-                    raise RouteUnavailable("nested business request escapes bound scope")
+                    raise ReadUnavailable("nested business request escapes bound scope")
                 identity = current.identity
                 binding = current.invocation
                 as_of = as_of or current.cutoff
@@ -472,7 +474,7 @@ def scoped_read(consumer):
                     from .invocation_bindings import invocation
                     point = business_identity(consumer, kind=kind, scope_id=scope_id, entities=entities, as_of=as_of)
                     workflow = purpose
-                    stable_requested = explicit and ((explicit.scope if isinstance(explicit, RouteIdentity)
+                    stable_requested = explicit and ((explicit.scope if isinstance(explicit, ReadScope)
                         else explicit.get("scope", explicit)).get("time_policy") == "per_invocation")
                     if stable_requested or (explicit is None and has_persistent_binding(point, purpose=purpose)):
                         identity = select(point, workflow=workflow, as_of=as_of, explicit=explicit, purpose=purpose)
@@ -524,7 +526,7 @@ def cli_read_request(function):
             elif value.startswith("--read-scope-json="):
                 supplied = json.loads(value.split("=", 1)[1])
         if not isinstance(supplied, dict):
-            raise RouteUnavailable("read scopes must be an object keyed by consumer")
+            raise ReadUnavailable("read scopes must be an object keyed by consumer")
         token = _REQUESTS.set(supplied)
         try:
             return function(argv)

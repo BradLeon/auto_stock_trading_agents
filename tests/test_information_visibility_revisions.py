@@ -200,11 +200,11 @@ def test_bound_extractor_uses_native_scope_instead_of_corpus_scan(monkeypatch):
 
 def test_extractor_cannot_read_under_another_roles_bound_context(monkeypatch):
     from ats.agents.information import assemble
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     context = SimpleNamespace(identity=SimpleNamespace(consumer_id="fundamental", scope={"entities": ["MSFT"]}))
     monkeypatch.setattr("ats.workflow.runtime_reads.current_read_context", lambda: context)
-    with pytest.raises(RouteUnavailable, match="consumer escapes"):
+    with pytest.raises(ReadUnavailable, match="consumer escapes"):
         assemble.admitted_articles(object(), since=NOW-timedelta(days=1))
 
 

@@ -168,7 +168,7 @@ def test_actuals_model_flagging_a_foreign_document_blocks_the_review(monkeypatch
     from ats.agents.pead import score
     from ats.agents.pead.outputs import ActualsView
     from ats.schemas.pead import PeadConfig
-    from ats.workflow.cutover_routing import RouteUnavailable
+    from ats.workflow.read_scope import ReadUnavailable
 
     view = ActualsView.model_validate({
         "reported_eps": 4.13, "metrics": [{"dim_key": "revenue", "actual": "$77.7B"}],
@@ -179,7 +179,7 @@ def test_actuals_model_flagging_a_foreign_document_blocks_the_review(monkeypatch
     with pytest.raises(score.DocumentIdentityMismatch) as caught:
         score.extract_actuals(config, None, "estee lauder call", "financials",
                               datetime(2026, 11, 4, tzinfo=timezone.utc), f"tavily:{ESTEE}")
-    assert isinstance(caught.value, RouteUnavailable)
+    assert isinstance(caught.value, ReadUnavailable)
     assert "Estée Lauder" in str(caught.value)
 
 

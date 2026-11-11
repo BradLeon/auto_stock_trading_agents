@@ -34,7 +34,8 @@ from ats.workflow.consumer_reads import (
     revoke_fallback,
     trace_reads,
 )
-from ats.workflow.cutover_routing import FallbackUnsafe, RouteUnavailable
+from ats.workflow.cutover_routing import FallbackUnsafe
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.isolation import isolated_run
 from ats.workflow.scoped_routes import transition_route
 
@@ -186,7 +187,7 @@ def test_emergency_disable_is_not_a_fallback_opportunity(isolated, tmp_path, mon
     identity = scope()
     activate(identity, tmp_path, monkeypatch)
     co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
-    with pytest.raises(RouteUnavailable, match="disabled"):
+    with pytest.raises(ReadUnavailable, match="disabled"):
         chief_state_entry(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
 
 
@@ -200,7 +201,7 @@ def test_actual_risk_node_blocks_before_account_or_dependent_execution(isolated,
     monkeypatch.setattr("ats.trader.portfolio.snapshot", forbidden)
     state = ChiefDecisionState(cycle_id="blocked-cycle", as_of=datetime.now(UTC), decide=False,
         decisions=[TradeDecision(symbol="COHR", action="buy", qty=1)])
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         chief.risk_gate(state, read_scope=identity.scope)
     assert isolated.conn.execute("SELECT COUNT(*) FROM decision_cycles").fetchone()[0] == 0
 
@@ -217,7 +218,7 @@ def test_actual_clerk_stops_next_step_after_read_revocation(isolated, tmp_path, 
         active[0] = False
         return {}
     monkeypatch.setattr(clerk, "_STEPS", {"first": first, "next": lambda *a, **k: calls.append("next")})
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         clerk_run(store=isolated, broker=object(), steps=("first", "next"), read_scope=identity.scope)
     assert calls == ["first"]
     assert isolated.conn.execute("SELECT status FROM clerk_runs").fetchone()[0] == "running"
@@ -229,7 +230,7 @@ def test_actual_read_rechecks_control_change_during_probe(isolated, tmp_path, mo
         co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="race")
         return {"value": 1}
     activate(identity, tmp_path, monkeypatch, reader=reader)
-    with pytest.raises(RouteUnavailable, match="changed during"):
+    with pytest.raises(ReadUnavailable, match="changed during"):
         consume_read(identity, target_reader=reader, legacy_reader=reader,
                      legacy_identifier="store.direct_trade_reads", usable=lambda v: True, refs=lambda v: ["state"])
 

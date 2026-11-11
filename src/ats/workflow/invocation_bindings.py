@@ -9,8 +9,8 @@ from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .cutover_routing import RouteUnavailable
-from .scoped_routes import RouteIdentity, canonical_json
+from .cutover_routing import ReadUnavailable
+from .scoped_routes import ReadScope, canonical_json
 
 
 def validate_policy(scope, consumer=None):
@@ -74,26 +74,26 @@ def event_proof(identity, actual, *, workflow, as_of, config_dir=None):
     root = Path(config_dir or os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
     digest = hashlib.sha256((root / "workflow/event_routes.yaml").read_bytes()).hexdigest()
     if digest != rule["config_sha256"]:
-        raise RouteUnavailable("approved Event rule configuration drifted")
+        raise ReadUnavailable("approved Event rule configuration drifted")
     with closing(sqlite3.connect(Path(platform_data_db_path()).resolve().as_uri()+"?mode=ro", uri=True)) as conn:
         conn.row_factory = sqlite3.Row
         row = conn.execute("SELECT * FROM schedule_events WHERE event_id=? AND valid_until=''",
                            (actual.scope.get("event_id"),)).fetchall()
         if len(row) != 1 or str(row[0]["event_version"]) != str(actual.scope.get("event_version")):
-            raise RouteUnavailable("Event version is not current")
+            raise ReadUnavailable("Event version is not current")
         if invocation_time(row[0]["valid_from"]) > invocation_time(as_of):
-            raise RouteUnavailable("Event version not visible at invocation cutoff")
+            raise ReadUnavailable("Event version not visible at invocation cutoff")
         event = ScheduleCalendarStore._event_dict(conn, row[0])
     if event.get("quality_status") != "ok":
-        raise RouteUnavailable("Event source quality is not admitted")
+        raise ReadUnavailable("Event source quality is not admitted")
     materials = [{**item, "status": "admitted"} for confirmation in event.get("release_confirmations", [])
                  for item in confirmation.get("materials", [])]
     route = resolve_event_route(event, materials=materials, config_dir=root)
     if route.route_kind != rule["route_kind"] or workflow not in route.workflow_ids:
-        raise RouteUnavailable("Event is outside approved route/workflow")
+        raise ReadUnavailable("Event is outside approved route/workflow")
     entity = str(event.get("payload", {}).get("entity") or event.get("entity") or "").upper()
     if route.scope_resolver == "event_entity" and (not entity or entity not in actual.scope["entities"]):
-        raise RouteUnavailable("Event entity escapes invocation scope")
+        raise ReadUnavailable("Event entity escapes invocation scope")
     return {"event_id": route.event_id, "event_version": route.event_version,
             "route_kind": route.route_kind, "source_refs": event.get("sources", []),
             "publication_at": event["valid_from"], "config_sha256": digest}
@@ -103,13 +103,13 @@ def invocation(identity, actual, *, workflow, as_of, purpose, run_id="", plan_ha
     from .read_windows import check_time
     cutoff = check_time(identity, as_of).isoformat()
     if not matches(actual, identity, purpose=purpose):
-        raise RouteUnavailable("invocation escapes explicit deployment mapping")
+        raise ReadUnavailable("invocation escapes explicit deployment mapping")
     window = query_window or actual.scope["time_range"]
     if set(window) != {"start", "end"}:
-        raise RouteUnavailable("query window requires start/end")
+        raise ReadUnavailable("query window requires start/end")
     from .read_windows import invocation_time
     if not invocation_time(window["start"]) <= invocation_time(window["end"]) <= invocation_time(as_of):
-        raise RouteUnavailable("query window escapes invocation cutoff")
+        raise ReadUnavailable("query window escapes invocation cutoff")
     return {"version": "phase-f-invocation-v1", "deployment_identity": identity.as_row(),
             "actual_identity": actual.as_row(), "workflow": workflow, "purpose": purpose,
             "as_of": cutoff, "query_window": window, "run_id": run_id,
@@ -119,13 +119,13 @@ def invocation(identity, actual, *, workflow, as_of, purpose, run_id="", plan_ha
 
 def recheck(identity, binding):
     if not binding or binding.get("version") != "phase-f-invocation-v1" or binding.get("deployment_identity") != identity.as_row():
-        raise RouteUnavailable("exact invocation binding missing")
-    actual = RouteIdentity(**binding["actual_identity"])
+        raise ReadUnavailable("exact invocation binding missing")
+    actual = ReadScope(**binding["actual_identity"])
     expected = invocation(identity, actual, workflow=binding["workflow"], as_of=binding["as_of"],
         purpose=binding["purpose"], run_id=binding["run_id"], plan_hash=binding["plan_hash"],
         config_dir=binding.get("config_dir") or None, query_window=binding.get("query_window"))
     if expected != binding:
-        raise RouteUnavailable("invocation binding or Event proof changed")
+        raise ReadUnavailable("invocation binding or Event proof changed")
     return actual
 
 

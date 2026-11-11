@@ -18,7 +18,8 @@ from ats.workflow.consumer_reads import (
     revoke_fallback,
     trace_reads,
 )
-from ats.workflow.scoped_routes import RouteIdentity, resolve_route, route_history
+from ats.workflow.scoped_routes import resolve_route, route_history
+from ats.workflow.read_scope import ReadScope
 
 
 def register(identity, tmp_path, strategy="stop", reader=None, target=None):
@@ -67,7 +68,7 @@ def test_new_version_actual_state_read_is_qualified_once_returned_and_traced(iso
     identity = scope()
     seed_performance(isolated)
     activate(identity, tmp_path, monkeypatch)
-    target = RouteIdentity(identity.domain_id, identity.consumer_id, "accepted-contract", identity.scope)
+    target = ReadScope(identity.domain_id, identity.consumer_id, "accepted-contract", identity.scope)
     calls = []
     def reader():
         calls.append("new")
@@ -97,7 +98,7 @@ def test_new_version_failure_latches_stop_without_old_fallback(isolated, tmp_pat
     identity = scope()
     seed_performance(isolated)
     activate(identity, tmp_path, monkeypatch)
-    target = RouteIdentity(identity.domain_id, identity.consumer_id, "accepted-contract", identity.scope)
+    target = ReadScope(identity.domain_id, identity.consumer_id, "accepted-contract", identity.scope)
     def reader():
         if failure == "unreadable":
             raise RuntimeError("new version failed")

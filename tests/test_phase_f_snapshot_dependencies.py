@@ -13,7 +13,7 @@ from ats.execution.authorization import build_authorization, validate_authorizat
 from ats.workflow import cutover as plane
 from ats.workflow import runtime_reads as reads
 from ats.workflow import scoped_routes as scopes
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.isolation import verified_isolation_root
 
 business_inputs=_business_inputs
@@ -77,7 +77,7 @@ def test_actual_unbound_callback_and_authorization_recheck_frozen_dependencies(r
             expected_generation=1,actor='fixture',reason='dependency changed',mode='isolated',
             fallback=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-selected-route'})
     else: policy(s.who,verified_isolation_root())
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         s.repo.record_approval(approval_id='late',cycle_id='dependent',revision_no=s.revision['revision_no'],
             decision_hash=s.revision['decision_hash'],decision='approved',reviewer='fixture',idempotency_key='late')
     reasons=validate_authorization(s.repo,s.auth,snapshot_as_of=datetime.now(UTC),
@@ -100,7 +100,7 @@ def test_actual_unbound_callback_and_authorization_recheck_frozen_dependencies(r
     assert {t:[dict(r) for r in s.store.conn.execute('SELECT * FROM '+t)] for t in before}==before
     assert s.repo.read_chain('dependent')['has_execution_approval']
     # No consumer-wide/global stop: unrelated business scope remains readable.
-    unrelated=scopes.RouteIdentity(s.who.domain_id,s.who.consumer_id,s.who.contract_version,
+    unrelated=scopes.ReadScope(s.who.domain_id,s.who.consumer_id,s.who.contract_version,
         {**s.who.scope,'id':'NVDA','entities':['NVDA']})
     assert reads.gate_read(unrelated).route=='legacy'
     record_property('actual_snapshot_dependency_rejection',json.dumps({'root':str(verified_isolation_root()),
@@ -305,7 +305,7 @@ def test_multi_routine_member_damage_refuses_chief(multi_routine_basis, damage):
         column, value = columns[damage]
         s.store.conn.execute('UPDATE task_projection_envelopes SET '+column+'=? WHERE projection_id=?',(value,ref))
         s.store.conn.commit()
-    with pytest.raises((RouteUnavailable, ValueError)):
+    with pytest.raises((ReadUnavailable, ValueError)):
         dr.validate_chief(s.store, basis, at=datetime.fromisoformat(s.plan.as_of))
 
 
@@ -337,9 +337,9 @@ def test_standalone_frozen_routine_rechecks_terminal_producer_before_use(multi_r
         s.store.conn.execute('UPDATE task_projection_envelopes SET agent_run_id=? WHERE projection_id=?',
             ('missing-producer', row['projection_id']))
     s.store.conn.commit()
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         dr.validate_chief(s.store, basis, at=at)
-    with pytest.raises((RouteUnavailable, ValueError)):
+    with pytest.raises((ReadUnavailable, ValueError)):
         repository.record_approval(approval_id='late-refused', cycle_id='late-producer',
             revision_no=revision['revision_no'], decision_hash=revision['decision_hash'], decision='approved',
             reviewer='fixture-human', idempotency_key='late-refused')

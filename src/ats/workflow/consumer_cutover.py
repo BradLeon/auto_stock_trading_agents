@@ -87,13 +87,13 @@ def _target(path) -> Path:
 
 
 def _contract(consumer_id: str) -> dict[str, Any]:
-    from .cutover_routing import _consumer_contract
+    from .cutover_routing import consumer_contract
 
     if consumer_id not in CONSUMERS:
         raise ConsumerCutoverError(
             f"{consumer_id!r} is not a consumer-wide read consumer (research: "
             f"{', '.join(RESEARCH_CONSUMERS)}; decision and trading: {', '.join(DECISION_CONSUMERS)})")
-    return _consumer_contract(consumer_id)
+    return consumer_contract(consumer_id)
 
 
 def lookup(conn: sqlite3.Connection, boundary: str, identity) -> dict[str, Any] | None:

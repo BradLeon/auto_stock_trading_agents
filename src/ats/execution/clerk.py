@@ -210,11 +210,11 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
             with bound_store(store):
                 results[step] = impl(store, broker=broker, dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001 - one failed step must not
-            from ..workflow.cutover_routing import RouteUnavailable
+            from ..workflow.read_scope import ReadUnavailable
             from ..workflow.cutover_wiring import BoundaryWriteRefused
             from .trade_publication import TradePublicationRefused
 
-            if isinstance(exc, (TradePublicationRefused, BoundaryWriteRefused, RouteUnavailable)):
+            if isinstance(exc, (TradePublicationRefused, BoundaryWriteRefused, ReadUnavailable)):
                 raise
             # Ordinary unavailable steps remain recoverable; publication violations stop.
             log.exception("clerk step %s failed", step)

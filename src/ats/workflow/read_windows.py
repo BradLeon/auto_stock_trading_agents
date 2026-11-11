@@ -13,14 +13,14 @@ from datetime import UTC, datetime
 
 from . import cutover as plane
 from . import joint_cutover as joint
-from .cutover_routing import RouteUnavailable
-from .scoped_routes import RouteIdentity
+from .cutover_routing import ReadUnavailable
+from .scoped_routes import ReadScope
 
 
 def invocation_time(value):
     point = datetime.fromisoformat(value) if isinstance(value, str) else value
     if not isinstance(point, datetime) or point.tzinfo is None:
-        raise RouteUnavailable("business as_of requires a timezone")
+        raise ReadUnavailable("business as_of requires a timezone")
     return point.astimezone(UTC)
 
 
@@ -30,7 +30,7 @@ def check_time(identity, as_of):
         return point
     window = identity.scope["time_range"]
     if not datetime.fromisoformat(window["start"]) <= point <= datetime.fromisoformat(window["end"]):
-        raise RouteUnavailable("business as_of is outside authorized window")
+        raise ReadUnavailable("business as_of is outside authorized window")
     return point
 
 
@@ -47,21 +47,21 @@ def _deployment(identity, *, workflow=None, path=None):
             (plane.PROJECTION_READ, identity.key),
         ).fetchone()
         if row is None or row["route"] != plane.ROUTE_TARGET or json.loads(row["identity_json"]) != identity.as_row():
-            raise RouteUnavailable("authorized target read window is not active")
+            raise ReadUnavailable("authorized target read window is not active")
         history = conn.execute(
             "SELECT * FROM scoped_cutover_history WHERE boundary=? AND identity_key=? AND generation=?",
             (plane.PROJECTION_READ, identity.key, row["generation"]),
         ).fetchall()
         if len(history) != 1 or not history[0]["reason"].startswith("joint:"):
-            raise RouteUnavailable("read window lacks an exact committed deployment")
+            raise ReadUnavailable("read window lacks an exact committed deployment")
         evidence = json.loads(history[0]["evidence_json"])
         operation = conn.execute("SELECT * FROM joint_cutover_operations WHERE batch_id=?",
             (history[0]["reason"].removeprefix("joint:"),)).fetchone()
         if operation is None or operation["state"] != "committed":
-            raise RouteUnavailable("read window deployment is not committed")
+            raise ReadUnavailable("read window deployment is not committed")
         request = joint._validate(json.loads(operation["request_json"]))
         if workflow is not None and request["workflow"] != workflow:
-            raise RouteUnavailable("read window belongs to another workflow")
+            raise ReadUnavailable("read window belongs to another workflow")
         member = next((m for m in request["members"] if m["boundary"] == plane.PROJECTION_READ
                        and m["identity"] == identity.as_row()), None)
         auth = evidence["authorization"]
@@ -69,7 +69,7 @@ def _deployment(identity, *, workflow=None, path=None):
                 or member["expected_generation"] + 1 != row["generation"]
                 or auth.get("member") != member or auth.get("workflow") != request["workflow"]
                 or auth.get("valid") is not True):
-            raise RouteUnavailable("read window authorization/generation mismatch")
+            raise ReadUnavailable("read window authorization/generation mismatch")
     joint._authorization(auth, request, path, runtime=True)
     return {**evidence, "deployment": {"workflow": request["workflow"],
         "batch_id": request["batch_id"], "permission": auth["reference"],
@@ -89,10 +89,10 @@ def assert_current(identity, *, workflow=None, path=None):
         evidence = _deployment(identity, workflow=workflow, path=path)
         proof = evidence["report"]
         if proof.get("identity") != identity.as_row() or proof.get("valid") is not True:
-            raise RouteUnavailable("read window report identity mismatch")
+            raise ReadUnavailable("read window report identity mismatch")
         return evidence
     except (plane.CutoverError, sqlite3.Error, ValueError, KeyError, TypeError, OSError) as exc:
-        raise RouteUnavailable("read window authority refused: " + str(exc)) from exc
+        raise ReadUnavailable("read window authority refused: " + str(exc)) from exc
 
 
 def _consumer_wide_binding(identity, *, purpose=None, path=None):
@@ -111,7 +111,7 @@ def _consumer_wide_binding(identity, *, purpose=None, path=None):
             if conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_cutover_routes'").fetchone():
                 for row in conn.execute("SELECT identity_json FROM scoped_cutover_routes WHERE boundary=?",
                                         (plane.PROJECTION_READ,)):
-                    if _same_business(identity, RouteIdentity(**json.loads(row[0])), purpose=purpose):
+                    if _same_business(identity, ReadScope(**json.loads(row[0])), purpose=purpose):
                         return None
             wide = lookup(conn, plane.PROJECTION_READ, identity)
     except sqlite3.Error:
@@ -133,23 +133,23 @@ def select(identity, *, workflow, as_of, explicit=None, path=None, purpose=None,
             gate_read(wide)
             return wide
         if explicit is not None:
-            supplied = explicit.as_row() if isinstance(explicit, RouteIdentity) else explicit
-            who = RouteIdentity(**supplied) if "scope" in supplied else RouteIdentity(
+            supplied = explicit.as_row() if isinstance(explicit, ReadScope) else explicit
+            who = ReadScope(**supplied) if "scope" in supplied else ReadScope(
                 identity.domain_id, identity.consumer_id, identity.contract_version, supplied)
             candidates = [who] if _same_business(identity, who, purpose=purpose) else []
         else:
             with closing(joint._read(path)) as conn:
                 if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_cutover_routes'").fetchone():
-                    raise RouteUnavailable("workflow has no explicitly authorized read window")
+                    raise ReadUnavailable("workflow has no explicitly authorized read window")
                 candidates = []
                 for row in conn.execute("SELECT identity_json FROM scoped_cutover_routes WHERE boundary=?",
                                         (plane.PROJECTION_READ,)):
-                    who = RouteIdentity(**json.loads(row[0]))
+                    who = ReadScope(**json.loads(row[0]))
                     if not _same_business(identity, who, purpose=purpose):
                         continue
                     try:
                         check_time(who, as_of)
-                    except RouteUnavailable:
+                    except ReadUnavailable:
                         continue
                     # Only exact workflow registrations participate; revoked or
                     # stopped matching registrations still fail at admission.
@@ -159,7 +159,7 @@ def select(identity, *, workflow, as_of, explicit=None, path=None, purpose=None,
                             for m in json.loads(r["request_json"])["members"]) for r in rows):
                         candidates.append(who)
         if len(candidates) != 1:
-            raise RouteUnavailable("workflow read window is missing or ambiguous")
+            raise ReadUnavailable("workflow read window is missing or ambiguous")
         who = candidates[0]
         check_time(who, as_of)
         assert_current(who, workflow=workflow, path=path)
@@ -171,7 +171,7 @@ def select(identity, *, workflow, as_of, explicit=None, path=None, purpose=None,
         gate_read(who)
         return who
     except (sqlite3.Error, ValueError, KeyError, TypeError, OSError) as exc:
-        raise RouteUnavailable("workflow read window binding refused: " + str(exc)) from exc
+        raise ReadUnavailable("workflow read window binding refused: " + str(exc)) from exc
 
 
 def has_persistent_binding(identity, *, purpose, path=None):
@@ -180,7 +180,7 @@ def has_persistent_binding(identity, *, purpose, path=None):
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_cutover_routes'").fetchone():
             return False
         for row in conn.execute("SELECT identity_json FROM scoped_cutover_routes WHERE boundary=?", (plane.PROJECTION_READ,)):
-            who = RouteIdentity(**json.loads(row[0]))
+            who = ReadScope(**json.loads(row[0]))
             if who.scope.get("time_policy") == "per_invocation" and _same_business(identity, who, purpose=purpose):
                 return True
         return False
@@ -212,7 +212,7 @@ def bind_plan(plan):
             as_of=plan.as_of)
         bindings["chief:portfolio"] = select(point, workflow=workflow, as_of=plan.as_of,
             explicit=supplied.get("chief:portfolio"), purpose="chief", config_dir=plan.config_root or None).as_row()
-        who = RouteIdentity(**bindings["chief:portfolio"])
+        who = ReadScope(**bindings["chief:portfolio"])
         if who.scope.get("time_policy") == "per_invocation":
             from .invocation_bindings import invocation
             invocations["chief:portfolio"] = invocation(who, point, workflow=workflow,

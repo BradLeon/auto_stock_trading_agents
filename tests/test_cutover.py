@@ -38,9 +38,9 @@ def simulated_enforcement(monkeypatch):
 
 def _target_read(monkeypatch, **kwargs):
     """Exercise old fallback logic against an explicitly simulated target scope."""
-    from ats.workflow.scoped_routes import RouteIdentity
-    contract = cr._consumer_contract(kwargs['consumer_id'])
-    who = RouteIdentity(contract['domain_id'], kwargs['consumer_id'], contract['contract_version'],
+    from ats.workflow.read_scope import ReadScope
+    contract = cr.consumer_contract(kwargs['consumer_id'])
+    who = ReadScope(contract['domain_id'], kwargs['consumer_id'], contract['contract_version'],
         {'kind': 'portfolio', 'id': 'test', 'entities': ['AMD'],
          'time_range': {'start': '2026-10-07T00:00:00Z', 'end': '2026-10-08T00:00:00Z'}})
     monkeypatch.setattr('ats.workflow.scoped_routes.resolve_route', lambda *a, **k: {'route': 'target'})
@@ -492,7 +492,7 @@ def test_a_revoked_qualification_is_reported_as_ineligible(monkeypatch):
 
 def test_an_undeclared_consumer_is_an_error(monkeypatch):
     """A reader cannot be qualified for a consumer that is not declared."""
-    with pytest.raises(cr.RouteUnavailable, match="no contract"):
+    with pytest.raises(cr.ReadUnavailable, match="no contract"):
         _target_read(monkeypatch, consumer_id="not_a_consumer", target_boundary_active=True,
                       fallback_check=lambda: {"verdict": cr.FALLBACK_OK})
 
@@ -536,7 +536,7 @@ def test_assert_downstream_current_raises_with_every_reason(monkeypatch):
     monkeypatch.setattr("ats.data.assurance.qualification",
                         lambda **kwargs: {"status": "ineligible",
                                           "reasons": ["manifest_drift"]})
-    with pytest.raises(cr.RouteUnavailable) as excinfo:
+    with pytest.raises(cr.ReadUnavailable) as excinfo:
         cr.assert_downstream_current(consumer_id="macro",
                                      scope={"consumer": "macro"})
     assert "manifest_drift" in str(excinfo.value)

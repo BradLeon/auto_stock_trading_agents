@@ -318,7 +318,7 @@ def read_input(consumer: str, product: str, *, scope: dict, as_of: datetime | No
         gaps.append(f"input_unavailable:{type(exc).__name__}:{exc}")
     if status not in {"complete"} and not gaps:
         gaps.append("missing_or_partial_input")
-    from ..workflow.consumer_reads import record_read
+    from ..workflow.read_scope import record_read
 
     record_read(consumer, "ats.data.consumer_api.read_input", refs=refs, status=status,
                 product=product, source_as_of=stamps, scope=_json(scope), queried_at=queried_at.isoformat(),

@@ -240,7 +240,7 @@ def assert_runtime_startup(*, caller: str, path=None) -> dict[str, BoundaryState
     entry. A revoked scope must not turn this structural check into a global stop.
     """
     from contextlib import closing
-    from .scoped_routes import RouteIdentity, canonical_json
+    from .scoped_routes import ReadScope, canonical_json
 
     target = Path(path or default_cutover_db_path()).resolve()
     try:
@@ -256,7 +256,7 @@ def assert_runtime_startup(*, caller: str, path=None) -> dict[str, BoundaryState
             assert_compatible(states)
             if conn.execute("SELECT 1 FROM sqlite_master WHERE name='scoped_cutover_routes'").fetchone():
                 for row in conn.execute("SELECT * FROM scoped_cutover_routes"):
-                    who = RouteIdentity(**json.loads(row["identity_json"]))
+                    who = ReadScope(**json.loads(row["identity_json"]))
                     if (who.key != row["identity_key"] or row["identity_json"] != canonical_json(who.as_row())
                             or row["boundary"] not in SIX_BOUNDARIES or row["route"] not in VALID_ROUTES
                             or not isinstance(row["generation"], int) or row["generation"] < 1):

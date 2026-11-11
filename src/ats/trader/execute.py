@@ -242,7 +242,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     try:
         auth = ExecutionAuthorization.model_validate(authorization)
         stored = build_authorization(repo, cycle_id)
-        from ..workflow.consumer_reads import record_read
+        from ..workflow.read_scope import record_read
 
         record_read("trader", "ats.execution.authorization.build_authorization",
                     refs=[stored.decision_hash, stored.review_id, stored.approval_id],

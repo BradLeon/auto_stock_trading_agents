@@ -16,7 +16,7 @@ from ats.graph.chief_state import ChiefDecisionState
 from ats.runtime.cli import run_decision_graph
 from ats.schemas.decision import BossApproval
 from ats.schemas.portfolio import PortfolioSnapshot
-from ats.workflow.consumer_reads import trace_reads, read_projection
+from ats.workflow.read_scope import trace_reads, read_projection
 from ats.agent.task_projection import ProjectionScope
 
 

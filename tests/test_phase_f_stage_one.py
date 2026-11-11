@@ -11,26 +11,6 @@ import pytest
 from ats.config import REPO_ROOT
 
 
-
-def test_cached_probe_uses_invocation_time_and_never_window_end():
-    from ats.workflow.read_scope import ReadScope
-    from ats.workflow.read_scope import ReadUnavailable
-    probe_spec = importlib.util.spec_from_file_location("phase_f_cached_probe", REPO_ROOT / "scripts/verify_dataflow_qualification.py")
-    probe = importlib.util.module_from_spec(probe_spec)
-    probe_spec.loader.exec_module(probe)
-    who = ReadScope("runtime_market", "technical", "target-dataflow-v1", {
-        "kind": "entity", "id": "COHR", "entities": ["COHR"], "time_policy": "per_invocation"})
-    with pytest.raises(ValueError, match="independent"):
-        probe.probe_time(who)
-    assert probe.probe_time(who, "2026-10-10T03:00:00+00:00").isoformat() == "2026-10-10T03:00:00+00:00"
-    bounded = ReadScope(who.domain_id, who.consumer_id, who.contract_version, {
-        "kind": "entity", "id": "COHR", "entities": ["COHR"],
-        "time_range": {"start": "2026-10-10T02:00:00+00:00", "end": "2026-10-10T04:00:00+00:00"}})
-    assert probe.probe_time(bounded, "2026-10-10T03:00:00+00:00").hour == 3
-    with pytest.raises(ReadUnavailable, match="outside"):
-        probe.probe_time(bounded, "2026-10-10T05:00:00+00:00")
-
-
 def test_readonly_probe_empty_or_bad_broker_cannot_prove_availability(monkeypatch):
     from ats.execution import broker_write_guard as guard
     probe_spec = importlib.util.spec_from_file_location("phase_f_tws_probe", REPO_ROOT / "scripts/probe_phase_f_tws_readonly.py")

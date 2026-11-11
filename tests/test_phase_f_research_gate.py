@@ -144,21 +144,6 @@ print(json.dumps(rows))"""
     record_property("reopened_refs", result.stdout)
 
 
-def test_sector_exact_scope_qualification_rechecked_before_html(isolated, monkeypatch, tmp_path):
-    from test_phase_f_safe_reads import activate
-
-    from ats.workflow import runtime_reads as rr
-    now = datetime.now(UTC)
-    identity = rr.business_identity("sector", kind="sector", scope_id="ai_hardware",
-        entities=rr.configured_entities("sector","ai_hardware"),
-        explicit={"kind":"sector","id":"ai_hardware","entities":rr.configured_entities("sector","ai_hardware"),
-                  "time_range":{"start":(now-timedelta(minutes=5)).isoformat(),"end":(now+timedelta(minutes=5)).isoformat()}})
-    seed_research(isolated)
-    activate(identity, tmp_path, monkeypatch)
-    with pytest.raises(ReadUnavailable):
-        cli.main(["--read-scope-json",json.dumps({"sector":identity.scope}),"sector","html","ai_hardware"])
-
-
 def test_sector_legacy_report_reader_remains_compatible(isolated, monkeypatch):
     from ats.agents.sector import viz
     from ats.schemas.sector import SectorReview

@@ -82,11 +82,17 @@ def tick(point=None, *, manual=False):
         schedule_id="technical-review", scheduled_for=(point or datetime.now(UTC)-timedelta(seconds=1)).isoformat())
 
 
-def transfer(workflow, scope, owner, dispositions=None):
-    token = rt.freeze(workflow, scope, actor="drill", reason="explicit isolated handover")
-    inventory = rt.frozen_inventory(token)
-    rt.handover(token, to_owner=owner, dispositions=dispositions or {}, actor="drill", reason="fence tested")
-    return token, inventory
+def transfer(workflow, scope, owner):
+    """Move one scope to `owner` and bump its generation, as an owner switch does. The scope-level freeze/handover
+    protocol of the joint coordinator was retired (switch-trade r5 9.3); these tests only need the owner change."""
+    from contextlib import closing
+
+    with closing(rt._connect(write=True)) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        changed = conn.execute("UPDATE schedule_scope_owners SET owner=?, generation=generation+1 "
+                               "WHERE workflow=? AND scope=?", (owner, workflow, rt.canonical(scope))).rowcount
+        assert changed == 1
+        conn.commit()
 
 
 def plan(inputs, trigger, run_id):
@@ -123,69 +129,6 @@ def test_real_cli_dispatcher_dedup_and_rollback(business_inputs, isolated, monke
     assert len(isolated.task_projection_envelopes(agent_role="technical_review", scope_id="COHR")) == count
     record_property("authority", json.dumps(rt.snapshot()))
     record_property("actual_dispatch", json.dumps(completed.as_dict()))
-
-
-@pytest.mark.parametrize("disposition", ["carry_over", "void"])
-def test_actual_late_memory_publisher_fenced_with_worker_alive(business_inputs, isolated, disposition, record_property):
-    entered, release = Event(), Event()
-    context = tick()
-    errors = []
-    def late_worker():
-        def action():
-            with task_store_scope(isolated.path) as store:
-                entered.set()
-                assert release.wait(10)
-                envelope = build_envelope(role="technical_review", scope=ProjectionScope.model_validate(SCOPE),
-                    payload={"entity":"COHR","signal":"neutral","summary":"late old worker","levels":{"close":100}},
-                    as_of=datetime.now(UTC).isoformat())
-                store.save_task_projection_envelope(envelope)
-        try:
-            rt.execute("technical-review", SCOPE, context, action, actor="resident-old-worker")
-        except rt.ScheduleAuthorityError as exc:
-            errors.append(str(exc))
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        worker = pool.submit(late_worker)
-        assert entered.wait(10)
-        token = rt.freeze("technical-review", SCOPE, actor="operator", reason="retain running old worker")
-        inventory = rt.frozen_inventory(token)
-        assert len(inventory) == 1
-        with pytest.raises(rt.ScheduleAuthorityError, match="frozen"):
-            rt.execute("technical-review", SCOPE, tick(datetime.now(UTC)), lambda: pytest.fail("new claim executed"))
-        with pytest.raises(rt.ScheduleAuthorityError, match="each unfinished"):
-            rt.handover(token, to_owner="dispatcher", dispositions={}, actor="operator", reason="missing disposition")
-        with pytest.raises(rt.ScheduleAuthorityError, match="recorded completion"):
-            rt.handover(token, to_owner="dispatcher", dispositions={inventory[0]["key"]:{"kind":"already_run","reason":"unverified"}}, actor="operator", reason="invalid completion")
-        rt.handover(token, to_owner="dispatcher", dispositions={inventory[0]["key"]:{"kind":disposition,"reason":"explicit disposition"}}, actor="operator", reason="handover while old worker alive")
-        assert not worker.done()
-        release.set(); worker.result(timeout=10)
-    assert errors and "publication" in errors[0]
-    assert not isolated.task_projection_envelopes(agent_role="technical_review", scope_id="COHR")
-    assert any(row["action"] == "publication_refused" for row in rt.snapshot()["history"])
-    result=Dispatcher(workflow_store=WorkflowStore(str(isolated.path)),max_workers=1).dispatch(plan(business_inputs,context,"carry-or-void"))
-    assert result.complete == (disposition == "carry_over"),result.as_dict()
-    assert len(isolated.task_projection_envelopes(agent_role="technical_review",scope_id="COHR")) == (1 if disposition == "carry_over" else 0)
-    record_property("late_publish_proof", json.dumps(rt.snapshot()))
-
-
-def test_freeze_allows_real_old_completion_without_operator_assertion(isolated):
-    entered, release = Event(), Event()
-    context = tick()
-    def worker():
-        def action():
-            with task_store_scope(isolated.path) as store:
-                entered.set(); assert release.wait(10)
-                store.save_task_projection_envelope(build_envelope(role="technical_review", scope=ProjectionScope.model_validate(SCOPE),
-                    payload={"entity":"COHR","signal":"neutral","summary":"completed before transfer","levels":{}}, as_of=datetime.now(UTC).isoformat()))
-        rt.execute("technical-review", SCOPE, context, action, actor="finish-before-handover")
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future=pool.submit(worker); assert entered.wait(10)
-        token=rt.freeze("technical-review", SCOPE, actor="operator", reason="finish old work")
-        assert rt.frozen_inventory(token)
-        release.set(); future.result(timeout=10)
-        assert rt.frozen_inventory(token) == []
-        rt.handover(token, to_owner="dispatcher", dispositions={}, actor="operator", reason="actual completion recorded")
-    row = rt.snapshot()["claims"][0]
-    assert row["status"] == "complete" and json.loads(row["result_refs"])
 
 
 def test_owner_reload_restart_and_missing_authority_fail_closed(isolated, tmp_path, monkeypatch):
@@ -294,61 +237,6 @@ def test_new_process_reads_same_owner_generation_without_reset(isolated, record_
     row=next(row for row in state["owners"] if row["scope"]==rt.canonical(SCOPE))
     assert row["owner"]=="dispatcher" and row["generation"]==2
     record_property("cross_process_authority",json.dumps(state))
-
-
-def test_committed_result_survives_control_record_crash_without_republication(business_inputs, isolated, monkeypatch):
-    from ats.agents.technical import review
-    monkeypatch.setattr(review,"resolve_universe",lambda *a,**kw:(["COHR"],[]))
-    original=rt._history
-    class ProcessCrash(BaseException):
-        pass
-    def crash(conn,action,key,payload):
-        if action=="publication":
-            raise ProcessCrash("result committed; control publication record not committed")
-        return original(conn,action,key,payload)
-    monkeypatch.setattr(rt,"_history",crash)
-    context=tick()
-    with rt.wake(context),pytest.raises(ProcessCrash):
-        cli.run_technical_review(write_report=False)
-    monkeypatch.setattr(rt,"_history",original)
-    row=next(row for row in rt.snapshot()["claims"] if row["workflow"]=="technical-review")
-    assert row["status"]=="running" and not json.loads(row["result_refs"])
-    raw=isolated.latest_technical_review("technical").model_dump(mode="json")
-    token=rt.freeze("technical-review",SCOPE,actor="operator",reason="crash between two databases")
-    rt.handover(token,to_owner="dispatcher",dispositions={row["key"]:{"kind":"carry_over","reason":"unrecorded result must still fence actual writer"}},actor="operator",reason="verify persisted result binding")
-    result=Dispatcher(workflow_store=WorkflowStore(str(isolated.path)),max_workers=1).dispatch(plan(business_inputs,context,"crash-recovery"))
-    assert not result.complete
-    assert isolated.latest_technical_review("technical").model_dump(mode="json")==raw
-    assert isolated.conn.execute("SELECT COUNT(*) FROM schedule_result_publications WHERE claim_key=?",(row["key"],)).fetchone()[0]
-
-
-def test_partial_publication_cannot_be_declared_carry_over(isolated):
-    class WorkerLost(BaseException):
-        pass
-    def action():
-        isolated.save_task_projection_envelope(build_envelope(role="technical_review",scope=ProjectionScope.model_validate(SCOPE),
-            payload={"entity":"COHR","signal":"neutral","summary":"partly completed","levels":{}},as_of=datetime.now(UTC).isoformat()))
-        raise WorkerLost()
-    with pytest.raises(WorkerLost):
-        rt.execute("technical-review",SCOPE,tick(),action)
-    token=rt.freeze("technical-review",SCOPE,actor="operator",reason="unfinished after actual publication")
-    row=rt.frozen_inventory(token)[0]
-    with pytest.raises(rt.ScheduleAuthorityError,match="partly published"):
-        rt.handover(token,to_owner="dispatcher",dispositions={row["key"]:{"kind":"carry_over","reason":"incorrect replay"}},actor="operator",reason="reject published replay")
-    assert rt.frozen_inventory(token)==[row]
-
-
-def test_rejected_handover_keeps_freeze_until_explicit_recovery(isolated):
-    rt.check_owner("technical-review",SCOPE,"legacy")
-    token=rt.freeze("technical-review",SCOPE,actor="operator",reason="test aborted migration")
-    before=rt.snapshot()["owners"]
-    with pytest.raises(rt.ScheduleAuthorityError,match="each unfinished"):
-        rt.handover(token,to_owner="dispatcher",dispositions={"unknown":{"kind":"void","reason":"wrong inventory"}},actor="operator",reason="invalid disposition")
-    assert rt.snapshot()["owners"]==before
-    rt.cancel_freeze(token,actor="operator",reason="abort handover; original owner retained")
-    owner=rt.check_owner("technical-review",SCOPE,"legacy")
-    assert owner["generation"]==1 and owner["owner"]=="legacy" and not owner["frozen"]
-    assert any(row["action"]=="cancel_freeze" for row in rt.snapshot()["history"])
 
 
 def test_claim_cannot_publish_into_different_authority_database(isolated, monkeypatch, tmp_path):

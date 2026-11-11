@@ -31,7 +31,7 @@ launchctl bootout gui/$(id -u)/com.ats.dispatcher                    # 停掉全
 ## 2. 每天看什么
 
 ```bash
-ats data health --consumer information   # 立即检查一个分析师读的数据产品（读路由已固定为 target）
+ats data health --consumer information   # 立即检查一个分析师读的数据产品
 ats data health-log                      # 数据产品健康状态的变化记录（只在由好转坏、由坏转好时记一行）
 ats dispatch owner-log               # 7 个研究工作流的调度负责人及切换历史
 ats workflow runs --limit 20         # 最近的研究运行：complete / incomplete / failed
@@ -107,7 +107,7 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 ```bash
 # 停用：定时与日历事件不再唤醒它（不需要批准，随时可做；有正在运行的认领时拒绝）
 ats dispatch pause --workflow <workflow_id> --actor <谁> --reason "<为什么>"
-# 恢复：交回 Dispatcher（需要批准原文；检查读路由与数据产品健康；有未完成认领须说明作废理由）
+# 恢复：交回 Dispatcher（需要批准原文；检查数据产品健康；有未完成认领须说明作废理由）
 ats dispatch resume --workflow <workflow_id> --actor <谁> --approval "<批准原文>" --reason "<为什么>"
 # 查看停用 / 恢复的追加式记录
 ats dispatch owner-log [--workflow <workflow_id>]
@@ -141,21 +141,14 @@ ats dispatch owner-log [--workflow <workflow_id>]
 - **读取前**：Dispatcher 要真正执行某个分析师的任务时（可复用上一次投影时不查），先检查它读的产品。不合格就不执行，
   该任务记为 `blocked`、缺口 `data_product_unhealthy`，整次运行 `incomplete`。
 
-两处都只告警、不改读路由；同一个分析师只在状态由好转坏、由坏转好时发一次飞书并记一行日志。
+两处都只告警；同一个分析师只在状态由好转坏、由坏转好时发一次飞书并在工作流主库（`var/ats.sqlite` 的 `data_health_log`）记一行。2026-11-11 之前的记录在 `var/phase_f_cutover.sqlite` 的 `consumer_cutover_log`，只读。
 
 ```bash
 ats data health --consumer <id>                  # 立即检查一个分析师读的数据产品
 ats data health-log [--consumer <id>]             # 健康状态变化记录
-# 读路由已固定为 target，不再提供状态命令
 ```
 
-研究分析师的读路由固定为 target，没有切换入口。万一某个分析师的读路由不在 target（2026-10-20 技术面就被已移除的每日自动切回机制切过一次，表现为该工作流报 `no explicitly authorized read window`），用下面的命令恢复；它只会把路由移向 target，要求批准原文、原因和通过的数据产品检查，并写入只增不改的日志：
-
-```bash
-# （读路由已固定为 target）
-ats consumer-cutover restore --consumer-id technical --actor <谁> \
-    --approval "<用户批准原文>" --reason "<为什么>"
-```
+读路由表与读取资格账本已在 2026-11-11 删除（switch-trade r5 9.3）：每个消费者只按自己声明的数据产品、在当次入口绑定的业务 scope 内读取，越界或产品不合格时显式失败。`ats consumer-cutover`、`ats data assurance` 已退役，用法存档见 `docs/archive/R5C_MIGRATION_COMMANDS.md`。
 
 Chief 不在其中（交易路径未切换）。
 
@@ -273,7 +266,7 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 3. `ats live gate` 没有有效的实盘授权引用。授权库里那行 `LIVE-X`（占位字段、来源未核实）按你 2026-10-21 的确认作废，作废记录追加、原记录保留，实盘门不会再把它当授权。
 
 **切换期的边界开关已不再可查。** `ats cutover` 已随 r5 8.4 退役（只剩提示桩）；它显示的六个边界开关从未接线，本就不是权威状态，
-控制库里的开关行由 R5d 删除。真实的状态看：读路由用 `ats data health`，
+读路由与切换控制库已在 R5d（2026-11-11）停用，库文件留作历史只读。真实的状态看：数据产品用 `ats data health`，
 调度负责人用 `ats dispatch owner-log`，切换发生在哪个提交见 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`。
 
 **怎么读 `ats dispatch owner-log`。** 它是"每个工作流的定时触发由谁负责"的审计日志：负责人要么是 `legacy`（旧的 launchd 触发），要么是 `dispatcher`。
@@ -329,7 +322,7 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 | `var/ats.sqlite` | 领域记录：决策、绩效、风控、Workflow Memory 与投影 |
 | `var/data.sqlite` | 数据平台：原始与准入数据、数据产品 |
 | `var/data_refresh.sqlite`、`var/persistent_ingestion.sqlite` | 采集账本与受管队列 |
-| `var/phase_f_*.sqlite` | 调度认领、读路由、切换与授权台账（只增不改） |
+| `var/phase_f_*.sqlite` | 调度认领、交易路由与授权台账（只增不改）；`phase_f_cutover.sqlite` 的读路由、切换与健康记录自 2026-11-11 起只读 |
 | `var/checkpoints.sqlite` | 等待审批的暂停态 |
 | `var/phase_f_evidence/` | 台账引用的证据文件；`tmp/` 下同名路径是指向这里的符号链接，清空 `tmp/` 后按 `MANIFEST.json` 重建 |
 

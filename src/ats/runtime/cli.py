@@ -614,6 +614,8 @@ RETIRED_MIGRATION_COMMANDS = {
     "read": "研究侧读切流的批次执行与部署授权工具已删除（r5 8.5）",
     "batch": "切流批次清单工具已删除（r5 8.5）",
     "intake": "隔离接入核验与消费者处置报告已删除（r5 8.7）；退役消费方核验用 `ats retirement zero/decide`",
+    "consumer-cutover": ("研究读路由表已删除（r5 9.3），读取只按消费者声明与业务 scope；数据产品健康用 "
+                         "`ats data health [--consumer <id>]`、`ats data health-log`"),
 }
 
 
@@ -629,36 +631,6 @@ DISPATCH_RETIRED = {
     "runtime-expected": "已改名为 `ats dispatch coverage-expected`（r5 8.8），参数不变",
     "runtime-compare": "已改名为 `ats dispatch coverage-compare`（r5 8.8），参数不变",
 }
-
-
-CONSUMER_CUTOVER_MOVED = {
-    "status": "研究分析师的读路由已固定为 target，不再提供状态查看；数据产品健康用 `ats data health --consumer <id>`。",
-    "health": "改用 `ats data health --consumer <id>`（不带 --consumer 时是数据平台的整体健康）。",
-    "log": "改用 `ats data health-log [--consumer <id>]`。",
-}
-
-
-def consumer_cutover_command(args, *, parser) -> int:
-    """Research consumers' read routes and data-product health. Only `restore` changes a route, and only
-    toward the new one."""
-    from ..workflow import consumer_cutover as cc
-
-    db = args.db or None
-    action = args.action
-    if action in CONSUMER_CUTOVER_MOVED:
-        # A prompt stub, not a silent alias: the command named a migration step, the replacement is health.
-        print(f"❌ `ats consumer-cutover {action}` 已退役：{CONSUMER_CUTOVER_MOVED[action]}")
-        return 2
-    try:
-        if not args.consumer_id:
-            parser.error(f"consumer-cutover {action} requires --consumer-id")
-        result = cc.restore(args.consumer_id, actor=args.actor, approval=args.approval,
-                            reason=args.reason, path=db)
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0
-    except (cc.ConsumerCutoverError, ValueError) as exc:
-        print(f"❌ {exc}")
-        return 1
 
 
 def workflow_command(args, *, parser) -> int:
@@ -2406,43 +2378,11 @@ def run_data(
         return 0 if saved.get(source_id, -1) >= 0 else 1
 
     if action == "assurance":
-        import json
-        from ..data import assurance
-
-        scope = json.loads(evidence_scope_json or "{}")
-        if value == "query":
-            result = assurance.qualification(
-                domain_id=assurance_domain, consumer_id=assurance_consumer,
-                contract_version=assurance_contract_version, scope=scope,
-                db_path=db_path or None)
-        elif value == "history":
-            result = assurance.evidence_history(
-                domain_id=assurance_domain, consumer_id=assurance_consumer,
-                scope=scope if scope else None, db_path=db_path or None, limit=limit)
-        elif value == "record":
-            if not as_of:
-                raise ValueError("data assurance record requires --as-of")
-            result = {"event_id": assurance.record_evidence(
-                domain_id=assurance_domain, consumer_id=assurance_consumer,
-                evidence_type=evidence_type, outcome=evidence_outcome, scope=scope,
-                as_of=datetime.fromisoformat(as_of.replace("Z", "+00:00")),
-                command_summary=evidence_command_summary,
-                result_summary=evidence_summary,
-                environment_names=evidence_environment_names,
-                prerequisite_event_ids=evidence_prerequisites,
-                details=json.loads(evidence_details_json),
-                dependency_paths=evidence_fingerprint_paths,
-                db_path=db_path or None)}
-        elif value == "revoke":
-            if not evidence_reason:
-                raise ValueError("data assurance revoke requires --reason")
-            result = {"event_id": assurance.revoke_evidence(
-                reason=evidence_reason, event_id=evidence_event_id,
-                db_path=db_path or None)}
-        else:
-            raise ValueError("data assurance action must be query, record, or revoke")
-        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-        return 0
+        # The qualification ledger went with the read routes (switch-trade r5 9.3, user ruling D5); recorded evidence
+        # stays readable in the `dataflow_assurance_events` table of var/data.sqlite.
+        print("❌ `ats data assurance` 已退役：读取资格账本随读路由删除（r5 9.3）；历史证据保留在 var/data.sqlite 的 "
+              "dataflow_assurance_events 表，只读。用法存档见 docs/archive/R5C_MIGRATION_COMMANDS.md")
+        return 2
 
     if action == "pead-official-disclosure-coverage":
         from ..data.pead_official_disclosures import (
@@ -3451,13 +3391,8 @@ def main(argv: list[str] | None = None) -> int:
     sch = sub.add_parser("schedule", help="research dispatcher daemon: scheduled and calendar-event workflows")
     ct = sub.add_parser("cutover", help="已退役（switch-trade r5 8.4）：切换控制平面的批次登记与报告校验已删除，交易路径已切换")
     ct.add_argument("rest", nargs=argparse.REMAINDER)
-    cc = sub.add_parser("consumer-cutover", help="仅保留 restore（把读路由不在 target 的分析师恢复到 target）；status/health/log 已迁到 `ats data health`、`ats data health-log`")
-    cc.add_argument("action", choices=["status", "health", "log", "restore"])
-    cc.add_argument("--consumer-id", default="", help="information | fundamental | ...")
-    cc.add_argument("--actor", default="", help="restore: 操作者")
-    cc.add_argument("--approval", default="", help="restore: 用户批准原文（必填）")
-    cc.add_argument("--reason", default="", help="restore: 原因（必填）")
-    cc.add_argument("--db", default="", help="覆盖切流控制库路径")
+    cc = sub.add_parser("consumer-cutover", help="已退役（switch-trade r5 9.3）：研究读路由表已删除；数据产品健康用 ats data health")
+    cc.add_argument("rest", nargs=argparse.REMAINDER)
 
     sh = sub.add_parser("shadow", help="已退役（switch-trade r5 8.4）：影子比较、验收与影子账本工具已删除")
     sh.add_argument("rest", nargs=argparse.REMAINDER)
@@ -4005,8 +3940,6 @@ def main(argv: list[str] | None = None) -> int:
 
         start()
         return 0
-    if args.command == "consumer-cutover":
-        return consumer_cutover_command(args, parser=parser)
     if args.command == "retirement":
         return retirement_command(args, parser=parser)
 

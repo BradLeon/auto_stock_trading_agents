@@ -53,7 +53,7 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | `migration.intake`、`migration.analysis_verification` | 8.7（**2026-11-10 已退役**，用户批准：删 `intake`、`intake_verification`、`scoped_intake`、`analysis_verification`、`consumer_disposition`、`isolated_entry`（11-08 定整删），`ats intake` 改提示桩；退役工具的扫描器已于 8.1 迁到 `consumer_scan`） |
 | `migration.dispatch_dedup` | 8.8（**2026-11-10 已退役**，用户批准：覆盖核验改名 `ats dispatch coverage-expected/coverage-compare`，搬移前后输出一致；删 `dispatch_claims` 与 `ats dispatch` 的 `runtime-*`、`ledger` 等迁移期子命令） |
 | `migration.trade_cutover_tooling` | 8.4（**2026-11-10 已退役**，用户批准：删 `boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`execution/shadow_execution`，`ats drill`、`ats cutover`、`ats shadow` 改提示桩；写账前的隔离根检查迁到 `execution/trade_publication`；`joint_cutover` 按 11-08 调用图核对移到 9.3） |
-| `migration.read_route_and_qualification` | 9.2–9.3（读路由与资格机制收窄：`consumer_api.read_input` 收窄为「查声明 → 查数据产品 → 读」，再删路由表、资格账本、指纹绑定与边界接线证据） |
+| `migration.read_route_and_qualification` | 9.2–9.3（**2026-11-11 已退役**，用户批准 D1–D5：读取收窄为「查声明 → 查 scope → 读」，长期部件搬到 `workflow/read_scope.py`；删路由表、资格账本、读窗口、读恢复、联合切换、写入边界守卫与指纹清单；启动检查改读交易路由登记表；`ats consumer-cutover`、`ats data assurance` 改提示桩） |
 
 **第 6、7 组复验 V4–V6（2026-11-10，tasks 6.6、7.6）：** 两组合入后的首次定时运行都正常。chief-daily 11-09 22:45（`chief-20261109-144500`）到 `pending_approval`，风控评审 approved，风控读取全部经 `read_input`，新周期不写旧 `cycles`/`decisions` 表；clerk-daily 11-10 07:00 completed，六步均有结果。全量测试对照见 `docs/TEST_BASELINE.md` 第 6、7 组两行。
 

@@ -471,25 +471,6 @@ def test_later_handoff_failure_preserves_first_receipt(execution, monkeypatch):
     assert execution.store.conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 2
 
 
-def test_price_native_api_cannot_borrow_production_legacy_or_isolated_candidate(execution, monkeypatch):
-    from ats.workflow.read_scope import ReadUnavailable
-
-    seen = []
-    def legacy(identity):
-        seen.append(identity)
-        return SimpleNamespace(route="legacy")
-    monkeypatch.setattr("ats.workflow.runtime_reads.gate_read", legacy)
-    monkeypatch.setattr("ats.workflow.isolation.verified_isolation_root", lambda: None)
-    order = TradeDecision(symbol="AAPL", action="buy", qty=1)
-    with prices.price_request("trader", [order], cycle_id="unqualified",
-                              purpose="preapproval_normalization"), pytest.raises(
-                                  ReadUnavailable, match="enabled exact business scope"):
-        prices.read_price("trader", order)
-    assert execution.calls == []
-    assert all(i.consumer_id == "trader" and i.contract_version == "target-dataflow-v2"
-               and i.scope["entities"] == ["AAPL"] for i in seen)
-
-
 def test_runtime_quotes_do_not_write_shared_facts_or_memory(execution):
     changes = execution.store.conn.total_changes
     orders, _notes = prices.normalize_orders([

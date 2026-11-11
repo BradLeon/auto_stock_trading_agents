@@ -390,9 +390,9 @@ def test_runtime_route_switch_preserves_qualification_fingerprints(registry):
     Registry/switch code belongs in the final dependency closure. Their SQL
     route generations are runtime state and must leave those hashes unchanged.
     """
-    from ats.workflow.assurance_surface import fingerprint, load_surface
+    from ats.workflow.assurance_surface import fingerprint, implementation_paths
 
-    paths = load_surface().all_paths()
+    paths = implementation_paths()
     assert "src/ats/execution/route_registry.py" in paths
     assert "src/ats/execution/route_switch.py" in paths
     before = fingerprint(paths)

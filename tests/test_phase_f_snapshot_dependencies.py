@@ -10,43 +10,19 @@ from test_phase_f_research_gate import research_isolation as _isolated
 
 from ats.decision.repository import DecisionAuditRepository
 from ats.execution.authorization import build_authorization, validate_authorization
-from ats.workflow import cutover as plane
 from ats.workflow import runtime_reads as reads
-from ats.workflow import scoped_routes as scopes
 from ats.workflow.read_scope import ReadUnavailable
-from ats.workflow.isolation import verified_isolation_root
 
 business_inputs=_business_inputs
 isolated=_isolated
 
 
-def policy(who, root):
-    """Register an explicit safe-stop recovery policy (moved from test_phase_f_read_executor, r5 8.5)."""
-    import hashlib
-    from ats.workflow import read_recovery as recovery
-    path = root / (who.key + '-stop.json')
-    path.write_text(json.dumps({"version": recovery.VERSION, "identity": who.as_row(), "strategy": "stop",
-        "dependency_hashes": recovery.dependency_hashes(who.consumer_id),
-        "valid_until": (datetime.now(UTC)+timedelta(hours=1)).isoformat()}))
-    recovery.register(who, reference=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                      actor='fixture', reason='pre-run explicit safe stop')
-
-
 @pytest.fixture
 def ready(business_inputs,isolated,monkeypatch):
-    monkeypatch.setattr('ats.workflow.boundary_evidence.assert_enforced',lambda *a,**k:None)
-    monkeypatch.setattr('ats.data.assurance.qualification',lambda **k:{'status':'eligible'})
     captured={}
     def before(plan):
         task=next(t for t in plan.tasks if t.task_id=='technical-review')
-        who=reads.task_identity(plan,task)
-        policy(who,verified_isolation_root())
-        scopes.transition_route(plane.PROJECTION_READ,who,'target',expected_generation=0,mode='isolated',
-            actor='fixture',reason='qualified dependency before actual role run',
-            qualification=lambda i:{'identity':i.as_row(),'status':'eligible'},
-            report=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-report'},
-            fallback=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-stop'})
-        captured['who']=who
+        captured['who']=reads.task_identity(plan,task)
     def runner(snapshot,manifest):
         captured['basis']=snapshot.to_payload();return {}
     result=decision_run(business_inputs,isolated,runner=runner,before_dispatch=before)
@@ -62,49 +38,6 @@ def ready(business_inputs,isolated,monkeypatch):
         decision_hash=rev['decision_hash'],decision='approved',reviewer='fixture-human',idempotency_key='approved')
     auth=build_authorization(repo,'dependent').model_copy(update={'route_id':'sim','route_generation':1})
     return SimpleNamespace(repo=repo,store=isolated,revision=rev,auth=auth,**captured)
-
-
-@pytest.mark.parametrize('failure',['revoked','manifest_drift','disabled','generation','policy'])
-def test_actual_unbound_callback_and_authorization_recheck_frozen_dependencies(ready,monkeypatch,failure,record_property):
-    s=ready
-    before={t:[dict(r) for r in s.store.conn.execute('SELECT * FROM '+t)] for t in
-            ('decision_revisions','decision_risk_reviews','boss_approvals')}
-    if failure in {'revoked','manifest_drift'}:
-        monkeypatch.setattr('ats.data.assurance.qualification',lambda **kw:{'status':'ineligible'
-            if kw['consumer_id']=='technical' else 'eligible','reasons':[failure]})
-    elif failure in {'disabled','generation'}:
-        scopes.transition_route(plane.PROJECTION_READ,s.who,'disabled' if failure=='disabled' else 'legacy',
-            expected_generation=1,actor='fixture',reason='dependency changed',mode='isolated',
-            fallback=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-selected-route'})
-    else: policy(s.who,verified_isolation_root())
-    with pytest.raises(ReadUnavailable):
-        s.repo.record_approval(approval_id='late',cycle_id='dependent',revision_no=s.revision['revision_no'],
-            decision_hash=s.revision['decision_hash'],decision='approved',reviewer='fixture',idempotency_key='late')
-    reasons=validate_authorization(s.repo,s.auth,snapshot_as_of=datetime.now(UTC),
-        route_state=SimpleNamespace(route_id='sim',generation=1))
-    assert any(r.startswith('research_dependencies_invalid') for r in reasons),reasons
-    # The real Trader entry must refuse before quotes or transport acceptance.
-    from ats.execution.authorization import bind_to_active_route
-    from ats.execution.route_registry import install_route
-    from ats.execution.simulation import simulated_execution
-    from ats.schemas.decision import TradeDecision
-    from ats.trader.execute import place_orders
-    install_route('sim', environment='paper', account='DU1')
-    auth=bind_to_active_route(build_authorization(s.repo,'dependent'))
-    orders=[TradeDecision.model_validate(row) for row in json.loads(s.revision['orders_json'])]
-    with simulated_execution(store=s.store,account='DU1') as transport:
-        entries,fills=place_orders([(order,order.qty) for order in orders],'dependent',
-            revision_no=s.revision['revision_no'],authorization=auth.model_dump(mode='json'))
-        assert not transport.accepted and not fills
-        assert entries and all('research_dependencies_invalid' in row.error for row in entries)
-    assert {t:[dict(r) for r in s.store.conn.execute('SELECT * FROM '+t)] for t in before}==before
-    assert s.repo.read_chain('dependent')['has_execution_approval']
-    # No consumer-wide/global stop: unrelated business scope remains readable.
-    unrelated=scopes.ReadScope(s.who.domain_id,s.who.consumer_id,s.who.contract_version,
-        {**s.who.scope,'id':'NVDA','entities':['NVDA']})
-    assert reads.gate_read(unrelated).route=='legacy'
-    record_property('actual_snapshot_dependency_rejection',json.dumps({'root':str(verified_isolation_root()),
-        'failure':failure,'basis':s.basis,'reasons':reasons,'approval_chain':s.repo.read_chain('dependent')}))
 
 
 def test_current_dependency_allows_idempotent_actual_approval_and_current_authorization(ready):

@@ -47,15 +47,15 @@ def test_health_log_reads_the_recorded_changes(capsys, monkeypatch):
     assert code == 0 and json.loads(out) == rows and seen == {"consumer": "technical"}
 
 
-def test_the_old_command_leaves_a_prompt_stub_for_status_health_and_log(capsys):
-    for action, replacement in (("status", "ats data health --consumer"), ("health", "ats data health --consumer"),
-                                ("log", "ats data health-log")):
+def test_the_retired_command_leaves_a_prompt_stub(capsys):
+    """`ats consumer-cutover` went entirely with the read-route tables (switch-trade r5 9.3), `restore` included."""
+    for action in ("status", "health", "log", "restore"):
         code, out = _run(capsys, ["consumer-cutover", action])
-        assert code == 2 and "已退役" in out and replacement in out
+        assert code == 2 and "已退役" in out and "ats data health" in out
 
 
-def test_restore_still_needs_a_consumer_id():
-    import pytest
+def test_the_retired_assurance_action_leaves_a_prompt_stub(capsys):
+    code, out = _run(capsys, ["data", "assurance", "query"])
+    assert code == 2 and "已退役" in out and "dataflow_assurance_events" in out
 
-    with pytest.raises(SystemExit):
-        cli.main(["consumer-cutover", "restore"])
+

@@ -169,9 +169,6 @@ def test_direct_trade_reads_are_retired_and_a_read_of_them_names_the_retirement(
     ts = reg.tombstone("store.direct_trade_reads")
     assert ts is not None and ts.status == "retired" and not ts.consumers
     assert reg.read_gate("store.direct_trade_reads") == ("retired", mod.REASON_RETIRED)
-    from ats.workflow.cutover_routing import is_retired
-
-    assert is_retired("store.direct_trade_reads")
 
 
 def test_realized_pnl_is_never_summed_across_currencies(store):

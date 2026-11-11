@@ -716,17 +716,18 @@ retired:
     gate: trade_path_cutover
     capability_domain: workflow/cutover-control
     replaced_by: >-
-      按 scope 读数据产品（交易路径切换后整体收窄）
+      按消费者声明与业务 scope 读数据产品（`workflow/read_scope.py`、`workflow/runtime_reads.py`）；交易路由启动检查（`route_registry.assert_runtime_startup`）
     target_phase: retire-legacy-and-migration-tooling
-    status: pending
+    status: retired
     exit_condition: >-
-      `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`cutover_guards`、`assurance_surface` 与指纹清单收窄。 另含 `joint_cutover`（2026-11-08 调用图核对后自 migration.trade_cutover_tooling 移入：被读路由与 Dispatcher 的空操作门禁导入）。
+      删除 `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`exit_requirements`、`cutover_guards`、`business_replay_inputs`、`joint_cutover` 与 `data/assurance` 资格账本；`assurance_surface` 只留 `route_switch` 的实现指纹；删除 `required_fingerprint_paths` / `consumer_fingerprint_paths` 与冻结面；命令 `ats consumer-cutover`、`ats data assurance` 退役。
     missing_condition: >-
-      交易链路（Chief、Clerk、Risk、Trader、Boss）尚未在新路径上充分验证；外部门 trade_path_cutover 未满足，本 change 只登记。
+      2026-11-11 退役（用户批准 D1–D5，tasks 9.2–9.3）。长期部件先搬到 `workflow/read_scope.py`（ReadScope、ReadUnavailable、consumer_contract、record_read、read_projection）；读取收窄为“查声明 → 查 scope → 读”，生产库副本探测主理人 28 万字上下文改前改后逐字节一致，研究快照只少读取依赖的 route/generation/recovery_generation 三字段；隔离写入检查搬到 `isolation.assert_write_destination`；启动检查改读交易路由登记表；调度侧去掉联合门禁与 resume 路由前提，数据健康记录归 `consumer_health`（`data_health_log`）。历史路由、资格与健康记录留在 var/phase_f_cutover.sqlite、var/data.sqlite，只读。V1 src 内无导入；V3 门 trade_path_cutover 已开，`ats retirement decide` 带回退演练引用（verification.md 3.9，2026-10-29）判可退出。
+      2026-11-08 调用图核对：`joint_cutover` 自 migration.trade_cutover_tooling 移入（被读路由与 Dispatcher 的空操作门禁导入）。
     consumers: []
     consumer_zero_criterion: >-
-      交易路径切换并过观察窗口后，研究分析师与 Chief 读同一新路径。
-    location: src/ats/workflow/cutover*.py, scoped_routes.py, consumer_reads.py, read_windows.py
+      研究分析师、主理人、风控、Trader、Clerk 读取只依据声明与业务 scope；src 内无上述模块的导入。
+    location: src/ats/workflow/read_scope.py, src/ats/workflow/runtime_reads.py
 
   - identifier: migration.trade_cutover_tooling
     kind: migration_tooling

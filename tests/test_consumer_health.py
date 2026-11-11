@@ -60,7 +60,7 @@ def world(monkeypatch):
     monkeypatch.setattr(health, "_latest_brief", lambda entity: (state.briefs.get(entity) or [None])[0])
     monkeypatch.setattr("ats.memory.get_store", lambda: pytest.fail("health check must not open the memory store"))
     # The consumer read gate is what the switch changes: the check must never touch it.
-    for name in ("ats.workflow.runtime_reads.gate_read", "ats.workflow.cutover_routing.read_route",
+    for name in ("ats.workflow.runtime_reads.gate_read",
                  "ats.data.consumer_api.read_input"):
         monkeypatch.setattr(name, lambda *a, **k: pytest.fail("health check went through a consumer read gate"))
     return state

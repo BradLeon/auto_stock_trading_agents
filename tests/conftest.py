@@ -327,9 +327,6 @@ def _isolate_db(tmp_path, monkeypatch):
     from ats.workflow.schedule_runtime import initialize
 
     initialize()
-    from ats.workflow.cutover import bootstrap
-
-    bootstrap(actor="test-fixture", path=tmp_path / "cutover.sqlite")
     monkeypatch.delenv("ATS_STRUCTURED_DB_PATH", raising=False)
     monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "structured_artifacts"))
     monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))

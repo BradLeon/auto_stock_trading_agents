@@ -1,4 +1,4 @@
-# R5c 退役的迁移期命令用法存档
+# R5c/R5d 退役的迁移期命令用法存档
 
 `switch-trade-path-and-retire-r5` 第 8 组（2026-11-10）删除了交易路径切换期间使用的命令。下面是删除前一刻各命令 `--help` 的原样输出，供查历史记录或复读旧证据时参考。
 
@@ -7,12 +7,14 @@
 | 命令 | 删除于 | 替代入口 |
 |---|---|---|
 | `ats drill` | 8.4 | 实盘路由演练用 `ats live drill` / `ats live rollback-drill` |
-| `ats cutover` | 8.4 | 无（切换控制平面随 R5d 收窄；读路由恢复仍用 `ats consumer-cutover restore`） |
+| `ats cutover` | 8.4 | 无（切换控制平面已在 R5d 删除） |
 | `ats shadow` | 8.4 | 无 |
 | `ats batch`、`ats read` | 8.5 | 无 |
 | `ats dispatch` 的 `ownership`、`executed`、`record-execution`、`rollback-plan`、`rollback-history` | 8.6 | 无 |
 | `ats dispatch` 的 `ledger` 与 `runtime-*` | 8.8 | `runtime-expected` / `runtime-compare` 改名为 `coverage-expected` / `coverage-compare`（参数不变）；其余无。保留 `pause`、`resume`、`owner-log` |
 | `ats intake` | 8.7 | 退役消费方核验用 `ats retirement zero/decide` |
+| `ats consumer-cutover`（含 `restore`） | 9.3 | 无：研究读路由表已删除；数据产品健康用 `ats data health [--consumer <id>]`、`ats data health-log` |
+| `ats data assurance`（query/history/record/revoke） | 9.3 | 无：读取资格账本已删除；历史证据在 `var/data.sqlite` 的 `dataflow_assurance_events` 表，只读 |
 
 ## 删除前的 `--help` 输出
 
@@ -320,4 +322,56 @@ options:
   --from-time FROM_TIME
                         预期集合窗口 ISO 起点（带时区）
   --to-time TO_TIME     预期集合窗口 ISO 终点（带时区）
+```
+
+## R5d（第 9 组，2026-11-11）删除前的用法
+
+```text
+=== ats consumer-cutover
+usage: ats consumer-cutover [-h] [--consumer-id CONSUMER_ID] [--actor ACTOR]
+                            [--approval APPROVAL] [--reason REASON] [--db DB]
+                            {status,health,log,restore}
+
+positional arguments:
+  {status,health,log,restore}
+
+options:
+  -h, --help            show this help message and exit
+  --consumer-id CONSUMER_ID
+                        information | fundamental | ...
+  --actor ACTOR         restore: 操作者
+  --approval APPROVAL   restore: 用户批准原文（必填）
+  --reason REASON       restore: 原因（必填）
+  --db DB               覆盖切流控制库路径
+```
+
+`ats data assurance` 是 `ats data` 的一个动作，删除前的专属参数（取自 `runtime/cli.py` 的参数定义）：
+
+```text
+        help="purge-source: 声明数据已在别处留存，写入清除记录供审计",
+    )
+    data.add_argument("--purge-note", default="", help="purge-source: 写入清除记录的备注")
+    data.add_argument("--consumer", dest="assurance_consumer", default="",
+                      help="assurance: target coverage consumer ID")
+    data.add_argument("--domain", dest="assurance_domain", default="",
+                      help="assurance: consumer data domain")
+    data.add_argument("--contract-version", dest="assurance_contract_version", default="",
+                      help="assurance: pinned consumer contract version")
+    data.add_argument("--evidence-type", default="", help="assurance record: required evidence kind")
+    data.add_argument("--outcome", dest="evidence_outcome", choices=["passed", "failed"], default="",
+                      help="assurance record: evidence outcome")
+    data.add_argument("--scope-json", dest="evidence_scope_json", default="{}",
+                      help="assurance: exact JSON scope shared by all evidence")
+    data.add_argument("--evidence-details-json", default="{}",
+                      help="assurance record: source statuses and per-product rollback proof; no raw text")
+    data.add_argument("--summary", dest="evidence_summary", default="",
+                      help="assurance record: sanitized result summary")
+    data.add_argument("--command-summary", dest="evidence_command_summary", default="",
+                      help="assurance record: sanitized command description (no secrets)")
+    data.add_argument("--environment-name", dest="evidence_environment_names", action="append", default=[],
+                      help="assurance record: environment variable name only; never its value")
+    data.add_argument("--prerequisite-event", dest="evidence_prerequisites", action="append", default=[],
+                      help="assurance record: prerequisite evidence ID; repeatable")
+    data.add_argument("--fingerprint-path", dest="evidence_fingerprint_paths", action="append", default=[],
+                      help="assurance record: dependency file to hash; repeatable")
 ```

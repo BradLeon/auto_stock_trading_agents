@@ -391,17 +391,3 @@ def test_actual_information_model_call_uses_required_confidence_schema(monkeypat
     assert update.confidence == 0.87 and update.materiality == 0.01
 
 
-def test_information_response_roundtrips_through_frozen_contract_decoder():
-    from ats.agents.information.outputs import InformationContextUpdateView
-    from ats.workflow.business_replay_inputs import decode, encode
-
-    response = InformationContextUpdateView(
-        materiality=0.01, confidence=0.87, event_summary='Verified factual summary')
-    recorded = encode(response)
-    assert recorded['$model'] == (
-        'ats.agents.information.outputs:InformationContextUpdateView')
-    assert decode(recorded) == response
-    # Arbitrary computation modules remain outside the recorded contract surface.
-    with pytest.raises(ValueError, match='outside data/schema contracts'):
-        decode({**recorded, '$model': (
-            'ats.agents.information.documents:InformationContextUpdateView')})

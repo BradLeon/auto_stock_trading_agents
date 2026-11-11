@@ -72,7 +72,7 @@ def world(monkeypatch):
     monkeypatch.setattr(inp, "knowledge_notes", packet)
     # The review's own read gate, the memory store and any provider are exactly what the check must not touch.
     monkeypatch.setattr("ats.memory.get_store", lambda: pytest.fail("health check must not open the memory store"))
-    for name in ("ats.workflow.runtime_reads.gate_read", "ats.workflow.cutover_routing.read_route",
+    for name in ("ats.workflow.runtime_reads.gate_read",
                  "ats.data.consumer_api.read_input"):
         monkeypatch.setattr(name, lambda *a, **k: pytest.fail("health check went through a consumer read gate"))
     monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("health check used the network"))

@@ -322,3 +322,19 @@ def test_null_narrative_values_roundtrip_but_null_numeric_kpi_is_refused():
     assert store.get_task_projection(env.projection_id)['payload'] == env.payload
     with pytest.raises(EnvelopeValidationError):
         validate_payload('fundamental_expectation_update', {**payload,'metric':'revenue'})
+
+
+def test_new_projection_keeps_evaluation_time_and_real_publication_time():
+    """Moved from test_phase_f_persistent_runtime when the read windows were retired (switch-trade r5 9.3)."""
+    from datetime import UTC, datetime, timedelta
+
+    from ats.agent.task_projection import ProjectionScope, build_envelope, projection_context
+
+    point = (datetime.now(UTC)-timedelta(minutes=5)).isoformat()
+    published = datetime.now(UTC).isoformat()
+    with projection_context(workflow_run_id="actual", agent_run_id="task", as_of=point):
+        envelope = build_envelope(role="technical_review", scope=ProjectionScope(kind="entity", id="COHR"),
+            payload={"entity":"COHR", "summary":"fixed evaluation", "signal":"neutral"},
+            as_of=published, created_at=published, input_refs=["source:original-time"])
+    assert envelope.as_of == point and envelope.created_at == published
+    assert envelope.input_refs == ["source:original-time"]

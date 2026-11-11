@@ -292,9 +292,7 @@ def test_macro_freshness_is_the_weekly_cadence():
 
 
 # --- the owner switch for macro-review ---------------------------------------------------------------------------
-def test_macro_review_owner_switch_needs_the_macro_read_route_and_a_healthy_macro_check(tmp_path):
-    from ats.workflow import consumer_cutover as cc
-    from ats.workflow import cutover_wiring as cw
+def test_macro_review_owner_switch_needs_a_healthy_macro_check(tmp_path):
     from ats.workflow import schedule_runtime as rt
     from ats.workflow.isolation import isolated_run
 
@@ -305,14 +303,8 @@ def test_macro_review_owner_switch_needs_the_macro_read_route_and_a_healthy_macr
         asked.append(consumer)
         return ok
 
-    with isolated_run("macro-owner-switch", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
+    with isolated_run("macro-owner-switch", root=tmp_path / "iso"):
         args = dict(to_owner="dispatcher", actor="op", reason="drill", approval="user approved", health_check=healthy)
-        with pytest.raises(rt.ScheduleAuthorityError, match="macro research read is not on the target route"):
-            rt.owner_switch("macro-review", **args)
-        cc.switch("macro", actor="op", approval="chat", stop_conditions="health fails", health=ok, path=path,
-                  observe_until=(datetime.now(UTC) + timedelta(hours=72)).isoformat())
         entry = rt.owner_switch("macro-review", **args)
         assert entry["to_owner"] == "dispatcher" and asked == ["macro"]
         assert json.loads(rt.owner_log("macro-review")[0]["health"])["consumer"] == "macro"

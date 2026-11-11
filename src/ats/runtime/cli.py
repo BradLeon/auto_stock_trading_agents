@@ -3834,10 +3834,9 @@ def main(argv: list[str] | None = None) -> int:
               "用法存档见 docs/archive/R5C_MIGRATION_COMMANDS.md")
         return 2
 
-    # Business and ordinary inspection entries never create a missing authority. The administrative
-    # bootstrap (`ats cutover state --bootstrap`) went with `ats cutover` (r5 8.4); isolated runs bootstrap
-    # their own authority in `isolation.isolated_run`.
-    from ..workflow.cutover import assert_runtime_startup
+    # A conflicting or unreadable trade-route authority stops every entry; no route means trading is closed and
+    # research entries run (switch-trade r5 9.3, replacing the six-boundary cutover check).
+    from ..execution.route_registry import assert_runtime_startup
     assert_runtime_startup(caller="ats.runtime.cli.main")
 
     if args.command == "data":

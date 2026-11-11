@@ -104,7 +104,7 @@ def start(*, run_once: bool = False) -> None:
     from ..execution.broker_write_guard import startup
 
     startup(caller="ats.runtime.dispatcher_daemon.start")
-    from ..workflow.cutover import assert_runtime_startup
+    from ..execution.route_registry import assert_runtime_startup
 
     assert_runtime_startup(caller="ats.runtime.dispatcher_daemon.start")
     from ..workflow.schedule_runtime import reload_authority

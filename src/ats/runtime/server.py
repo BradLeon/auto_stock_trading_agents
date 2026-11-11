@@ -37,7 +37,7 @@ def _resume_once(thread_id: str, approval, channel, verdict: str,
 
     with _RESUME_LOCK:
         try:
-            from ..workflow.cutover import assert_runtime_startup
+            from ..execution.route_registry import assert_runtime_startup
             assert_runtime_startup(caller='ats.runtime.server._resume_once')
             repo = DecisionAuditRepository(get_store())
             ok, reason, deduped = repo.validate_callback(
@@ -113,7 +113,7 @@ def build_app():
     @asynccontextmanager
     async def lifespan(app):
         from ..execution.broker_write_guard import startup
-        from ..workflow.cutover import assert_runtime_startup
+        from ..execution.route_registry import assert_runtime_startup
         startup(caller='ats.runtime.server.lifespan')
         assert_runtime_startup(caller='ats.runtime.server.lifespan')
         yield

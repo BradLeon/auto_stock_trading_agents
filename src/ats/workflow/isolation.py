@@ -291,11 +291,6 @@ def isolated_run(run_id: str, *, root: str | Path | None = None,
         broker_write_guard.assert_broker_writes_prohibited(
             operation="isolated_run", caller=run_id)
         _ACTIVE_ROOT = environment.root
-        # A fresh isolated authority may start at the safe legacy/disabled
-        # defaults. This never initializes the production control database.
-        from .cutover import bootstrap
-
-        bootstrap(actor=run_id, path=environment.path_for("ATS_CUTOVER_DB"))
         from .schedule_runtime import initialize
 
         initialize()

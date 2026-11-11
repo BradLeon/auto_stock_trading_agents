@@ -660,9 +660,9 @@ def _record_approval(state: ChiefDecisionState, approval: BossApproval) -> None:
             created_at=approval.reviewed_at.isoformat()
             if approval.reviewed_at else None)
     except Exception as exc:  # noqa: BLE001 - preserve ordinary audit error handling
-        from ..workflow.cutover_wiring import BoundaryWriteRefused
+        from ..workflow.isolation import IsolatedWriteRefused
 
-        if isinstance(exc, BoundaryWriteRefused):
+        if isinstance(exc, IsolatedWriteRefused):
             raise
         log.warning("boss_approvals write failed for %s: %s", state.cycle_id, exc)
 

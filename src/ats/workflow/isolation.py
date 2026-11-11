@@ -317,3 +317,57 @@ def isolated_run(run_id: str, *, root: str | Path | None = None,
         broker_write_guard._STATE.reason_code = previous_reason
         _ACTIVE_ROOT = previous_root
         _reset_caches()
+
+
+class IsolatedWriteRefused(RuntimeError):
+    """A write from an isolated (or shadow-mode) run would land outside the run's own isolation root."""
+
+    def __init__(self, what: str, message: str, *, reason_code: str) -> None:
+        super().__init__(f"{what}: {message}")
+        self.what = what
+        self.reason_code = reason_code
+
+
+def assert_write_destination(store, *, what: str) -> None:
+    """An isolated run may write only inside its own isolation root, never to production (moved from the retired
+    publication guards, switch-trade r5 9.3). Checks the actual connection, including handles opened before isolation."""
+    import os
+
+    from .runtime_reads import current_read_context
+
+    context = current_read_context()
+    mode = context.mode if context else os.environ.get("ATS_RUN_MODE", "production")
+    if os.environ.get("ATS_RUN_MODE") == "isolated":
+        mode = "isolated"
+    if mode not in {"isolated", "shadow"}:
+        return
+    from ..execution.broker_write_guard import assert_broker_writes_prohibited
+
+    assert_broker_writes_prohibited(operation="publication", caller=what)
+    filename = next((row[2] for row in store.conn.execute("PRAGMA database_list")
+                     if row[1] == "main"), "")
+    if not filename:  # A genuinely in-memory connection cannot reach production.
+        return
+    destination = Path(filename).resolve()
+    allowed = {Path(os.environ[name]).resolve() for name in ("ATS_DB_PATH", "ATS_SHADOW_DB_PATH")
+               if os.environ.get(name)}
+    if context and context.publication_path:
+        allowed.add(Path(context.publication_path).resolve())
+    production = (REPO_ROOT / "var/ats.sqlite").resolve()
+    root = active_isolation_root()
+    if mode == "isolated" and root is None:
+        # Child processes inherit the complete redirection, not the parent ContextVar.
+        root = Path(os.environ.get("ATS_DB_PATH", "")).resolve().parent
+        expected = build_environment(root)
+        if any(os.environ.get(name) != filename for name, filename in expected.surfaces.items()):
+            raise IsolatedWriteRefused(what, "incomplete isolated persistence redirection",
+                                       reason_code="publication_destination_not_isolated")
+    if (destination == production or destination not in allowed
+            or (mode == "isolated" and root is not None and not destination.is_relative_to(root.resolve()))
+            or (mode == "shadow" and (not context or not context.publication_path
+                                     or destination != Path(context.publication_path).resolve()
+                                     or destination == Path(os.environ.get("ATS_DB_PATH", production)).resolve()
+                                     or (os.environ.get("ATS_SHADOW_DB_PATH") and destination !=
+                                         Path(os.environ["ATS_SHADOW_DB_PATH"]).resolve())))):
+        raise IsolatedWriteRefused(what, "isolated/shadow write destination is not owned by this run",
+                                   reason_code="publication_destination_not_isolated")

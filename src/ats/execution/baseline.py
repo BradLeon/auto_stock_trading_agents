@@ -125,9 +125,9 @@ def position_changes(store, previous: dict | None, current: dict) -> dict:
 
 def establish_baseline(*, store, broker, as_of: str, operator: str, reason: str, apply: bool) -> dict:
     """Open the books at `as_of` (YYYY-MM-DD) from the broker's current state; `apply=False` only reports the plan."""
-    from ..workflow.cutover_wiring import guard_clerk_publication
+    from ..workflow.isolation import assert_write_destination
 
-    guard_clerk_publication(store=store, what="Day-1 baseline")
+    assert_write_destination(store, what="Day-1 baseline")
     current = baseline_date(store)
     if current and current != as_of:
         raise ValueError(f"a baseline already exists at {current}; refusing to move it to {as_of}")

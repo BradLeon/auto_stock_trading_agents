@@ -2087,7 +2087,7 @@ class TradingMemory:
                                      processor_version: str, *, version_id: str,
                                      retry_failed: bool = False) -> str | None:
         """Own-role analysis state belongs to Memory, not the ingestion ledger."""
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
         from ..workflow.runtime_reads import current_read_context
         context = current_read_context()
         if context and (context.identity.consumer_id != 'information' or
@@ -2095,7 +2095,7 @@ class TradingMemory:
             raise PermissionError('Information processing escapes bound target')
         if not all((document_id, target_id, processor_version, version_id)):
             raise ValueError('Information processing requires exact version and target')
-        guard_analyst_output(store=self, what='Information processing state')
+        assert_write_destination(self, what='Information processing state')
         stamp=evaluation_now(timezone.utc).isoformat()
         cur=self.conn.execute(
             "INSERT INTO information_processing_runs "
@@ -2126,13 +2126,13 @@ class TradingMemory:
     def finish_information_processing(self, version_id: str, target_id: str,
                                       processor_version: str, *, ok: bool,
                                       outputs: int = 0, note: str = '') -> None:
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
         from ..workflow.runtime_reads import current_read_context
         context=current_read_context()
         if context and (context.identity.consumer_id != 'information' or
                         context.identity.scope.get('id') != target_id):
             raise PermissionError('Information processing escapes bound target')
-        guard_analyst_output(store=self,what='Information processing completion')
+        assert_write_destination(self, what='Information processing completion')
         self.conn.execute(
             "UPDATE information_processing_runs SET status=?,completed_at=?,outputs=?,note=? "
             "WHERE version_id=? AND target_id=? AND processor_version=? AND status='running'",
@@ -2424,9 +2424,9 @@ class TradingMemory:
         import hashlib
         import json
 
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
 
-        guard_analyst_output(store=self, what="a legacy task projection")
+        assert_write_destination(self, what="a legacy task projection")
 
         stamp = created_at or evaluation_now(timezone.utc).isoformat(timespec="seconds")
         projection_id = hashlib.sha1(
@@ -2490,9 +2490,9 @@ class TradingMemory:
         """
         import json
 
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
 
-        guard_analyst_output(store=self, what="a task projection envelope")
+        assert_write_destination(self, what="a task projection envelope")
 
         # Timed-out/retried Dispatcher attempts may finish after their caller has
         # moved on. Do not allow such a late worker to publish into the durable

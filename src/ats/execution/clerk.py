@@ -161,11 +161,11 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     the SAME id for the same window and cannot double-book.
     """
     from ..memory import bound_store, get_store
-    from ..workflow.cutover_wiring import guard_clerk_publication
+    from ..workflow.isolation import assert_write_destination
     from ..workflow.runtime_reads import current_read_context, gate_read
 
     store = store or get_store()
-    guard_clerk_publication(store=store)
+    assert_write_destination(store, what="a ledger publication")
     if steps:
         from ..data.runtime.clerk_reads import ClerkBrokerReads, UnavailableBrokerReads
 
@@ -201,7 +201,7 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
         context = current_read_context()
         if context:
             gate_read(context.identity)
-        guard_clerk_publication(store=store, what=f"Clerk step {step}")
+        assert_write_destination(store, what=f"Clerk step {step}")
         impl = _STEPS.get(step)
         if impl is None:
             errors.append(f"{step}: unknown step")
@@ -211,10 +211,10 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
                 results[step] = impl(store, broker=broker, dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001 - one failed step must not
             from ..workflow.read_scope import ReadUnavailable
-            from ..workflow.cutover_wiring import BoundaryWriteRefused
+            from ..workflow.isolation import IsolatedWriteRefused
             from .trade_publication import TradePublicationRefused
 
-            if isinstance(exc, (TradePublicationRefused, BoundaryWriteRefused, ReadUnavailable)):
+            if isinstance(exc, (TradePublicationRefused, IsolatedWriteRefused, ReadUnavailable)):
                 raise
             # Ordinary unavailable steps remain recoverable; publication violations stop.
             log.exception("clerk step %s failed", step)
@@ -236,7 +236,7 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     context = current_read_context()
     if context:
         gate_read(context.identity)
-    guard_clerk_publication(store=store, what="Clerk completion and gap publication")
+    assert_write_destination(store, what="Clerk completion and gap publication")
     # A TWS that could not be reached says nothing about what the broker can still return (2026-11-03: a TWS that
     # had not logged in registered 30 permanent gaps, from 09-01 to 10-28, none of them verified). The run is
     # failed, `last_reconcile_at` does not move, and the next run with TWS up sees the same windows again.

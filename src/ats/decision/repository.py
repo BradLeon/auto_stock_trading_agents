@@ -398,9 +398,9 @@ class DecisionAuditRepository:
                       before_metrics: Mapping[str, Any] | None = None,
                       after_metrics: Mapping[str, Any] | None = None,
                       notes: str = "", created_at: str | None = None) -> sqlite3.Row:
-        from ..workflow.cutover_wiring import guard_approval_write
+        from ..workflow.isolation import assert_write_destination
 
-        guard_approval_write(store=self.store, what="a risk review")
+        assert_write_destination(self.store, what="a risk review")
         self.validate_research_dependencies(cycle_id)
         # §5.3/§10.2: a review binds ONE revision under ONE ruleset at ONE
         # snapshot instant. Any missing binding makes the row unverifiable, so
@@ -437,9 +437,9 @@ class DecisionAuditRepository:
                         idempotency_key: str,
                         created_at: str | None = None) -> sqlite3.Row:
         """Idempotent on `idempotency_key`: a replayed callback gets the original."""
-        from ..workflow.cutover_wiring import guard_approval_write
+        from ..workflow.isolation import assert_write_destination
 
-        guard_approval_write(store=self.store, what="a Boss approval")
+        assert_write_destination(self.store, what="a Boss approval")
         self.validate_research_dependencies(cycle_id)
         self.conn.execute(
             "INSERT OR IGNORE INTO boss_approvals (approval_id, cycle_id, "

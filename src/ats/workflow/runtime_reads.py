@@ -346,9 +346,6 @@ def replace_plan_without_bindings(plan):
 
 
 def check_plan_reads(plan, *, collect=False):
-    from .cutover_wiring import guard_analyst_output
-
-    guard_analyst_output(what="Dispatcher analyst execution")
     refused = {}
     for task in plan.tasks:
         try:
@@ -491,10 +488,6 @@ def scoped_read(consumer):
                 else:
                     identity = business_identity(consumer, kind=kind, scope_id=scope_id,
                         entities=entities, as_of=as_of, explicit=explicit, purpose=purpose)
-            if consumer not in {"chief", "risk", "trader", "clerk"} and function.__name__ != "run_sector_html":
-                from .cutover_wiring import guard_analyst_output
-
-                guard_analyst_output(what="analyst business entry")
             with bind_read(identity, as_of=as_of, mode=current.mode if current else None,
                            publication_path=current.publication_path if current else "",
                            fallback_input=fallback_input, invocation=binding):

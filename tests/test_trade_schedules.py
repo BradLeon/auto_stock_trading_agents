@@ -18,8 +18,6 @@ from test_phase_d_e2e import _an_active_trade_route, _chief_llm, _seed, _state, 
 from ats.config import REPO_ROOT
 from ats.decision.repository import DecisionAuditRepository
 from ats.runtime import dispatcher_daemon
-from ats.workflow import consumer_cutover as cc
-from ats.workflow import cutover_wiring as cw
 from ats.workflow import schedule_runtime as rt
 from ats.workflow import trade_schedules as ts
 from ats.workflow.isolation import isolated_run
@@ -36,14 +34,9 @@ def _tick(workflow, when):
 
 @pytest.fixture
 def world(tmp_path):
-    """An isolated schedule authority and route store; the two trade routes are on target and healthy."""
+    """An isolated schedule authority."""
     with isolated_run("trade-schedules", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
-        for consumer in ("clerk", "chief"):
-            cc.switch(consumer, actor="op", approval="chat", stop_conditions="health fails", health=OK, path=path,
-                      observe_until=(datetime.now(UTC) + timedelta(hours=72)).isoformat())
-        yield path
+        yield environment.path_for("ATS_DISPATCH_STATE_PATH")
 
 
 def _resume(workflow):
@@ -158,17 +151,6 @@ def test_resume_needs_the_approval_text_and_the_consumers_target_route(world):
     assert rt.current_owner("chief-daily", SCOPE) == "dispatcher"
     paused = rt.owner_switch("chief-daily", to_owner="legacy", actor="op", reason="pause")
     assert paused["action"] == "rollback" and rt.current_owner("chief-daily", SCOPE) == "legacy"
-
-
-def test_resume_is_refused_while_the_consumer_is_not_on_the_target_route(tmp_path):
-    with isolated_run("trade-schedules-off-route", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
-        cc.switch("clerk", actor="op", approval="chat", stop_conditions="health fails", health=OK, path=path,
-                  observe_until=(datetime.now(UTC) + timedelta(hours=72)).isoformat())
-        with pytest.raises(rt.ScheduleAuthorityError, match="not on the target route"):
-            _resume("chief-daily")                          # `chief` was never switched
-        assert _resume("clerk-daily")["to_owner"] == "dispatcher"
 
 
 def test_a_workflow_that_is_neither_research_nor_trade_path_is_refused(world):

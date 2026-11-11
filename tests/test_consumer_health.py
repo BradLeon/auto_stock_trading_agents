@@ -236,13 +236,10 @@ def test_technical_fails_when_the_whole_universe_has_no_recent_bar_twice(prices)
 
 @pytest.fixture
 def health_log(tmp_path):
-    from ats.workflow import cutover_wiring as cw
     from ats.workflow.isolation import isolated_run
 
     with isolated_run("consumer-health-log", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
-        yield path
+        yield environment.path_for("ATS_DB_PATH")
 
 
 OK_HEALTH = {"status": "ok", "problems": [], "warnings": []}
@@ -250,8 +247,6 @@ BAD_HEALTH = {"status": "failed", "problems": ["no admitted documents for the wh
 
 
 def test_observe_logs_and_alerts_only_when_the_status_changes(health_log):
-    from ats.workflow import consumer_cutover as cc
-
     alerts = []
     notify = lambda *a: alerts.append(a)  # noqa: E731
     assert health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
@@ -261,8 +256,8 @@ def test_observe_logs_and_alerts_only_when_the_status_changes(health_log):
     assert not health.observe("information", BAD_HEALTH, actor="dispatcher", notify=notify, path=health_log)
     assert health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
     assert [a[0] for a in alerts] == ["数据产品健康检查未通过：information", "数据产品健康检查已恢复：information"]
-    assert [row["action"] for row in cc.log(path=health_log)] == ["health", "health", "health"]
-    assert cc.status(path=health_log) == []  # observing never writes a route
+    assert [row["status"] for row in health.health_log(path=health_log)] == ["ok", "failed", "ok"]
+    assert [row["actor"] for row in health.health_log(path=health_log)] == ["data-refresh"] * 3
 
 
 def test_a_failing_alert_does_not_break_observation(health_log):

@@ -188,8 +188,6 @@ class Lease:
 
 
 def _owner(conn, workflow, scope, requested):
-    from .joint_cutover import assert_schedule_open
-    assert_schedule_open(workflow,json.loads(scope))
     row = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=? AND scope=?",
                        (workflow, scope)).fetchone()
     if row is None:
@@ -285,8 +283,6 @@ def publication_guard():
     if lease is None or _PUBLISHING.get():
         yield
         return
-    from .joint_cutover import assert_schedule_open
-    assert_schedule_open(lease.workflow,json.loads(lease.scope))
     if str(state_path().resolve()) != lease.ledger:
         raise ScheduleAuthorityError("schedule authority path changed after claim; refusing publication")
     with closing(_connect(write=True)) as conn:
@@ -307,7 +303,6 @@ def publication_guard():
         flag = _PUBLISHING.set(conn)
         try:
             yield
-            assert_schedule_open(lease.workflow,json.loads(lease.scope))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -802,105 +797,11 @@ def compare_triggers(expected):
             "clean": bool(rows or expected.get("wake_expected")) and not missing_wakes and all(not row["missing_paths"] and not row["missing_results"] and row["status"] in ("complete", SKIPPED_BY_PAUSE, VOIDED_BY_PAUSE) for row in rows)}
 
 
-def freeze(workflow, scope, *, actor, reason):
-    from .isolation import verified_isolation_root
-    if verified_isolation_root() is None:
-        from .joint_cutover import authorize_schedule
-        authorize_schedule(workflow,scope)
-    if not actor or not reason:
-        raise ScheduleAuthorityError("freeze actor/reason required")
-    scope = canonical(scope)
-    with closing(_connect(write=True)) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=? AND scope=?", (workflow, scope)).fetchone()
-        if row is None or row["frozen"]:
-            raise ScheduleAuthorityError("scope missing or already frozen")
-        token = uuid4().hex
-        conn.execute("UPDATE schedule_scope_owners SET frozen=1,token=? WHERE workflow=? AND scope=?", (token, workflow, scope))
-        _history(conn, "freeze", token, {"workflow": workflow, "scope": scope, "actor": actor, "reason": reason})
-        conn.commit()
-    return token
-
-
-def frozen_inventory(token):
-    with closing(_connect()) as conn:
-        state = conn.execute("SELECT * FROM schedule_scope_owners WHERE frozen=1 AND token=?", (token,)).fetchone()
-        if state is None:
-            raise ScheduleAuthorityError("valid frozen token required before inventory")
-        return [dict(row) for row in conn.execute("SELECT * FROM schedule_runtime_claims WHERE workflow=? AND scope=? AND status IN ('running','failed','pending')",
-                                                (state["workflow"], state["scope"]))]
-
-
-def cancel_freeze(token, *, actor, reason):
-    from .isolation import verified_isolation_root
-    if verified_isolation_root() is None or not actor or not reason:
-        raise ScheduleAuthorityError("freeze recovery requires isolated operator/reason")
-    with closing(_connect(write=True)) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        state = conn.execute("SELECT * FROM schedule_scope_owners WHERE frozen=1 AND token=?", (token,)).fetchone()
-        if state is None:
-            raise ScheduleAuthorityError("valid frozen token required")
-        conn.execute("UPDATE schedule_scope_owners SET frozen=0,token='' WHERE token=?", (token,))
-        _history(conn, "cancel_freeze", token, {"actor": actor, "reason": reason, "state": dict(state), "generation": state["generation"]})
-        conn.commit()
-
-
-def handover(token, *, to_owner, dispositions, actor, reason):
-    """Atomic fenced handover. Production coordinator will supply its gates in 10.2/5.15."""
-    from .isolation import verified_isolation_root
-    if verified_isolation_root() is None:
-        from .joint_cutover import authorize_schedule
-        with closing(_connect()) as guard_conn:
-            state=guard_conn.execute("SELECT workflow,scope FROM schedule_scope_owners WHERE frozen=1 AND token=?",(token,)).fetchone()
-        if state is None:raise ScheduleAuthorityError("frozen token missing")
-        authorize_schedule(state["workflow"],state["scope"])
-    if to_owner not in {"legacy", "dispatcher", "shadow"} or not actor or not reason:
-        raise ScheduleAuthorityError("owner/actor/reason required")
-    with closing(_connect(write=True)) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            state = conn.execute("SELECT * FROM schedule_scope_owners WHERE frozen=1 AND token=?", (token,)).fetchone()
-            if state is None:
-                raise ScheduleAuthorityError("frozen token missing")
-            assert_scope_execution_records(conn, state['workflow'], json.loads(state['scope']))
-            rows = conn.execute("SELECT * FROM schedule_runtime_claims WHERE workflow=? AND scope=? AND status IN ('running','failed','pending')",
-                                (state["workflow"], state["scope"])).fetchall()
-            if set(dispositions) != {row["key"] for row in rows}:
-                raise ScheduleAuthorityError("each unfinished claim needs one explicit disposition")
-            for row in rows:
-                item = dispositions[row["key"]]
-                mode = item.get("kind")
-                if mode not in {"carry_over", "already_run", "void"} or not item.get("reason"):
-                    raise ScheduleAuthorityError("disposition kind/reason required")
-                if mode == "already_run":
-                    raise ScheduleAuthorityError("already_run requires recorded completion, not operator assertion; let the worker finish")
-                if mode == "carry_over":
-                    if json.loads(row["result_refs"]):
-                        raise ScheduleAuthorityError("partly published trigger must finish or be voided; cannot carry over published results")
-                    # Keep identity/history; the old lease loses its generation.
-                    conn.execute("UPDATE schedule_runtime_claims SET owner=?,generation=?,status='pending' WHERE key=?",
-                                 (to_owner, state["generation"] + 1, row["key"]))
-                else:
-                    conn.execute("UPDATE schedule_runtime_claims SET status='void' WHERE key=?", (row["key"],))
-                _history(conn, "disposition", row["key"], {**item, "actor": actor, "old_generation": state["generation"]})
-            conn.execute("UPDATE schedule_scope_owners SET owner=?,generation=generation+1,frozen=0,token='' WHERE token=?",
-                         (to_owner, token))
-            _history(conn, "handover", token, {"from": dict(state), "to_owner": to_owner,
-                "to_generation": state["generation"] + 1, "actor": actor, "reason": reason,
-                "unfinished_inventory": [row["key"] for row in rows],
-                "publisher_fence": "same SQLite writer transaction", "source_lifecycle": "unchanged"})
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
-
 # --------------------------------------------------------------------------- #
 # Light owner switch for research workflows (Phase F simplification, 2026-10-16)
 # --------------------------------------------------------------------------- #
-# `freeze`/`handover` above stay under the joint coordinator. This path is for the research workflows and the two
-# trade-path workflows (`clerk-daily`, `chief-daily`, which resume only when their consumer reads the target route
-# and is healthy): one SQL transaction flips the workflow's template row and every
+# The research workflows and the two trade-path workflows (`clerk-daily`, `chief-daily`, which resume only when
+# their consumer's data products are healthy): one SQL transaction flips the workflow's template row and every
 # existing scope row, needs a recorded approval and a passing consumer health check to go to the Dispatcher, and
 # needs neither to come back. Unfinished claims must be voided on purpose; a running claim is never touched.
 RESEARCH_WORKFLOW_CONSUMER = {
@@ -930,18 +831,15 @@ def _workflow_consumer(workflow):
 
 
 def _dispatcher_preconditions(workflow, health_check):
-    """A workflow may go to the Dispatcher only when its consumer reads the target route and is healthy."""
-    from . import consumer_cutover, consumer_health
+    """A workflow may go to the Dispatcher only when its consumer's data products are healthy (user ruling D3,
+    2026-11-11: the read-route precondition went with the route tables, switch-trade r5 9.3)."""
+    from . import consumer_health
 
     consumer = _workflow_consumer(workflow)
-    route = next((row for row in consumer_cutover.status() if row["consumer_id"] == consumer), None)
-    if route is None or route["route"] != "target":
-        raise ScheduleAuthorityError(
-            f"{workflow}: the {consumer} research read is not on the target route; the Dispatcher cannot bind it")
     health = (health_check or consumer_health.check)(consumer)
     if health.get("status") != "ok":
         raise ScheduleAuthorityError(f"{workflow}: {consumer} health check failed: {health.get('problems')}")
-    return {"consumer": consumer, "route": route["route"], "route_generation": route["generation"],
+    return {"consumer": consumer,
             "health": {k: health.get(k) for k in ("status", "checked_at", "warnings")}}
 
 

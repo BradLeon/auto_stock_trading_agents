@@ -2812,9 +2812,10 @@ def run_data(
         result = products.health()
     elif action == "health-log":
         # The recorded changes of that health (a line only when it turns bad or turns good again).
-        from ..workflow import consumer_cutover as cc
+        from ..workflow import consumer_health
 
-        print(json.dumps(cc.log(consumer_id=assurance_consumer or None), ensure_ascii=False, indent=2, default=str))
+        print(json.dumps(consumer_health.health_log(consumer_id=assurance_consumer or None),
+                         ensure_ascii=False, indent=2, default=str))
         return 0
     elif action == "quality":
         structured = products.structured_quality_report(dataset=dataset or None)

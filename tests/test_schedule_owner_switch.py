@@ -10,12 +10,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ats.workflow import consumer_cutover as cc
-from ats.workflow import cutover_wiring as cw
-from ats.workflow import read_windows as rw
-from ats.workflow import runtime_reads as rr
 from ats.workflow import schedule_runtime as rt
-from ats.workflow.isolation import isolated_run, verified_isolation_root
+from ats.workflow.isolation import isolated_run
 
 OK = {"status": "ok", "problems": [], "warnings": []}
 BAD = {"status": "failed", "problems": ["no admitted documents"], "warnings": []}
@@ -27,10 +23,7 @@ SCOPE_B = {"kind": "entity", "id": "TSM"}
 @pytest.fixture
 def world(tmp_path):
     with isolated_run("owner-switch", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
-        cc.switch("information", actor="op", approval="chat", stop_conditions="health fails", health=OK, path=path,
-                  observe_until=(datetime.now(UTC) + timedelta(hours=72)).isoformat())
+        path = environment.path_for("ATS_DISPATCH_STATE_PATH")
         with closing(rt._connect(write=True)) as conn:
             for scope in (SCOPE_A, SCOPE_B):
                 conn.execute("INSERT INTO schedule_scope_owners VALUES(?,?,?,1,0,'')",
@@ -64,13 +57,12 @@ def test_switch_flips_the_template_and_every_scope_row_in_one_generation(world):
     assert row["action"] == "switch" and row["approval"] == "user approved" and json.loads(row["health"])["consumer"] == "information"
 
 
-def test_going_to_the_dispatcher_needs_approval_a_healthy_consumer_and_a_target_read_route(world):
+def test_going_to_the_dispatcher_needs_approval_and_a_healthy_consumer(world):
+    """No read-route precondition since the route tables were retired (switch-trade r5 9.3, user ruling D3)."""
     with pytest.raises(rt.ScheduleAuthorityError, match="approval"):
         go(approval="")
     with pytest.raises(rt.ScheduleAuthorityError, match="health check failed"):
         go(health_check=lambda c: BAD)
-    with pytest.raises(rt.ScheduleAuthorityError, match="not on the target route"):
-        go(workflow="fundamental-routine")                                   # fundamental read route is still legacy
     assert owners() == {("*", "legacy", 1), (rt.canonical(SCOPE_A), "legacy", 1), (rt.canonical(SCOPE_B), "legacy", 1)}
     assert rt.owner_log() == []
 
@@ -144,35 +136,6 @@ def test_a_frozen_scope_or_mixed_owners_refuse_the_light_path(world):
                      (rt.canonical(SCOPE_A),))
     with pytest.raises(rt.ScheduleAuthorityError, match="mixed"):
         go()
-
-
-def who(consumer, symbol="NVDA"):
-    return rr.business_identity(consumer, kind="entity", scope_id=symbol, entities=[symbol], as_of=POINT)
-
-
-def test_dispatcher_plans_bind_a_consumer_on_the_target_route_without_a_registered_window(world):
-    point = who("information")
-    assert rw.select(point, workflow="information-brief", as_of=POINT, path=world, purpose="information-brief") == point
-
-
-def test_dispatcher_plans_still_refuse_a_consumer_on_the_old_route(world):
-    with pytest.raises(rr.ReadUnavailable, match="read window"):
-        rw.select(who("fundamental"), workflow="fundamental-routine", as_of=POINT, path=world, purpose="fundamental-routine")
-
-
-def test_an_exact_registered_window_still_wins_over_the_consumer_wide_route(world):
-    from ats.workflow import cutover as co
-    from ats.workflow import scoped_routes as sr
-
-    point = who("information")
-    conn = sqlite3.connect(world)
-    conn.executescript(sr._SCHEMA)
-    conn.execute("INSERT INTO scoped_cutover_routes VALUES (?,?,?,?,?,?)",
-                 (co.PROJECTION_READ, point.key, sr.canonical_json(point.as_row()), "disabled", 5, "now"))
-    conn.commit(); conn.close()
-    with pytest.raises(rr.ReadUnavailable):                                 # exact-but-unauthorized stays refused
-        rw.select(point, workflow="information-brief", as_of=POINT, path=world, purpose="information-brief")
-    assert verified_isolation_root() is not None
 
 
 def test_a_running_claim_whose_worker_already_ended_with_an_error_can_be_voided(world):

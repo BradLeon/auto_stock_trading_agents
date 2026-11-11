@@ -41,7 +41,7 @@ def test_data_health_without_a_consumer_is_still_the_platform_health(capsys, mon
 def test_health_log_reads_the_recorded_changes(capsys, monkeypatch):
     rows = [{"seq": 1, "consumer_id": "technical", "event": "health"}]
     seen = {}
-    monkeypatch.setattr("ats.workflow.consumer_cutover.log",
+    monkeypatch.setattr("ats.workflow.consumer_health.health_log",
                         lambda consumer_id=None, path=None: seen.update(consumer=consumer_id) or rows)
     code, out = _run(capsys, ["data", "health-log", "--consumer", "technical"])
     assert code == 0 and json.loads(out) == rows and seen == {"consumer": "technical"}

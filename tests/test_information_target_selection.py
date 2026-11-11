@@ -21,7 +21,7 @@ def article(key, source='semianalysis', title='Capacity', body='Microsoft increa
 
 def bound(monkeypatch, publishers=True):
     entities = ['MSFT', 'NVDA'] + (CONFIG['publisher_entities'] if publishers else [])
-    context = SimpleNamespace(route='target', identity=SimpleNamespace(consumer_id='information',
+    context = SimpleNamespace(identity=SimpleNamespace(consumer_id='information',
                                    scope={'kind': 'entity', 'id': 'MSFT', 'entities': entities}))
     monkeypatch.setattr(selection, 'current_read_context', lambda: context)
     monkeypatch.setattr(assemble, 'signal_chain_universe', lambda targets: ('MSFT target; NVDA supplier',
@@ -263,8 +263,8 @@ def test_native_target_channel_reads_publisher_material_only_when_target_is_inde
         title='Industry architecture', published_at=NOW.isoformat(), min_chars=1, now=NOW, store=store)
     identity = business_identity('information', kind='entity', scope_id='MSFT',
         entities=['MSFT', 'NVDA', *CONFIG['publisher_entities']], as_of=NOW)
-    context = ReadContext(identity, mode='isolated', route='target', cutoff=NOW)
-    monkeypatch.setattr(runtime_reads, 'gate_read', lambda identity: SimpleNamespace(route='target'))
+    context = ReadContext(identity, mode='isolated', cutoff=NOW)
+    monkeypatch.setattr(runtime_reads, 'gate_read', lambda identity: None)
     monkeypatch.setattr(selection, 'current_read_context', lambda: context)
     monkeypatch.setattr(assemble, 'evaluation_now', lambda tz: NOW)
     monkeypatch.setattr(assemble, 'signal_chain_universe', lambda targets: ('MSFT + NVDA', {'MSFT':['MSFT'], 'NVDA':['MSFT']}))

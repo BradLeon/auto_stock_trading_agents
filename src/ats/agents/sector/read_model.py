@@ -10,10 +10,7 @@ from ...workflow.runtime_reads import current_read_context
 
 
 def governed():
-    from ...workflow.isolation import verified_isolation_root
-
-    context = current_read_context()
-    return context is not None and (context.route == "target" or verified_isolation_root() is not None)
+    return current_read_context() is not None
 
 
 def allocation(store, name, *, date=""):

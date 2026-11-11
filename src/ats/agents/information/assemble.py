@@ -26,11 +26,10 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
     published_at; the cutoff here is applied on the record's published time so
     late-arriving old material is excluded from "this window's new facts".
     """
-    from ...workflow.isolation import verified_isolation_root
     from ...workflow.runtime_reads import current_read_context
 
     context = current_read_context()
-    if context and (context.route == "target" or verified_isolation_root() is not None):
+    if context:
         from ...data.consumer_api import read_input
 
         packet = read_input(consumer="information", product="DOC_DATA",

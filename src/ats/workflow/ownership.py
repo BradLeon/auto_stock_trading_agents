@@ -188,10 +188,6 @@ def run_owned_workflow(workflow_id: str, *, scope: ProjectionScope,
             enter_decision_cycle=body["enter_decision_cycle"],
             config_dir=config_dir, namespace=mode,
             task_inputs=body.get("task_inputs", {}))
-        from .isolation import verified_isolation_root
-        if mode == "dispatcher" and verified_isolation_root() is None:
-            from .read_windows import bind_plan
-            plan = bind_plan(plan)
         return plan
 
 

@@ -2718,10 +2718,9 @@ class TradingMemory:
 
         now = evaluation_now(timezone.utc).isoformat()
         from ..workflow.runtime_reads import current_read_context
-        from ..workflow.isolation import verified_isolation_root
 
         context = current_read_context()
-        if context and (context.route == "target" or verified_isolation_root() is not None):
+        if context:
             # Target extraction already carries the canonical admitted document
             # ID. Resolve its immutable version through the product boundary.
             from ..data.products.unstructured import admitted_documents

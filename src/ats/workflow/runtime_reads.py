@@ -1,24 +1,27 @@
-"""Business-entry read gates. A scope is frozen per invocation, never per product."""
+"""Business-entry read binding: one explicit scope per invocation (narrowed in switch-trade r5 9.2).
+
+A consumer reads only what it declared (`config/data/target_dataflow_coverage.yaml`, see `read_scope`) and only under
+the business scope its entry was bound to: the entities, the time point and the consumer of that entry. Reads that
+escape the scope are refused with `ReadUnavailable`, never served empty. Whether the product itself is fit to read is
+checked where it is read (`consumer_api.read_input`, `read_scope.read_projection`, the Dispatcher's product health
+gate). The route tables, qualification ledger, read windows, invocation receipts and read-stop latches that used to sit
+in front of every read were migration machinery and were retired.
+"""
 
 from __future__ import annotations
 
-import hashlib
 import inspect
 import json
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from functools import wraps
-from uuid import uuid4
 
 from ats.workflow.evaluation_clock import now as evaluation_now
 
-from .cutover_routing import read_route
-
-from .read_scope import ReadUnavailable, consumer_contract
-from .read_scope import ReadScope
+from .read_scope import ReadScope, ReadUnavailable, consumer_contract
 
 
 @dataclass(frozen=True)
@@ -26,15 +29,7 @@ class ReadContext:
     identity: ReadScope
     mode: str
     publication_path: str = ""
-    route: str = "legacy"
     cutoff: datetime | None = None
-    fallback_input: object | None = None
-    recovery_generation: int = 0
-    joint_epoch: int = 0
-    publication_generations: tuple[tuple[str, int], ...] = ()
-    read_generation: int = 0
-    invocation: dict | None = None
-    deployment: dict | None = None
     execution_plan_hash: str = ""
 
 
@@ -46,8 +41,25 @@ def current_read_context():
     return _CURRENT.get()
 
 
+def invocation_time(value):
+    point = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if not isinstance(point, datetime) or point.tzinfo is None:
+        raise ReadUnavailable("business as_of requires a timezone")
+    return point.astimezone(UTC)
+
+
+def check_time(identity, as_of):
+    """The read's time point must fall inside the scope's time range."""
+    point = invocation_time(as_of)
+    window = identity.scope["time_range"]
+    if not datetime.fromisoformat(window["start"]) <= point <= datetime.fromisoformat(window["end"]):
+        raise ReadUnavailable("business as_of is outside the bound scope's time range")
+    return point
+
+
 def business_identity(consumer, *, kind, scope_id, entities, as_of=None, explicit=None,
-                      event_id="", event_version="", purpose=None):
+                      event_id="", event_version=""):
+    """The scope of one business request. An explicit scope may narrow the time range, nothing else."""
     contract = consumer_contract(consumer)
     point = as_of or evaluation_now(UTC)
     point = datetime.fromisoformat(point) if isinstance(point, str) else point
@@ -57,37 +69,27 @@ def business_identity(consumer, *, kind, scope_id, entities, as_of=None, explici
              "time_range": {"start": point.isoformat(), "end": point.isoformat()}}
     if event_id or event_version:
         scope.update(event_id=event_id, event_version=event_version)
-    if explicit is not None:
-        supplied = explicit.as_row() if isinstance(explicit, ReadScope) else explicit
-        if "scope" in supplied:
-            if any(supplied.get(k) != v for k, v in (
-                    ("domain_id", contract["domain_id"]), ("consumer_id", consumer),
-                    ("contract_version", contract["contract_version"]))):
-                raise ReadUnavailable("requested read contract mismatch")
-            supplied = supplied["scope"]
-        identity = ReadScope(contract["domain_id"], consumer,
-                                 contract["contract_version"], supplied)
-        actual = identity.scope
-        from .invocation_bindings import matches
-        point_identity = ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope)
-        if (identity.scope.get("time_policy") != "per_invocation" and
-                any(actual.get(k) != scope.get(k) for k in ("kind", "id", "entities", "event_id", "event_version"))
-                or identity.scope.get("time_policy") == "per_invocation" and
-                not matches(point_identity, identity, purpose=purpose or consumer)):
-            raise ReadUnavailable("requested read scope does not match business request")
-        from .read_windows import check_time
-        check_time(identity, point)
-        return identity
-    return ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope)
+    if explicit is None:
+        return ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope)
+    supplied = explicit.as_row() if isinstance(explicit, ReadScope) else explicit
+    if "scope" in supplied:
+        if any(supplied.get(k) != v for k, v in (
+                ("domain_id", contract["domain_id"]), ("consumer_id", consumer),
+                ("contract_version", contract["contract_version"]))):
+            raise ReadUnavailable("requested read contract mismatch")
+        supplied = supplied["scope"]
+    identity = ReadScope(contract["domain_id"], consumer, contract["contract_version"], supplied)
+    actual = identity.scope
+    expected = ReadScope(contract["domain_id"], consumer, contract["contract_version"], scope).scope
+    if any(actual.get(k) != expected.get(k) for k in ("kind", "id", "entities", "event_id", "event_version")):
+        raise ReadUnavailable("requested read scope does not match business request")
+    check_time(identity, point)
+    return identity
 
 
 def gate_read(identity):
-    from .cutover import CutoverError
-    from .joint_cutover import assert_scope_open
-    try:
-        assert_scope_open(identity)
-    except CutoverError as exc:
-        raise ReadUnavailable(str(exc)) from exc
+    """Recheck at every read: the consumer is declared, and an isolated run still has its complete isolation."""
+    consumer_contract(identity.consumer_id)
     if os.environ.get("ATS_RUN_MODE") == "isolated":
         from ..execution.broker_write_guard import startup
         from .isolation import verified_isolation_root
@@ -95,35 +97,10 @@ def gate_read(identity):
         startup(caller="business_read_gate", mode="isolated")
         if verified_isolation_root() is None:
             raise ReadUnavailable("isolated read environment is incomplete")
-    current = current_read_context()
-    if current and current.identity == identity:
-        from . import cutover as plane
-        from .joint_cutover import epoch
-        from .scoped_routes import resolve_route
-        if (epoch(identity) != current.joint_epoch or
-                resolve_route(plane.PROJECTION_READ, identity)["generation"] != current.read_generation):
-            raise ReadUnavailable("bound worker read authority changed")
-    if current and current.identity == identity and current.invocation:
-        from .invocation_bindings import recheck
-        recheck(identity, current.invocation)
-    decision = read_route(consumer_id=identity.consumer_id, identity=identity)
-    if not decision.qualification:
-        from ..data.assurance import qualification
-
-        result = qualification(domain_id=identity.domain_id, consumer_id=identity.consumer_id,
-                               contract_version=identity.contract_version, scope=identity.scope)
-        decision.qualification = {"status": result.get("status"), "reasons": result.get("reasons", [])}
-    if decision.route == "target" and not decision.consumer_wide:
-        from .isolation import verified_isolation_root
-        if verified_isolation_root() is None or identity.scope.get("time_policy") == "per_invocation":
-            from .read_windows import assert_current
-            assert_current(identity, workflow=current.invocation["workflow"]
-                if current and current.identity == identity and current.invocation else None)
-    return decision
 
 
 def guard_input(consumer, query, *, as_of=None, business_scope=None):
-    """Recheck the bound business identity before a native input can serve data."""
+    """Check a native input request against the bound business scope before it can serve data."""
     current = current_read_context()
     if current and current.identity.consumer_id != consumer:
         raise ReadUnavailable("input consumer escapes bound business request")
@@ -143,15 +120,10 @@ def guard_input(consumer, query, *, as_of=None, business_scope=None):
     else:
         raise ReadUnavailable("native input requires an explicit business scope or bound entry")
     entities = query.get("entities") or ([query["entity"]] if query.get("entity") else [])
-    if current is None and identity.scope.get("time_policy") == "per_invocation":
-        from .isolation import verified_isolation_root
-        if verified_isolation_root() is None:
-            raise ReadUnavailable("persistent native input requires a bound invocation")
-    actual_scope = (current.invocation["actual_identity"]["scope"]
-                    if current and current.invocation else identity.scope)
-    if not set(entities) <= set(actual_scope["entities"]):
+    bound = identity.scope
+    if not set(entities) <= set(bound["entities"]):
         raise ReadUnavailable("input entity escapes bound business scope")
-    if actual_scope.get("kind") == "decision" and query.get("cycle_id") is not None and str(query["cycle_id"]) != actual_scope["id"]:
+    if bound.get("kind") == "decision" and query.get("cycle_id") is not None and str(query["cycle_id"]) != bound["id"]:
         raise ReadUnavailable("input cycle escapes bound business scope")
     if as_of is not None:
         point = as_of.astimezone(UTC).isoformat()
@@ -159,107 +131,30 @@ def guard_input(consumer, query, *, as_of=None, business_scope=None):
                     as_of.astimezone(UTC).isoformat())
         if point != expected:
             raise ReadUnavailable("input time escapes bound business scope")
-    decision = gate_read(identity)
-    if decision.route != "target":
-        from .isolation import verified_isolation_root
-
-        # Candidate data in a fully isolated run can establish future evidence.
-        # The native API has no legacy implementation: it must not silently serve
-        # target data just because the old business route is still allowed.
-        if verified_isolation_root() is None:
-            raise ReadUnavailable("native target input requires an enabled exact business scope")
-    return decision
+    gate_read(identity)
 
 
 @contextmanager
-def bind_read(identity, *, as_of=None, mode=None, publication_path="", fallback_input=None, invocation=None, execution_plan_hash=""):
-    from . import cutover as plane
-    from .joint_cutover import epoch
-    from .scoped_routes import resolve_route
-    joint_epoch=epoch(identity)
-    read_generation = resolve_route(plane.PROJECTION_READ, identity)["generation"]
-    generations = tuple((boundary, resolve_route(boundary, identity)["generation"])
-                        for boundary in (plane.ANALYST_OUTPUT, plane.APPROVAL_LIFECYCLE,
-                                         plane.CLERK_PUBLICATION))
-    window = identity.scope.get("time_range")
-    start = datetime.fromisoformat(window["start"]) if window else None
-    end = datetime.fromisoformat(window["end"]) if window else None
+def bind_read(identity, *, as_of=None, mode=None, publication_path="", execution_plan_hash=""):
+    """Bind one business scope and its time point for the reads made inside this entry."""
+    window = identity.scope["time_range"]
+    start, end = datetime.fromisoformat(window["start"]), datetime.fromisoformat(window["end"])
     parent = current_read_context()
-    if parent and parent.identity == identity:
-        # A nested entry is still the same worker, not a newly authorized one.
-        # Rebinding must not refresh away its pre-stop publication authority.
-        generations = parent.publication_generations
-        joint_epoch = parent.joint_epoch
-        read_generation = parent.read_generation
-    if fallback_input is None and parent and parent.identity == identity:
-        fallback_input = parent.fallback_input
-    from .read_windows import check_time
-    if parent and parent.identity == identity:
+    nested = parent is not None and parent.identity == identity
+    if nested:
+        # A nested entry is the same worker: it keeps the outer time point.
         cutoff = parent.cutoff
         if as_of is not None and check_time(identity, as_of) != cutoff:
             raise ReadUnavailable("nested entry cannot change invocation as_of")
     else:
-        cutoff = check_time(identity, as_of if as_of is not None else
-                            end if window and start == end else evaluation_now(UTC))
-    try:
-        decision = gate_read(identity)  # Recheck TTL/revocation on every entry, including reuse.
-    except ReadUnavailable as exc:
-        from .read_recovery import ReadStopped
-
-        if isinstance(exc, ReadStopped):
-            raise
-        if fallback_input is None:
-            raise
-        from .consumer_reads import InternalFallback
-        from .cutover_routing import RouteDecision
-
-        if not isinstance(fallback_input, InternalFallback):
-            raise ReadUnavailable("actual fallback adapter required")
-        fallback_input = fallback_input.prepare(identity)  # Proof and actual readable data.
-        decision = RouteDecision(identity.consumer_id, identity.domain_id,
-                                 identity.contract_version, identity.scope, fallback_input.route)
-    else:
-        fallback_input = None
-    from .read_recovery import ReadStopped, current_policy
-
-    policy = current_policy(identity)
-    if policy and policy["stopped"]:
-        raise ReadStopped("scope stopped before context binding")
-    if epoch(identity)!=joint_epoch or resolve_route(plane.PROJECTION_READ, identity)["generation"] != read_generation:
-        raise ReadUnavailable("joint authority changed during worker binding")
-    deployment = None
-    if identity.scope.get("time_policy") == "per_invocation":
-        from .read_windows import _deployment
-        from .invocation_bindings import invocation as build_invocation, recheck
-        evidence = _deployment(identity)
-        deployment = evidence["deployment"]
-        if parent and parent.identity == identity:
-            if invocation is not None and invocation != parent.invocation:
-                raise ReadUnavailable("nested entry cannot change invocation binding")
-            invocation = parent.invocation
-        if invocation is None:
-            if identity.scope.get("event_rule") or identity.scope.get("invocation_rule"):
-                raise ReadUnavailable("explicit dynamic invocation binding required")
-            scope = {k: v for k, v in identity.scope.items() if k not in
-                     {"time_policy", "deployment_purpose"}}
-            scope["time_range"] = {"start": cutoff.isoformat(), "end": cutoff.isoformat()}
-            actual = ReadScope(identity.domain_id, identity.consumer_id, identity.contract_version, scope)
-            invocation = build_invocation(identity, actual, workflow=deployment["workflow"],
-                as_of=cutoff, purpose=identity.scope.get("deployment_purpose", identity.consumer_id),
-                run_id="read:" + uuid4().hex)
-        recheck(identity, invocation)
-        if invocation["workflow"] != deployment["workflow"] or invocation["as_of"] != cutoff.isoformat():
-            raise ReadUnavailable("invocation workflow or cutoff differs from committed permission")
+        cutoff = check_time(identity, as_of if as_of is not None else end if start == end else evaluation_now(UTC))
+    gate_read(identity)
     context = ReadContext(identity, mode or os.environ.get("ATS_RUN_MODE", "production"),
-                          str(publication_path), decision.route, cutoff, fallback_input,
-                          policy["event_id"] if policy else 0,
-                          joint_epoch, generations, read_generation, invocation, deployment,
-                          parent.execution_plan_hash if parent and parent.identity == identity else execution_plan_hash)
+                          str(publication_path), cutoff,
+                          parent.execution_plan_hash if nested else execution_plan_hash)
     token = _CURRENT.set(context)
     try:
-        from .consumer_reads import audit_read_entry
-        with audit_read_entry(context):
-            yield context
+        yield context
     finally:
         _CURRENT.reset(token)
 
@@ -337,29 +232,15 @@ def task_identity(plan, task):
         event_id, event_version = actual
     return business_identity(consumer, kind=task.scope.kind, scope_id=task.scope.id or "portfolio",
                              entities=entities, as_of=plan.as_of, explicit=explicit,
-                             event_id=event_id, event_version=event_version, purpose=task.task_id)
-
-
-def replace_plan_without_bindings(plan):
-    from dataclasses import replace
-    return replace(plan, task_inputs={**plan.task_inputs, "read_scopes": {}})
+                             event_id=event_id, event_version=event_version)
 
 
 def check_plan_reads(plan, *, collect=False):
+    """Every task of a plan has a valid business scope under the current configuration."""
     refused = {}
     for task in plan.tasks:
         try:
-            identity = task_identity(plan, task)
-            if identity.scope.get("time_policy") == "per_invocation":
-                from .invocation_bindings import recheck
-                from .read_windows import assert_current
-                binding = (plan.task_inputs.get("read_invocations") or {}).get(task.instance_key)
-                actual = recheck(identity, binding)
-                expected = task_identity(replace_plan_without_bindings(plan), task)
-                if actual != expected or binding["run_id"] != plan.run_id:
-                    raise ReadUnavailable("frozen plan invocation scope/run differs")
-                assert_current(identity, workflow=plan.trigger["workflow_id"])
-            gate_read(identity)
+            gate_read(task_identity(plan, task))
         except ReadUnavailable as exc:
             if not collect:
                 raise
@@ -368,7 +249,7 @@ def check_plan_reads(plan, *, collect=False):
 
 
 def decision_read(consumer):
-    """Bind a real decision node's role independently of the Chief's authority."""
+    """Bind a real decision node's role (Risk, Trader) to the cycle's own orders."""
     def decorate(function):
         @wraps(function)
         def entry(state, **kwargs):
@@ -378,27 +259,9 @@ def decision_read(consumer):
             explicit = kwargs.pop("read_scope", None)
             now = evaluation_now(UTC)
             entities = sorted({order.symbol for order in orders})
-            supplied = explicit or {"kind": "decision", "id": state.cycle_id, "entities": entities,
-                "time_range": {"start": (now-timedelta(minutes=5)).isoformat(),
-                               "end": (now+timedelta(minutes=5)).isoformat()}}
-            point = business_identity(consumer, kind="decision", scope_id=state.cycle_id,
-                                      entities=entities, as_of=now)
-            from .isolation import verified_isolation_root
-            binding = None
-            if verified_isolation_root() is None:
-                from .read_windows import select
-                from .invocation_bindings import invocation
-                requirements = getattr(state, "decision_requirements", {}) or state.research_snapshot.get("requirements", {})
-                from .decision_requirements import restore
-                plan = restore(requirements)
-                workflow = plan.trigger["workflow_id"]
-                identity = select(point, workflow=workflow, as_of=now, explicit=explicit, purpose=consumer)
-                binding = invocation(identity, point, workflow=workflow, as_of=now,
-                    purpose=consumer, run_id=state.cycle_id, plan_hash=plan.plan_hash)
-            else:
-                identity = business_identity(consumer, kind="decision", scope_id=state.cycle_id,
-                                             entities=entities, explicit=supplied)
-            with bind_read(identity, as_of=now, invocation=binding):
+            identity = business_identity(consumer, kind="decision", scope_id=state.cycle_id,
+                                         entities=entities, as_of=now, explicit=explicit)
+            with bind_read(identity, as_of=now):
                 return function(state, **kwargs)
         return entry
     return decorate
@@ -412,7 +275,6 @@ def scoped_read(consumer):
         @wraps(function)
         def entry(*args, **kwargs):
             explicit = kwargs.pop("read_scope", (_REQUESTS.get() or {}).get(consumer))
-            fallback_input = kwargs.pop("read_fallback", None)
             as_of = kwargs.pop("read_as_of", None)
             current = current_read_context()
             values = signature.bind(*args, **kwargs)
@@ -440,70 +302,21 @@ def scoped_read(consumer):
             else:
                 kind, scope_id = "portfolio", "portfolio"
             entities = consumer_entities(consumer, kind, scope_id, sector=name if kind == "layer" else "")
-            binding = None
-            from .isolation import verified_isolation_root
-            purpose = {"layer": "layer-review", "information": "information-brief",
-                "sector": "sector-review", "macro": "macro-review", "technical": "technical-review"}.get(consumer, consumer)
-            if consumer == "fundamental":
-                requested_mode = getattr(values.get("request"), "mode", None) or getattr(values.get("args"), "mode", None)
-                if requested_mode is None and "phase" in values:
-                    requested_mode = "event" if values["phase"] == "score" else "routine"
-                if requested_mode is None:
-                    requested_mode = "event" if "event" in function.__module__ or "event" in function.__name__ else "routine"
-                if requested_mode not in {"routine", "event"}:
-                    raise ReadUnavailable("unsupported Fundamental invocation mode")
-                purpose = "fundamental-" + requested_mode
             if current and current.identity.consumer_id == consumer and explicit is None:
-                if current.invocation and current.invocation["purpose"] != purpose:
-                    raise ReadUnavailable("nested entry purpose escapes bound invocation")
-                if consumer == "clerk" and current.invocation and current.invocation["query_window"] != _clerk_query_window(values, as_of or current.cutoff):
-                    raise ReadUnavailable("Clerk query window escapes bound invocation")
                 scope = current.identity.scope
                 if scope["kind"] != kind or scope["id"] != scope_id or scope["entities"] != sorted(set(entities)):
                     raise ReadUnavailable("nested business request escapes bound scope")
                 identity = current.identity
-                binding = current.invocation
                 as_of = as_of or current.cutoff
             else:
                 as_of = as_of or evaluation_now(UTC)
-                if verified_isolation_root() is None:
-                    from .read_windows import select, has_persistent_binding
-                    from .invocation_bindings import invocation
-                    point = business_identity(consumer, kind=kind, scope_id=scope_id, entities=entities, as_of=as_of)
-                    workflow = purpose
-                    stable_requested = explicit and ((explicit.scope if isinstance(explicit, ReadScope)
-                        else explicit.get("scope", explicit)).get("time_policy") == "per_invocation")
-                    if stable_requested or (explicit is None and has_persistent_binding(point, purpose=purpose)):
-                        identity = select(point, workflow=workflow, as_of=as_of, explicit=explicit, purpose=purpose)
-                    else:
-                        identity = business_identity(consumer, kind=kind, scope_id=scope_id,
-                            entities=entities, as_of=as_of, explicit=explicit, purpose=purpose)
-                    if identity.scope.get("time_policy") == "per_invocation":
-                        binding = invocation(identity, point, workflow=workflow, as_of=as_of, purpose=purpose,
-                            run_id="entry:" + hashlib.sha256(json.dumps({"consumer": consumer,
-                                "scope": point.as_row(), "function": function.__module__ + "." + function.__name__}, sort_keys=True).encode()).hexdigest())
-                        if consumer == "clerk":
-                            binding = invocation(identity, point, workflow=workflow, as_of=as_of,
-                                purpose=purpose, run_id=binding["run_id"], query_window=_clerk_query_window(values, as_of))
-                else:
-                    identity = business_identity(consumer, kind=kind, scope_id=scope_id,
-                        entities=entities, as_of=as_of, explicit=explicit, purpose=purpose)
+                identity = business_identity(consumer, kind=kind, scope_id=scope_id,
+                                             entities=entities, as_of=as_of, explicit=explicit)
             with bind_read(identity, as_of=as_of, mode=current.mode if current else None,
-                           publication_path=current.publication_path if current else "",
-                           fallback_input=fallback_input, invocation=binding):
+                           publication_path=current.publication_path if current else ""):
                 return function(*args, **kwargs)
         return entry
     return decorate
-
-
-def _clerk_query_window(values, as_of):
-    from .read_windows import invocation_time
-
-    stamp = invocation_time(as_of)
-    day = values.get("as_of") or stamp.date().isoformat()
-    start = datetime.fromisoformat(values.get("window_start") or day).replace(tzinfo=UTC)
-    end = datetime.fromisoformat(values.get("window_end") or day).replace(tzinfo=UTC) + timedelta(days=1) - timedelta(microseconds=1)
-    return {"start": start.isoformat(), "end": min(end, stamp).isoformat()}
 
 
 def cli_read_request(function):

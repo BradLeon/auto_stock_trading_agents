@@ -64,9 +64,8 @@ def run_information_target(symbol: str, *, store=None, use_llm: bool = True,
 
     store = get_store() if store is None else store
     from ...workflow.runtime_reads import current_read_context
-    from ...workflow.isolation import verified_isolation_root
     context = current_read_context()
-    if context is not None and (context.route == "target" or verified_isolation_root() is not None):
+    if context is not None:
         # Candidate acceptance uses the native business implementation inside
         # complete isolation. Native reads still run their scope/route gates;
         # this does not activate a production route or grant qualification.

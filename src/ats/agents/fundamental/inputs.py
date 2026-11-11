@@ -4,13 +4,12 @@ from __future__ import annotations
 import json
 
 from ...data.consumer_api import read_input
-from ...workflow.isolation import verified_isolation_root
 from ...workflow.runtime_reads import current_read_context
 
 
 def governed_company_inputs(symbol):
     context = current_read_context()
-    if context is None or (context.route != "target" and verified_isolation_root() is None):
+    if context is None:
         return None  # Existing legacy entry; never used as a target fallback.
     financials = read_input("fundamental", "COMPANY_DATA", scope={"kind": "financials", "entity": symbol})
     consensus = read_input("fundamental", "COMPANY_DATA", scope={"kind": "consensus", "entity": symbol})

@@ -31,32 +31,22 @@ def dependency_identities(plan):
 
 
 def freeze_read_dependencies(plan):
-    from . import cutover as plane
+    """The business scopes this decision reads, frozen with the requirements (no route or qualification state)."""
     from .isolation import verified_isolation_root
-    from .read_recovery import current_policy
     from .runtime_reads import gate_read
-    from .scoped_routes import resolve_route
 
     rows = []
     isolated = verified_isolation_root() is not None
     for who in dependency_identities(plan).values():
-        decision = gate_read(who)
-        authority = resolve_route(plane.PROJECTION_READ, who)
-        policy = current_policy(who)
-        if not isolated and (decision.route != "target" or decision.qualification.get("status") != "eligible"):
-            raise ReadUnavailable("new decision dependency requires qualified target business scope")
-        rows.append({"identity": who.as_row(), "route": authority["route"],
-                     "generation": authority["generation"], "candidate_isolated": isolated,
-                     "recovery_generation": policy["event_id"] if policy else 0})
+        gate_read(who)
+        rows.append({"identity": who.as_row(), "candidate_isolated": isolated})
     return rows
 
 
 def validate_read_dependencies(plan, requirements):
-    from . import cutover as plane
     from .isolation import verified_isolation_root
-    from .read_recovery import current_policy
+    from .read_scope import ReadScope
     from .runtime_reads import gate_read
-    from .scoped_routes import resolve_route
 
     expected = dependency_identities(plan)
     rows = requirements.get("read_dependencies") or []
@@ -65,28 +55,13 @@ def validate_read_dependencies(plan, requirements):
         raise ReadUnavailable("frozen read dependency closure missing")
     seen = set()
     for row in rows:
-        from .read_scope import ReadScope
         who = ReadScope(**row["identity"])
         if who.key not in expected or who.key in seen:
             raise ReadUnavailable("frozen read dependency scope differs")
         seen.add(who.key)
         if row["candidate_isolated"] and verified_isolation_root() is None:
             raise ReadUnavailable("isolated research basis cannot authorize production")
-        authority = resolve_route(plane.PROJECTION_READ, who)
-        if any(row[key] != authority[key] for key in ("route", "generation")):
-            raise ReadUnavailable("research read dependency route/generation changed")
-        policy = current_policy(who)
-        if row["recovery_generation"] != (policy["event_id"] if policy else 0):
-            raise ReadUnavailable("research read recovery policy changed")
-        if who.scope.get("time_policy") == "per_invocation":
-            from .invocation_bindings import recheck
-            binding = next((value for value in (plan.task_inputs.get("read_invocations") or {}).values()
-                            if value.get("deployment_identity") == who.as_row()), None)
-            recheck(who, binding)
-        decision = gate_read(who)  # rechecks scope stop, revocation, TTL and enforcement
-        if not row["candidate_isolated"] and (decision.route != "target" or
-                decision.qualification.get("status") != "eligible"):
-            raise ReadUnavailable("research dependency qualification invalid")
+        gate_read(who)
     if seen != set(expected):
         raise ReadUnavailable("required read dependency omitted")
 
@@ -442,6 +417,5 @@ def validate_chief(store, payload, *, at=None):
     identity = business_identity("chief", kind="portfolio", scope_id="portfolio",
         entities=configured_entities("portfolio", "portfolio", config_dir=plan.config_root), as_of=plan.as_of,
         explicit=(plan.task_inputs.get("read_scopes") or {}).get("chief:portfolio"))
-    with bind_read(identity, as_of=plan.as_of,
-                   invocation=(plan.task_inputs.get("read_invocations") or {}).get("chief:portfolio")):
+    with bind_read(identity, as_of=plan.as_of):
         return validate(store, payload, at=at)

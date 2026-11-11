@@ -192,11 +192,6 @@ class Dispatcher:
             scheduling.check_owner(task.task_id, task.scope.model_dump(mode="json"),
                 "shadow" if task.instance_key.startswith("shadow:") else "dispatcher")
 
-        from .isolation import verified_isolation_root
-        if (verified_isolation_root() is None and
-                any(task.instance_key.startswith("dispatcher:") for task in plan.tasks)):
-            from .read_windows import bind_plan
-            plan = bind_plan(plan)
         read_errors = check_plan_reads(plan, collect=True)
         request = {
             "run_id": plan.run_id, "trigger": plan.trigger,
@@ -685,24 +680,8 @@ class Dispatcher:
         mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
         with bind_read(task_identity(context.plan, context.task), as_of=context.plan.as_of, mode=mode,
                 publication_path=str(self.workflow_store.path),
-                invocation=(context.plan.task_inputs.get("read_invocations") or {}).get(context.task.instance_key),
                 execution_plan_hash=context.plan.plan_hash):
             return self._invoke_bound_adapter(adapter, context)
-
-    @staticmethod
-    def _record_reused(context, envelopes):
-        from .read_scope import record_read
-        from .runtime_reads import current_read_context, gate_read
-        from .payload_digest import digest
-
-        bound = current_read_context()
-        if bound is not None and bound.invocation:
-            gate_read(bound.identity)
-            record_read(bound.identity.consumer_id, "Dispatcher.projection_reuse",
-                refs=[e.projection_id for e in envelopes],
-                source_as_of=[e.as_of for e in envelopes],
-                queried_at=evaluation_now(timezone.utc).isoformat(),
-                payload_hash=digest([e.model_dump(mode="json") for e in envelopes]))
 
     def _invoke_bound_adapter(self, adapter, context):
         from . import schedule_runtime as scheduling
@@ -724,7 +703,6 @@ class Dispatcher:
                 valid = [env for env in envelopes if self._projection_reuse_check(env, context.task, context.input_refs, context.data_vintage_refs, context.plan.as_of, task_registry().spec(context.task.task_id).freshness_seconds, PAYLOAD_SCHEMA_BY_ROLE[TASK_ROLE[context.task.task_id]].role_schema_name())[0]]
                 if not valid:
                     raise ProjectionMissing("shared trigger projections fail current reuse validation")
-                self._record_reused(context, valid)
                 return tuple(valid), "shared_trigger_reused"
         return result
 
@@ -734,7 +712,6 @@ class Dispatcher:
         reusable = getattr(context, "reusable_projection", None)
         if reusable is not None:
             envelopes = tuple(reusable) if isinstance(reusable, (tuple, list)) else (reusable,)
-            self._record_reused(context, envelopes)
             record_reuse([envelope.projection_id for envelope in envelopes])
             return envelopes, "projection_reused"
         return self._invoke_claimed_adapter(adapter, context)
@@ -746,7 +723,6 @@ class Dispatcher:
         mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
         with bind_read(task_identity(context.plan, context.task), as_of=context.plan.as_of, mode=mode,
                        publication_path=str(self.workflow_store.path),
-                       invocation=(context.plan.task_inputs.get("read_invocations") or {}).get(context.task.instance_key),
                        execution_plan_hash=context.plan.plan_hash), \
                 task_store_scope(self.workflow_store.path) as store:
             context.store = store
@@ -826,7 +802,6 @@ class Dispatcher:
         mode = "shadow" if any(t.instance_key.startswith("shadow:") for t in plan.tasks) else None
         try:
             with bind_read(identity, as_of=plan.as_of, mode=mode, publication_path=self.workflow_store.path,
-                           invocation=(plan.task_inputs.get("read_invocations") or {}).get("chief:portfolio"),
                            execution_plan_hash=plan.plan_hash):
                 return self._assemble_chief_snapshot(result, plan, memory)
         except ReadUnavailable as exc:

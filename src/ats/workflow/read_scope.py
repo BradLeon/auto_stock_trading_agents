@@ -25,7 +25,6 @@ class ReadUnavailable(RuntimeError):
 
 
 _TRACE: ContextVar[list | None] = ContextVar("consumer_read_trace", default=None)
-_AUDITS: ContextVar[tuple] = ContextVar("consumer_entry_audits", default=())
 
 
 def canonical_json(value: Any) -> str:
@@ -63,21 +62,13 @@ class ReadScope:
             raise ValueError("business scope requires explicit entities")
         normalized["entities"] = sorted(set(entities))
         window = normalized.get("time_range")
-        independent = normalized.get("time_policy") == "per_invocation"
-        if independent and "time_range" in normalized:
-            raise ValueError("per-invocation scope cannot contain a fixed time_range")
-        if "time_policy" in normalized and not independent:
-            raise ValueError("unknown business scope time_policy")
-        if not independent and (not isinstance(window, dict) or set(window) != {"start", "end"}):
+        if not isinstance(window, dict) or set(window) != {"start", "end"}:
             raise ValueError("business scope requires time_range start/end")
-        if not independent:
-            window["start"], window["end"] = _stamp(window["start"]), _stamp(window["end"])
-            if datetime.fromisoformat(window["start"]) > datetime.fromisoformat(window["end"]):
-                raise ValueError("business time window is reversed")
+        window["start"], window["end"] = _stamp(window["start"]), _stamp(window["end"])
+        if datetime.fromisoformat(window["start"]) > datetime.fromisoformat(window["end"]):
+            raise ValueError("business time window is reversed")
         if bool(normalized.get("event_id")) != bool(normalized.get("event_version")):
             raise ValueError("event_id and event_version must be supplied together")
-        from .invocation_bindings import validate_policy
-        validate_policy(normalized, consumer_id)
         object.__setattr__(self, "scope_json", canonical_json(normalized))
 
     @property
@@ -135,19 +126,14 @@ def record_read(consumer, api, *, refs=(), status="complete", **detail):
 
     context = current_read_context()
     if context is not None and context.identity.consumer_id == consumer:
-        row.update(business_identity=context.identity.as_row(), invocation_as_of=context.cutoff.isoformat(), bound_route=context.route,
-                   run_mode=context.mode, invocation=context.invocation, deployment=context.deployment,
-                   read_generation=context.read_generation, joint_epoch=context.joint_epoch)
-        row.setdefault('route', context.route)
+        row.update(business_identity=context.identity.as_row(), invocation_as_of=context.cutoff.isoformat(),
+                   run_mode=context.mode)
     logger = logging.getLogger("ats.consumer_reads")
     (logger.warning if status in {"blocked", "unavailable"} else logger.info)(
         "consumer_read %s", json.dumps(row, sort_keys=True, default=str))
     rows = _TRACE.get()
     if rows is not None:
         rows.append(row)
-    for buffer in _AUDITS.get():
-        if buffer is not rows:
-            buffer.append(row)
 
 
 def read_projection(store, *, consumer, role, scope, at=None, projection_id="", content_hash="",

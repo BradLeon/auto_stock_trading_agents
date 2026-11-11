@@ -27,9 +27,7 @@ def _risk_context():
 
 
 def _bound_entities(context) -> set[str]:
-    scope = (context.invocation["actual_identity"]["scope"] if context.invocation
-             else context.identity.scope)
-    return set(scope.get("entities") or [])
+    return set(context.identity.scope.get("entities") or [])
 
 
 def _outer_as_of(context):
@@ -41,9 +39,7 @@ def _outer_as_of(context):
     """
     if context is None:
         return None
-    scope = (context.invocation["actual_identity"]["scope"] if context.invocation
-             else context.identity.scope)
-    return ((scope or {}).get("time_range") or {}).get("end") or None
+    return (context.identity.scope.get("time_range") or {}).get("end") or None
 
 
 @contextmanager

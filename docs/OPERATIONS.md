@@ -10,7 +10,7 @@
 |---|---|---|---|
 | `com.ats.data-refresh` | 数据刷新控制器：结构化/非结构化采集、文档准入、财报日历刷新、FactSet 月末摄入 | `python -m ats.data.refresh tick` | 每小时一次 |
 | `com.ats.dispatcher` | 研究调度（Dispatcher）：按时间表与日历事件运行 7 个研究工作流；**不进 Chief、不下单** | `ats schedule` | 常驻 |
-| `com.ats.serve` | 飞书审批回调（签名链接） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
+| `com.ats.serve` | 飞书回调端点（审批已改为命令行 `ats approval`，现行审批不经过它） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
 
 
 plist 在 `~/Library/LaunchAgents/`；`data-refresh`、`dispatcher` 的模板在 `deploy/launchd/`。
@@ -196,7 +196,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ## 7. 交易路径（已切换 S1–S5；实盘锁定）
 
-- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 的读路由已切到新路由（S1），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 18:00 纽约；11-02 起由 16:30 改为 18:00）。**`chief-daily` 已启用**（S5，2026-11-02；11-03 由 09:00 改为 09:45 纽约，台北冬令时 22:45，因为订单规范化只接受常规时段内的实时买卖价，开盘前的周期过不了，见 blockers B9）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
+- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 改读新路径（S1；读路由表本身已于 2026-11-11 随 R5d 删除，读取只按声明与业务 scope），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 18:00 纽约；11-02 起由 16:30 改为 18:00）。**`chief-daily` 已启用**（S5，2026-11-02；11-03 由 09:00 改为 09:45 纽约，台北冬令时 22:45，因为订单规范化只接受常规时段内的实时买卖价，开盘前的周期过不了，见 blockers B9）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
 - Chief 每个交易日由 `chief-daily` 自动跑一次；也可手动运行：
 
   ```bash
@@ -335,8 +335,8 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 
 ## 12. 诊断工具
 
-- 切换期工具已退役（switch-trade r5 第 8 组，2026-11-10）：`ats drill`、`ats cutover`、`ats shadow`、`ats batch`、`ats read`、`ats intake`
-  与 `ats dispatch` 的所有权、回滚去重子命令只剩提示桩；删除前的用法存档在
+- 切换期工具已退役（switch-trade r5 第 8、9 组，2026-11-10/11）：`ats drill`、`ats cutover`、`ats shadow`、`ats batch`、`ats read`、`ats intake`、
+  `ats consumer-cutover`、`ats data assurance` 与 `ats dispatch` 的所有权、回滚去重子命令只剩提示桩；删除前的用法存档在
   [`archive/R5C_MIGRATION_COMMANDS.md`](archive/R5C_MIGRATION_COMMANDS.md)，影子比较手册归档在
   [`archive/SHADOW_COMPARISON_RUNBOOK.md`](archive/SHADOW_COMPARISON_RUNBOOK.md)。实盘路由演练仍用 `ats live drill` / `ats live rollback-drill`。
 - 历史手册（切换期间的逐 scope 授权、批次切换、持久部署许可、旧上线 checklist）已归档在

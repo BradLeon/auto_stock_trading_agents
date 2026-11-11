@@ -148,7 +148,8 @@
 
 - [ ] 10.1 退役 change 归档后，用 openspec-update-change 在本 change 补一条删除：退役 change 新增的“迁移完成后研究读路由必须固定为新路径……”，因为它已被“消费者必须按声明的数据产品与业务 scope 读取”取代。同时核对 SEC 原文非阻塞处理已并入数据产品检查。验证：`openspec validate switch-trade-path-and-retire-r5 --strict` 通过
 - [ ] 10.2 复核 `data/target-dataflow-assurance` 与 `workflow/cutover-control` 中其余只服务于资格或接入核验的要求（如“十个角色的实际接入必须以运行记录核验”“隔离接入验收不得以生产资格为前置”），需要删改的用 openspec-update-change 补增量。验证：每条都有保留或删改的结论
-- [ ] 10.3 文档：ARCHITECTURE §6、§10、§11，OPERATIONS 第 7 节，退役 runbook，README，同步到 R5 之后的状态。验证：文档中的命令都能照写运行
+- [x] 10.3 文档：ARCHITECTURE §6、§10、§11，OPERATIONS 第 7 节，退役 runbook，README，同步到 R5 之后的状态。验证：文档中的命令都能照写运行
+  - 记录（2026-11-11）：ARCHITECTURE §6（读取改为按声明与业务 scope、Chief 行去掉读路由、旧实现在册 38 条退 37 条）、§10.1（快照记录业务 scope、不再记录路由与资格）、§11（写入路径唯一、只留隔离写入检查）、§15.5（影子运行改为观察窗口）；OPERATIONS 第 7 节切换进度、服务表 serve 一行、第 12 节退役命令；退役 runbook 新增「〇·〇 2026-11-11 现状」；README 交易路径改为已切换、审批改为命令行。文档中 127 条 `ats` 命令逐条过 CLI 解析器：代码块示例全部可解析，17 条未过的都是正文里的命令名、斜杠简写或已退役命令的历史记录（脚本 scratchpad doc_cmds.py）。
 - [ ] 10.4 全量测试一次，与基线逐项对照，并登记删除的测试与任何新失败的归因。验证：TEST_BASELINE 有本 change 的权威测量
 - [ ] 10.5 在退役 change 归档之后，`openspec validate --all --strict` 通过。验证：命令输出通过
 

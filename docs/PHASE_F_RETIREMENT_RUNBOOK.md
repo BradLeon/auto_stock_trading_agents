@@ -1,6 +1,12 @@
 # 旧实现退役 Runbook（Phase F，2026-10-17）
 
-> 写给要决定「什么时候可以删旧代码」的人。先说结论（**2026-10-17 的快照，最新数字见下面第〇节**）：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+> 写给要决定「什么时候可以删旧代码」的人。先说结论（**2026-10-17 的快照，最新数字见下面「〇·〇」**）：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+
+## 〇·〇、2026-11-11 现状
+
+**登记处 38 条：37 条已退役，1 条 pending。** R5 的 20 条已由 `switch-trade-path-and-retire-r5` 全部退役（R5a 读取侧、R5b 写入与入口侧 11-07/08，R5c 切换期工具 11-10，R5d 读路由与资格机制 11-11），门 `trade_path_cutover` 于 11-07 观察窗口结论签字时开启。剩下的 `legacy_entry.research_owner_legacy_mode` 是有意保留的技术债（对外已是 `ats dispatch pause/resume`，库内取值仍为 `legacy`），等另开 change 取消开关。另有 6 张表登记为长期在用（`task_projections`、`evidence_fact_projections.legacy_observation_id`、`pead_dossier`、`sector_reviews`、`macro_reviews`、`technical_reviews`），不退役。
+
+逐条状态以 `ats retirement decide --drill-reference "verification.md 3.9 回退演练（2026-10-29）"` 为准；下面「〇」起是 10-27 当时的分组记录，保留作历史。
 
 ## 〇、2026-10-27 更新：分组、依赖与门（退役变更 retire-legacy-and-migration-tooling）
 

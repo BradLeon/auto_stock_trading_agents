@@ -22,7 +22,7 @@ name = "news"
 
 
 def fetch_news(symbol: str, since: datetime, until: datetime | None = None, *,
-               store=None, consumer: str = "pead_monitor") -> list[NewsItem]:
+               store=None, consumer: str = "fundamental") -> list[NewsItem]:
     """Read released news only; scheduled ingestion owns source acquisition.
 
     A consumer must never fall back to an ad-hoc provider request: doing so bypasses

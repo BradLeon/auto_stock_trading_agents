@@ -21,10 +21,10 @@ def _release_manager(tmp_path) -> ReleaseManager:
 def test_workflow_boundaries_keep_memory_outputs_out_of_data_products(monkeypatch):
     from ats.data.products import workflow_data_boundary
 
-    monkeypatch.delenv("ATS_STRUCTURED_CHIEF_GRAPH_MODE", raising=False)
     chief = workflow_data_boundary("chief-graph")
 
-    assert chief.consumer == "chief_graph" and chief.mode == "shadow"
+    # No rollout mode: it was only logged and read as "the Chief never switched" (removed 2026-11-12).
+    assert chief.consumer == "chief_graph" and not hasattr(chief, "mode")
     assert "decision" in chief.memory_outputs[0]
     # The legacy scheduler's boundary went with the scheduler (2026-10-20).
     import pytest
@@ -40,7 +40,7 @@ def test_chief_uses_boundary_metadata_without_routing_memory_through_data(monkey
     seen = []
     monkeypatch.setattr(products, "workflow_data_boundary", lambda consumer: (
         seen.append(consumer) or WorkflowDataBoundary(
-            consumer="chief_graph", mode="shadow", persistent_inputs=(),
+            consumer="chief_graph", persistent_inputs=(),
             runtime_inputs=(), memory_outputs=("decisions",))))
     monkeypatch.setattr("ats.trader.execute.pead_event_data", lambda: {"events": []})
     state = ChiefDecisionState(
@@ -68,17 +68,19 @@ def test_release_confirmation_product_keeps_event_date_guard(monkeypatch):
     assert earnings.confirm_reported("MSFT", Print()) == (True, "8-K MSFT")
 
 
-def test_shadow_release_and_rollback_are_isolated_per_orchestration_consumer(tmp_path):
+def test_release_and_rollback_are_isolated_per_consumer(tmp_path):
     manager = _release_manager(tmp_path)
 
-    chief_check = manager.check_consumer("chief_graph", mode="shadow")
-    assert chief_check["ready"] is True
+    # `chief_graph` no longer carries a rollout mode (removed 2026-11-12), so it is not a releasable consumer.
+    assert manager.check_consumer("chief_graph", mode="shadow")["ready"] is False
 
-    assert manager.apply(chief_check)["applied"] is True
-    chief_rollback = manager.rollback(
-        kind="consumer", target_id="chief_graph", mode="legacy")
-    assert chief_rollback["previous_mode"] == "shadow"
+    check = manager.check_consumer("pead_graph", mode="platform")
+    assert check["ready"] is True
+
+    assert manager.apply(check)["applied"] is True
+    rollback = manager.rollback(kind="consumer", target_id="pead_graph", mode="legacy")
+    assert rollback["previous_mode"] == "platform"
 
     overlay = load_release_overlay(tmp_path / "releases.yaml")
-    assert overlay["consumers"] == {"chief_graph": "legacy"}
-    assert [row["action"] for row in overlay["history"]] == ["set_mode", "rollback"]
+    assert overlay["consumers"] == {"pead_graph": "legacy"}
+    assert [row["action"] for row in overlay["history"]] == ["publish", "rollback"]

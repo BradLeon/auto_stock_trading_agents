@@ -141,63 +141,45 @@ frontier_ai_capability_registry:
 feature_flags:
   default_mode: legacy
   sources:
+    # 2026-11-12 收敛（用户批准）：此前有 11 个源的 platform 只写在运行时叠加层
+    # `var/structured_data/releases.yaml`，基线仍是 shadow/legacy；`macro_series_feeds`、
+    # `issuer_ir_files`、FactSet metrics/doc 标 shadow 却已被新路径正式读取（shadow 不拦消费）。
+    # 新路径在用的源一律在基线写 platform，叠加层清空，让本文件成为唯一真相。
+    # 清单与依据见 var/audits/rollout-modes-2026-11-12.md。
     tw_mof_exports: platform
     kr_ecos_exports: platform
-    # This source may collect in the governed layer after isolated acceptance;
-    # its own data-only release check still decides whether it can be published.
-    trendforce_dram: shadow
-    sec_companyfacts: shadow
-    company_disclosures: shadow
-    # Issuer IR statement files for foreign issuers the vendors/SEC XBRL cover late or not at all.
-    issuer_ir_files: shadow
-    defeatbeta_stock_statement: shadow
-    yfinance_financials: shadow
-    yfinance_consensus: shadow
-    macro_series_feeds: shadow
+    trendforce_dram: platform            # L6 存储命题的合约价读数（chain source dram_contract_price）
+    sec_companyfacts: platform           # 以下五个是 company_financials 的财报包来源
+    company_disclosures: platform
+    issuer_ir_files: platform            # 外国发行人 IR 报表（TSM/ASML/SKHY）
+    defeatbeta_stock_statement: platform
+    yfinance_financials: platform
+    yfinance_consensus: platform
+    macro_series_feeds: platform         # 宏观复盘每日读取的指标序列
     # Private-company events are intentionally deferred and therefore do not
     # enter the persistent layer until a later, separately approved scope.
+    # 新路径未使用，去留待用户 review（清单 D）。
     accepted_document_evidence: legacy
-    factset_earnings_insight_doc: shadow
-    factset_earnings_insight_metrics: shadow
-    # 082826 index acceptance and Macro dual-read are complete; this partition is
-    # now the formal governed source for the Macro consumer.
+    # FactSet：真正的发布闸门是 index / sector 两个分区；doc / metrics 只用于展示与
+    # `off` 检查，与分区保持一致写 platform。
+    factset_earnings_insight_doc: platform
+    factset_earnings_insight_metrics: platform
     factset_earnings_insight_index: platform
-    # 082826 的八张行业表已经通过独立原图 decoder 与 231/231 golden-cell
-    # 比较；consumer 仍须在真实 Sector review 成功后另行切换。
     factset_earnings_insight_sector: platform
-    # Economic Index starts as an isolated governed source.  It must pass its
-    # own release check before a later explicit platform promotion.
-    anthropic_economic_index: legacy
-    # The two US adoption sources are the load-bearing axes of the L1 production
-    # Observer and have been ingesting on schedule since 2026-09.  Their mode was
-    # left at ``legacy`` while only the Anthropic index was promoted through the
-    # runtime overlay, which made the checked-in baseline disagree with both the
-    # observer it feeds and section 10.2 of STRUCTURED_DATA_OPERATIONS.  Promote
-    # the baseline itself so the effective mode no longer depends on an overlay
-    # entry that was never written for these two.
+    # L1 生产化扩散观察器的四个来源（BTOS / RPS / Anthropic Economic Index / Ramp）。
+    anthropic_economic_index: platform
     us_census_btos: platform
     rps_genai_adoption: platform
-    # Ramp starts in shadow until the web-export fixtures and slice-level
-    # release gate have passed isolated acceptance.
-    ramp_ai_index: shadow
-    # OpenRouter Rankings Data API passed fixture/live smoke, offline replay,
-    # visualization and L1 report acceptance; publish the source directly.
+    ramp_ai_index: platform
+    # L1 商业化与原始能力观察器的来源。
     openrouter_rankings: platform
-    # Frontier AI Labs revenue is released straight to platform once its own
-    # isolated end-to-end acceptance (7.1-7.5) passes; until then it only runs
-    # under --force in an isolated SQLite/artifact root. There is deliberately
-    # no shadow/experimental promotion step after acceptance.
     sacra_public_company_profiles: platform
     tickertrends_public_research: platform
-    # Raw capability uses benchmark-maintainer Git/CSV/JSON/HTML routes plus
-    # low-frequency policy-gated public structured pages. Paid AA API is never
-    # required; policy-blocked or parser-drift slices fail closed. Keep the
-    # Real-source acceptance and the full L1 regression gate passed on
-    # 2026-09-18. Public benchmark data and the fail-closed official-release
-    # supplement are therefore formal platform inputs.
     frontier_ai_capability: platform
     frontier_ai_capability_official_lab: platform
   consumers:
+    # 2026-11-12：删除 chief_graph（模式只写日志）、pead_monitor / pead_research（代理已退役、
+    # 无模式查询）、evidence_chain（只经 platform-only 的非结构化读路由，模式不起作用）。
     # A source-level platform mode never bypasses a consumer release gate.  Each
     # direct consumer remains shadow/legacy until its durable release record has a
     # passing assessment; only the explicitly listed platform consumers below have
@@ -226,21 +208,9 @@ feature_flags:
     # deterministic score/decision behaviour while platform corrected legacy's
     # stale calendar event to the accepted immutable document package.
     pead_graph: platform
-    # NVDA 七日窗口已验证：受管 IBKR News（Yahoo 仅在 IBKR 不可达时兜底）
-    # 的版本血缘、时效与 monitor 输出均已独立验收。
-    pead_monitor: platform
     # Per-company accounting view used by the sector workflow.  It shares PEAD's
     # complete company_financials report package; valuation and beta stay runtime.
     sector_constituent_financials: platform
-    # PEAD research reads governed third-party research assets from platform.
-    # Its processing lease and insight/event outputs remain Workflow memory.
-    # SemiAnalysis previews are explicitly partial; they are not full articles.
-    pead_research: platform
-    # Actual platform Chain report acceptance passed with explicit no-LLM unknowns.
-    # Each cited evidence item has either immutable document/version lineage or a
-    # labelled historical evidence snapshot; structured observations are excluded.
-    evidence_chain: platform
-    chief_graph: shadow
     # Macro reads the released index partition.
     macro_factset: platform
     # 9.3: the 082826 sector partition passed the independent 231-cell gate and

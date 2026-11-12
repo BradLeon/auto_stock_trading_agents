@@ -49,7 +49,7 @@ def assemble_context(state: ChiefDecisionState) -> dict:
 
     out: dict = {}
     boundary = workflow_data_boundary("chief_graph")
-    log.info("chief input boundary: consumer=%s mode=%s", boundary.consumer, boundary.mode)
+    log.info("chief input boundary: consumer=%s", boundary.consumer)
     if not state.event_data:
         out["event_data"] = texec.pead_event_data()
     if not state.decide:

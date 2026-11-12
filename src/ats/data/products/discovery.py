@@ -36,7 +36,11 @@ class DataDiscovery:
             sources.append({
                 "source_id": source.id, "provider": source.provider,
                 "adapter": source.adapter, "catalog_status": source.catalog_status.value,
-                "persistence": source.persistence.value, "release_mode": source_mode(source.id),
+                "persistence": source.persistence.value,
+                # Runtime-only inputs are never collected or released; a mode would read as
+                # "still legacy" (2026-11-12), so they report "runtime" instead.
+                "release_mode": ("runtime" if source.persistence.value == "runtime"
+                                 else source_mode(source.id)),
                 "datasets": source.datasets, "accepted_observations": len(rows),
                 "last_ingestion_status": last.get("last_status") or "no_run",
                 "last_completed_at": last.get("last_completed_at") or None,

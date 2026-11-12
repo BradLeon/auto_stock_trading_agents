@@ -115,7 +115,7 @@ OpenRouter 11-06（台北 08:00–11-07 08:00）共约 60 次：约 55 次是 21
 | 11-11 22:49 | chief-daily | `chief-20261111-144500` | pending_approval（卖 NVDX 全部、DRAM 250 股，风控两笔放行） | 正常。风控读收盘价有 2 次 partial、2 次 unavailable，同为 Yahoo 握手失败，风控按缺数据跳过后照常出结论 |
 | 11-11 23:58 | fills-capture | — | finished | 正常 |
 | 11-12 07:01 | clerk-daily | `run_29fd6093…` | completed | 正常：Flex 补录 1 笔（11-10 7709 买 1000 @15.78）、持仓 18、标记 48、绩效已记 |
-| 11-12 09:31 | macro-review（手动） | `run-ea8508aa…` | complete，投影已发布（goldilocks，provisional） | 工作流正常；但模型只返回前四段（态势、总评、结论变化、利率路径），行业倾斜、主题、情景、风险、证伪条件为空，因此未写周报文件。同一模型 11-07 输出完整，属模型单次输出不完整，与退役无关 |
+| 11-12 09:31 | macro-review（手动） | `run-ea8508aa…` | complete，投影已发布（goldilocks，provisional） | 工作流正常；但模型只返回前四段（态势、总评、结论变化、利率路径），行业倾斜、主题、情景、风险、证伪条件为空，因此未写周报文件。属模型输出不完整，与退役无关。用户要求重跑：直接重跑被 dispatcher 判为复用（`run-f804a42b…`，`projection_reused`，未请求模型）；按 OPERATIONS 用 `force_recompute` 重跑（`run-e7a61868…`，10:51）后行业倾斜 12 行、资产含义齐全，周报 `宏观分析-宏观-2026-11-12.md` 已写出，但主题、风险、FactSet 盈利判读、情景、时间范围、证伪条件仍为空。`macro_reviews` 逐期对照：输出总在字段顺序的尾部被截断、截断位置每次不同，11-03 04:18（换模型与本组退役之前）已有同样现象，11-07 缺风险清单——属既有的模型输出截断问题，另行追踪 |
 | 11-12 09:35 | sector-review（手动） | `run-3c4b74f5…` | complete：8 层（2 层复用）+ 行业全部 succeeded | 正常：7 份层报告、行业报告与丰富版 HTML 仪表盘均已写出 |
 
 数据刷新与日历消费：`phase_e:calendar-consume` 每 30 分钟正常结束（11-11 17:05 一次跑到 18:12，其间两次因上一次未结束而跳过，既有现象）；data-refresh 的 misfire 是既有遗留。`data_health_log` 已开始记录（11-11 六个消费者 ok）。

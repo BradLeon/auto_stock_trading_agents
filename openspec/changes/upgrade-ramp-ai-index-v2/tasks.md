@@ -105,13 +105,13 @@
 ## 5. 安装与生产首采（每步需你确认）
 
 - [x] 5.1 经你确认后安装 `playwright` 与 Chromium（约 150 MB）。验证：`playwright --version` 正常，`.venv` 中可导入。
-- [ ] 5.2 生产执行一次 `ats data release-check --source ramp_ai_index_fred --ingest-new --force-check`。验证：14 条序列入库，`RAMPAIALL` 最新期间为 2026-10，值与网页一致；记录写入本 change 的 `verification.md`。
-- [ ] 5.3 生产执行一次 `ats data release-check --source ramp_ai_index --ingest-new --force-check`（无头 runner）。验证：
+- [x] 5.2 生产执行一次 `ats data release-check --source ramp_ai_index_fred --ingest-new --force-check`。验证：14 条序列入库，`RAMPAIALL` 最新期间为 2026-10，值与网页一致；记录写入本 change 的 `verification.md`。
+- [x] 5.3 生产执行一次 `ats data release-check --source ramp_ai_index --ingest-new --force-check`（无头 runner）。验证：
   - 5 个图表导出成功或给出明确原因码；
   - 增量入库数量与 2.4 的预期一致；
   - 交叉核对没有 mismatch，或差异已记录；
   - 结果写入 `verification.md`。
-- [ ] 5.4 生产执行一次 L1 观察器。验证：Ramp 段落显示 v2 的 2026-10 数据和七个 scope，三轴 judgement 与本次变更前一致。
+- [x] 5.4 生产执行一次 L1 观察器。验证：Ramp 段落显示 v2 的 2026-10 数据和七个 scope，三轴 judgement 与本次变更前一致。
 
 ## 6. 真实定时观察
 

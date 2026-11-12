@@ -4,21 +4,20 @@ from __future__ import annotations
 import json
 
 from ...data.consumer_api import read_input
-from ...workflow.isolation import verified_isolation_root
 from ...workflow.runtime_reads import current_read_context
 
 
 def governed_company_inputs(symbol):
     context = current_read_context()
-    if context is None or (context.route != "target" and verified_isolation_root() is None):
+    if context is None:
         return None  # Existing legacy entry; never used as a target fallback.
     financials = read_input("fundamental", "COMPANY_DATA", scope={"kind": "financials", "entity": symbol})
     consensus = read_input("fundamental", "COMPANY_DATA", scope={"kind": "consensus", "entity": symbol})
     hierarchy = read_input("fundamental", "HIER_DATA", scope={"kind": "evidence", "entity": symbol})
     if financials.status != "complete":
-        from ...workflow.cutover_routing import RouteUnavailable
+        from ...workflow.read_scope import ReadUnavailable
 
-        raise RouteUnavailable("fundamental financial input unavailable: " + ";".join(financials.gaps))
+        raise ReadUnavailable("fundamental financial input unavailable: " + ";".join(financials.gaps))
     values = {}
     snapshot = consensus.payload or {}
     meta = {"known_at": snapshot.get("known_at") or "", "target_event_date": ""}

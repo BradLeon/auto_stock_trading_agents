@@ -53,6 +53,25 @@ themes:
     quant: []
     queries: ["Korea Japan semiconductor subsidy chip act", "US CHIPS Act funding AI chip policy latest"]
 
+# 板块倾斜的可选板块清单与代表 ETF。模型只从 key 里选，ETF 由配置决定（不让模型自己挑 ETF 代码）。
+# 选择口径：美股上市（IBKR 可交易）、跟踪该板块、规模大、费率低。2026-11-03 用行情数据核对：
+# SPDR 行业系列费率均为 0.08%，规模 7.7B–127B；房地产选 VNQ（66B、0.13%）而不是 XLRE（7.7B、0.08%），
+# 因为规模差约 9 倍；半导体选 SMH（75B、0.35%）而不是 SOXX（48B、0.33%）。规模与费率会变，换 ETF 时重新核对。
+sector_universe:
+  - {key: utilities, label: 公用事业, etf: XLU, etf_name: Utilities Select Sector SPDR}
+  - {key: consumer_staples, label: 必需消费, etf: XLP, etf_name: Consumer Staples Select Sector SPDR}
+  - {key: health_care, label: 医疗保健, etf: XLV, etf_name: Health Care Select Sector SPDR}
+  - {key: energy, label: 能源, etf: XLE, etf_name: Energy Select Sector SPDR}
+  - {key: financials, label: 金融, etf: XLF, etf_name: Financial Select Sector SPDR}
+  - {key: consumer_discretionary, label: 可选消费, etf: XLY, etf_name: Consumer Discretionary Select Sector SPDR}
+  - {key: communication_services, label: 通信服务, etf: XLC, etf_name: Communication Services Select Sector SPDR}
+  - {key: industrials, label: 工业, etf: XLI, etf_name: Industrial Select Sector SPDR}
+  - {key: materials, label: 原材料, etf: XLB, etf_name: Materials Select Sector SPDR}
+  - {key: real_estate, label: 房地产/REITs, etf: VNQ, etf_name: Vanguard Real Estate ETF}
+  - {key: information_technology, label: 信息技术（含半导体）, etf: XLK, etf_name: Technology Select Sector SPDR}
+  - {key: semiconductors, label: 半导体, etf: SMH, etf_name: VanEck Semiconductor ETF}
+  - {key: software, label: 软件（信息技术剔除半导体与硬件的近似）, etf: IGV, etf_name: iShares Expanded Tech-Software Sector ETF}
+
 search:
   max_results_per_query: 4
   recency_days: 21

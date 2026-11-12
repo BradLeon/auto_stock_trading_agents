@@ -374,9 +374,9 @@ def score_fetch(state: PeadState) -> dict:
     if governed:
         out["input_refs"] = governed["input_refs"]
         if state.transcript_source:
-            from ..workflow.cutover_routing import RouteUnavailable
+            from ..workflow.read_scope import ReadUnavailable
 
-            raise RouteUnavailable("governed event input requires an admitted document version")
+            raise ReadUnavailable("governed event input requires an admitted document version")
     out["fundamentals_text"] = (governed["fundamentals_text"] if governed else
                                 fund_src.fetch(state.symbol).to_context()
                                 if state.live_data else "(offline)")
@@ -401,9 +401,9 @@ def score_fetch(state: PeadState) -> dict:
                 **({"as_of": governed["as_of"]} if governed else {}))
 
     if governed and not state.transcript_source and (package is None or not package.scoreable):
-        from ..workflow.cutover_routing import RouteUnavailable
+        from ..workflow.read_scope import ReadUnavailable
 
-        raise RouteUnavailable("governed earnings documents unavailable; provider fallback forbidden")
+        raise ReadUnavailable("governed earnings documents unavailable; provider fallback forbidden")
 
     use_package = bool(package and package.scoreable and package_mode in {"platform", "fallback"})
     if use_package:
@@ -415,7 +415,7 @@ def score_fetch(state: PeadState) -> dict:
         out["documents_text"] = package.official_text()
         out["document_lineage"] = [item.lineage for item in package.documents]
         if governed:
-            from ..workflow.consumer_reads import record_read
+            from ..workflow.read_scope import record_read
 
             doc_refs = [f"{item.document_id}@{item.version_id}" for item in package.documents]
             out["input_refs"] = out.get("input_refs", []) + doc_refs

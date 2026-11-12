@@ -211,6 +211,39 @@ def read_state(path: str | Path | None = None) -> RouteState:
         reason=row["reason"])
 
 
+def assert_runtime_startup(*, caller: str, path: str | Path | None = None) -> RouteState | None:
+    """Service admission: a conflicting or unreadable trade-route authority fails startup (switch-trade r5 9.3).
+
+    No authority file, or no registered route, means trading is closed: research services start, and every
+    submission is refused later by `read_state`. A file that exists but cannot be read or parsed, or that holds more
+    than one active route, stops the service here and names the conflict; it never picks one route or degrades to an
+    ungated run.
+    """
+    target = Path(path or default_registry_path())
+    if not target.is_file():
+        return None
+    try:
+        with closing(sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0)) as conn:
+            conn.row_factory = sqlite3.Row
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='trade_route_state'").fetchone():
+                raise RouteRegistryError(f"{caller}: trade route authority {target} has no route table")
+            rows = conn.execute("SELECT * FROM trade_route_state").fetchall()
+    except (OSError, sqlite3.Error) as exc:
+        raise RouteRegistryError(
+            f"{caller}: trade route authority is unreadable: {type(exc).__name__}: {exc}") from exc
+    if len(rows) > 1:
+        raise RouteRegistryError(
+            f"{caller}: conflicting active trade routes: {', '.join(sorted(str(r['route_id']) for r in rows))}")
+    if not rows:
+        return None
+    row = rows[0]
+    if not row["route_id"] or not isinstance(row["generation"], int) or row["generation"] < 1:
+        raise RouteRegistryError(f"{caller}: trade route authority is corrupt")
+    return RouteState(route_id=row["route_id"], generation=row["generation"], environment=row["environment"],
+                      account=row["account"], updated_at=row["updated_at"], updated_by=row["updated_by"],
+                      reason=row["reason"])
+
+
 def try_read_state(path: str | Path | None = None) -> RouteState | None:
     """`read_state` without the raise. Absence is None, unreadability still raises."""
     try:

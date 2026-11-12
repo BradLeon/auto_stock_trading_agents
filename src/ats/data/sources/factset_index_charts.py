@@ -199,6 +199,9 @@ def _bottom_up_eps(document, chart, image, run, policy) -> list[FactSetCandidate
     return output if len(output) == len(target) else []
 
 
+_UNREADABLE_CELL = {'printed_percent_unit_missing', 'printed_multiple_unit_mismatch', 'numeric_token_unreadable'}
+
+
 def extract_index_chart_candidates(document, run: FactSetExtractionRun, *, policy=None,
                                    chart_inventory=None) -> list[FactSetCandidate]:
     """Extract supported printed-grid aggregate rows with local numeric evidence.
@@ -297,6 +300,13 @@ def extract_index_chart_candidates(document, run: FactSetExtractionRun, *, polic
                     unit = 'ratio'
                 basis = chart.period_basis
                 prior = existing.get((metric, chart.periods[0], basis))
+                if prior is not None and errors and set(errors) <= _UNREADABLE_CELL:
+                    # A printed cell the reader could not trust (e.g. "14%" read as "1496") is no evidence about
+                    # the value. Letting it into the merge would put a wrong number against the paragraph's
+                    # accepted one and quarantine the whole group, so the paragraph stands alone and the
+                    # unreadable token is kept on it.
+                    prior.dimensions.setdefault('unreadable_chart_cells', []).append(row.raw_token)
+                    continue
                 state = prior.estimate_state if prior else EstimateState.ESTIMATED
                 evidence = [FactSetEvidenceAnchor(
                     document_id=run.document_id, version_id=run.version_id,

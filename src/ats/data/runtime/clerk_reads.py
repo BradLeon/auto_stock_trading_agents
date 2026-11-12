@@ -1,9 +1,11 @@
-"""Clerk's read-only broker adapter, retaining source IDs and local audit chains."""
+"""Clerk's read-only broker adapter: every read goes through the governed read API.
+
+Each broker read is one `BROKER_STATE` step (portfolio, fills, completed orders), so a step keeps its own
+failure (B4); the decision chains the reports belong to are read as `DECISION_APPROVAL_CONTEXT`.
+"""
 from __future__ import annotations
 
 from ...schemas.portfolio import PortfolioSnapshot
-from ...workflow.consumer_reads import record_read
-from .broker import portfolio_snapshot
 
 
 class UnavailableBrokerReads:
@@ -19,50 +21,54 @@ class UnavailableBrokerReads:
     get_portfolio = get_fills = completed_orders = _unavailable
 
 
+def _raise_read_failure(packet) -> None:
+    """Hand a failed read back as the broker's own error, so callers that tell TWS-down from other failures
+    (performance snapshot, the Clerk run's unreachable check) still can."""
+    from ...broker import IBKRUnavailable
+
+    detail = ";".join(packet.gaps) or packet.status
+    for gap in packet.gaps:
+        if gap.startswith("input_unavailable:"):
+            _, kind, message = gap.split(":", 2)
+            if kind == "IBKRUnavailable":
+                raise IBKRUnavailable(message)
+            raise RuntimeError(f"{kind}: {message}")
+    raise RuntimeError(detail)
+
+
+def _read_input(*args, **kwargs):
+    from ..consumer_api import read_input
+
+    return read_input(*args, **kwargs)
+
+
 class ClerkBrokerReads:
     def __init__(self, broker, store):
         self.broker = broker
         self.store = store
 
-    def _gate(self):
-        from ...workflow.runtime_reads import current_read_context, gate_read
-
-        context = current_read_context()
-        if context:
-            gate_read(context.identity)
+    def _read(self, step):
+        return _read_input("clerk", "BROKER_STATE", scope={"kind": "broker", "step": step}, broker=self.broker)
 
     def get_portfolio(self):
-        self._gate()
-        packet = portfolio_snapshot(self.broker)
-        record_read("clerk", "ats.data.runtime.broker.portfolio_snapshot", status=packet["status"],
-                    refs=[f"broker-portfolio:{packet['source_as_of']}"] if packet["source_as_of"] else [])
-        return PortfolioSnapshot.model_validate(packet["payload"]) if packet["payload"] else None
+        packet = self._read("portfolio")
+        return PortfolioSnapshot.model_validate(packet.payload) if packet.payload else None
 
-    def _reports(self, method, id_field):
-        self._gate()
+    def _reports(self, step):
+        packet = self._read(step)
+        if packet.status != "complete":
+            _raise_read_failure(packet)
         from ...decision.repository import DecisionAuditRepository
 
-        try:
-            rows = getattr(self.broker, method)()
-        except Exception as exc:
-            record_read("clerk", f"ats.data.runtime.clerk_reads.{method}",
-                        status="unavailable", error=str(exc))
-            raise
-        if not isinstance(rows, list):
-            raise ValueError("broker_read_not_collection")
-        record_read("clerk", f"ats.data.runtime.clerk_reads.{method}",
-                    refs=[str(row.get(id_field) or row.get("order_ref") or "") for row in rows])
         cycles = {str(row["cycle_id"]) for row in self.store.conn.execute(
             "SELECT DISTINCT cycle_id FROM trades WHERE cycle_id IS NOT NULL AND cycle_id != ''")}
         audit = DecisionAuditRepository(self.store)
         for cycle in sorted(cycles):
-            chain = audit.read_chain(cycle)
-            record_read("clerk", "ats.decision.repository.DecisionAuditRepository.read_chain",
-                        refs=[cycle], status="complete" if chain.get("cycle") else "no_coverage")
-        return rows
+            _read_input("clerk", "DECISION_APPROVAL_CONTEXT", scope={"cycle_id": cycle}, audit=audit)
+        return packet.payload
 
     def get_fills(self):
-        return self._reports("get_fills", "exec_id")
+        return self._reports("fills")
 
     def completed_orders(self):
-        return self._reports("completed_orders", "perm_id")
+        return self._reports("completed_orders")

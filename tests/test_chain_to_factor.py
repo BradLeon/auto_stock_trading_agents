@@ -219,35 +219,45 @@ def _review_with_basket(structural=True):
                             moat_pricing=-0.5, rationale="份额指引下修 -5pt")])])
 
 
+def _chief_sector_text(review):
+    """What the Chief reads: the published sector_allocation payload, rendered by the context block."""
+    from ats.agent.task_projection import SectorAllocationPayload
+    from ats.agents.chief import assemble
+    from ats.agents.sector.review import allocation_extras
+
+    payload = SectorAllocationPayload(
+        sector="ai_hardware", stance="neutral", target_weight=0.3, rationale="标配",
+        **allocation_extras(review, {}, {})).model_dump(mode="json")
+    detail = [{"task_id": "sector_allocation", "role": "sector_allocation", "scope": "sector:ai_hardware",
+               "status": "fresh", "projection_id": "p1", "content_hash": "h", "as_of": "2026-10-28",
+               "payload": payload}]
+    return assemble.projection_context_block(detail), payload
+
+
 def test_chief_sees_the_divergence_but_never_the_weights():
     """The Chief gets the disagreement and its reason — NOT the suggested sizing.
 
     Handing over "13% / 9%" would get copied, moving the sizing decision to a model
     nobody is accountable for; the Chief is the only decision-maker.
     """
-    from ats.agents.chief import assemble
-
-    lines = "\n".join(assemble._basket_lines(_review_with_basket()))
-    assert "量化第3 → 复合第1" in lines and "SS" in lines
-    assert "HBM4 通过核心客户认证" in lines                  # the evidence travels
-    assert "13%" not in lines and "9%" not in lines         # the sizing does not
-    assert "0.13" not in lines and "weight" not in lines
+    text, payload = _chief_sector_text(_review_with_basket())
+    assert "量化第3 → 复合第1" in text and "SS" in text
+    assert "HBM4 通过核心客户认证" in text                      # the evidence travels
+    divergence = payload["cross_section_divergence"]
+    assert divergence and all("weight" not in d for d in divergence)   # the sizing does not travel here
 
 
 def test_pure_quant_basket_adds_nothing():
     """Without the structural overlay there is no position claim to report."""
-    from ats.agents.chief import assemble
-
-    assert assemble._basket_lines(_review_with_basket(structural=False)) == []
+    text, payload = _chief_sector_text(_review_with_basket(structural=False))
+    assert not payload.get("cross_section_divergence") and "量化第" not in text
 
 
 def test_feed_chief_basket_flag_off_is_a_clean_kill_switch(monkeypatch):
-    """Regression guard: with the flag off the Chief context is byte-identical to the
-    pre-stage-3 system."""
     import ats.config as _config
-    from ats.agents.chief import assemble
 
     real = _config.load_pead_global
     monkeypatch.setattr(_config, "load_pead_global", lambda: {
         **real(), "sector_review": {**real()["sector_review"], "feed_chief_basket": False}})
-    assert assemble._basket_lines(_review_with_basket()) == []
+    text, payload = _chief_sector_text(_review_with_basket())
+    assert not payload.get("cross_section_divergence") and "量化第" not in text

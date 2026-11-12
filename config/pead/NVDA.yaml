@@ -1,6 +1,10 @@
 # NVIDIA (NVDA) — PEAD config
 # AI 硬件链需求端龙头：GPU/GB200 决定全链景气。供给端受 TSM CoWoS 产能 + HBM(SKHY/MU) 约束，
 # 故信号链上游读数极关键——TSM 的 CoWoS 产能/指引直接决定 NVDA 出货上限。
+# 财年 1 月底结：8 月底报 FQ2，11 月下旬报 FQ3。
+# 2026-11-04 更新：产品主线从 Blackwell 换成 Vera Rubin。依据（网络检索，二手来源为主）：FQ2 FY2027 超指引，
+# FQ3 指引约 $108B；Rubin 已全面量产、FQ3 开始出货，预计约占当季数据中心营收 20%；管理层称 FY2028 营收增长约 70%，
+# 且是"供给受限"的展望。
 
 symbol: NVDA
 company_name: "Nvidia"
@@ -15,8 +19,8 @@ long_threshold: 1.2          # 龙头+高关注度+高预期，门槛抬高（�
 scorecard_dims:
   - {key: datacenter_rev,  weight: 0.25, label: 数据中心营收超预期（含环比加速度）}
   - {key: forward_guide,   weight: 0.25, label: 次季营收指引（中枢 vs 卖方）}
-  - {key: blackwell_ramp,  weight: 0.15, label: Blackwell/GB200/GB300 爬坡节奏与 mix}
-  - {key: gross_margin,    weight: 0.15, label: 毛利率（Blackwell 初期稀释 vs 恢复路径）}
+  - {key: rubin_ramp,      weight: 0.15, label: Vera Rubin 爬坡节奏与占比（Blackwell→Rubin 切换）}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率（Rubin 初期稀释、HBM/存储成本上涨的影响）}
   - {key: supply_capacity, weight: 0.10, label: 供给约束（CoWoS/HBM 是否松动，决定上限）}
   - {key: call_tone,       weight: 0.10, label: 电话会语气 + 主权AI/中国需求措辞}
 
@@ -32,7 +36,8 @@ signal_chain:
 
 narrative_seed: >
   AI 加速计算绝对龙头；数据中心营收 + 次季指引是全市场风险偏好锚；
-  供给（TSM CoWoS + HBM）而非需求是当前瓶颈——上游产能松动=出货上修，故 TSM/ASML/SKHY 读数领先；
-  Blackwell(GB200/GB300) 爬坡节奏 + 初期毛利率稀释路径是本季主线；
-  主权AI + 推理需求打开第二增长曲线；中国区(H20/合规版)是政策变量；
+  供给（TSM CoWoS + HBM）而非需求是当前瓶颈，管理层自己把下一财年展望定性为"供给受限"——
+  上游产能松动=出货上修，故 TSM/ASML/SKHY/MU 读数领先；
+  Blackwell→Vera Rubin 切换是本轮主线：Rubin 占比爬升速度与初期毛利率稀释、HBM 涨价对成本的影响；
+  云厂自研芯片（TPU/Trainium/MTIA）份额扩大是长期竞争变量；中国区是政策变量；
   极高预期使 “beat 但指引不够炸” 成为回调触发器（PEAD 放大器）。

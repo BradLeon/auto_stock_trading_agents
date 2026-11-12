@@ -60,7 +60,7 @@ def world(monkeypatch):
     monkeypatch.setattr(health, "_latest_brief", lambda entity: (state.briefs.get(entity) or [None])[0])
     monkeypatch.setattr("ats.memory.get_store", lambda: pytest.fail("health check must not open the memory store"))
     # The consumer read gate is what the switch changes: the check must never touch it.
-    for name in ("ats.workflow.runtime_reads.gate_read", "ats.workflow.cutover_routing.read_route",
+    for name in ("ats.workflow.runtime_reads.gate_read",
                  "ats.data.consumer_api.read_input"):
         monkeypatch.setattr(name, lambda *a, **k: pytest.fail("health check went through a consumer read gate"))
     return state
@@ -145,7 +145,7 @@ def test_fundamental_fails_when_a_financial_snapshot_is_unreadable(world):
 
 
 def test_a_consumer_without_a_defined_check_cannot_pass(world):
-    result = health.check("chief", now=NOW)      # a decision role: it never moves with the research-read switch
+    result = health.check("unknown-consumer", now=NOW)
     assert result["status"] == "failed" and "no health check defined" in result["problems"][0]
 
 
@@ -236,13 +236,10 @@ def test_technical_fails_when_the_whole_universe_has_no_recent_bar_twice(prices)
 
 @pytest.fixture
 def health_log(tmp_path):
-    from ats.workflow import cutover_wiring as cw
     from ats.workflow.isolation import isolated_run
 
     with isolated_run("consumer-health-log", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
-        yield path
+        yield environment.path_for("ATS_DB_PATH")
 
 
 OK_HEALTH = {"status": "ok", "problems": [], "warnings": []}
@@ -250,8 +247,6 @@ BAD_HEALTH = {"status": "failed", "problems": ["no admitted documents for the wh
 
 
 def test_observe_logs_and_alerts_only_when_the_status_changes(health_log):
-    from ats.workflow import consumer_cutover as cc
-
     alerts = []
     notify = lambda *a: alerts.append(a)  # noqa: E731
     assert health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
@@ -261,8 +256,8 @@ def test_observe_logs_and_alerts_only_when_the_status_changes(health_log):
     assert not health.observe("information", BAD_HEALTH, actor="dispatcher", notify=notify, path=health_log)
     assert health.observe("information", OK_HEALTH, actor="data-refresh", notify=notify, path=health_log)
     assert [a[0] for a in alerts] == ["数据产品健康检查未通过：information", "数据产品健康检查已恢复：information"]
-    assert [row["action"] for row in cc.log(path=health_log)] == ["health", "health", "health"]
-    assert cc.status(path=health_log) == []  # observing never writes a route
+    assert [row["status"] for row in health.health_log(path=health_log)] == ["ok", "failed", "ok"]
+    assert [row["actor"] for row in health.health_log(path=health_log)] == ["data-refresh"] * 3
 
 
 def test_a_failing_alert_does_not_break_observation(health_log):
@@ -298,3 +293,32 @@ def test_gate_maps_tasks_to_consumers_and_leaves_upstream_projections_to_the_dis
 def test_fundamental_without_upstream_ignores_the_information_briefs(world):
     world.briefs = {}
     assert health.check("fundamental", now=NOW, include_upstream=False)["status"] == "ok"
+
+
+def test_a_decision_consumer_check_passes_on_a_complete_store_and_fails_when_it_cannot_read(world, tmp_path, monkeypatch):
+    """Chief, Risk, Trader and Clerk read internal state: the check is that it can be read at all,
+    and for the Chief that a published projection exists for every role it decides from."""
+    import sqlite3
+
+    from ats import memory
+    from ats.memory.store import TradingMemory
+
+    path = tmp_path / "decision-health.sqlite"
+    TradingMemory(path)
+    monkeypatch.setattr(memory, "_db_path", lambda: str(path))
+    for consumer in ("risk", "trader", "clerk"):
+        assert health.check(consumer, now=NOW)["status"] == "ok", consumer
+    chief = health.check("chief", now=NOW)
+    assert chief["status"] == "failed" and "no published projection for" in chief["problems"][0]
+    with sqlite3.connect(path) as conn:
+        columns = [r[1] for r in conn.execute("PRAGMA table_info(task_projection_envelopes)")]
+        base = {c: "" for c in columns}
+        for role in ("layer_analysis", "information_brief", "sector_allocation", "macro_review",
+                     "technical_review", "fundamental_event_review"):
+            row = {**base, "projection_id": role, "agent_role": role, "status": "published"}
+            conn.execute(f"INSERT INTO task_projection_envelopes ({','.join(row)}) VALUES ({','.join('?' * len(row))})",
+                         list(row.values()))
+    assert health.check("chief", now=NOW)["status"] == "ok"
+    monkeypatch.setattr(memory, "_db_path", lambda: str(tmp_path / "missing.sqlite"))
+    for consumer in ("chief", "risk", "trader", "clerk"):
+        assert health.check(consumer, now=NOW)["status"] == "failed"

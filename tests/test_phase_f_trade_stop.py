@@ -22,7 +22,7 @@ from ats.execution.authorization import (
 )
 from ats.execution.authorization_lifecycle import AuthorizationLifecycle, lifecycle_for_cycle
 from ats.execution.clerk import clerk_run
-from ats.workflow.business_replay_inputs import implementation_hashes
+from ats.workflow.assurance_surface import implementation_hashes
 from ats.workflow.isolation import verified_isolation_root
 
 execution = _execution

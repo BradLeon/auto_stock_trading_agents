@@ -342,7 +342,9 @@ def test_chainmap_edges_come_from_declared_customer_supplier_witness_stance():
 
 
 # --------------------------------------------------------------------------- #
-# `ats sector html` — the offline rebuild CLI (runtime/cli.py::run_sector_html)
+# `ats sector html` — the offline rebuild CLI (runtime/cli.py::run_sector_html). These drive the unbound body
+# (`__wrapped__`): the bound entry always takes the published-projection path since the read routes were retired
+# (switch-trade r5 9.2), so the stored-review rendering below is reachable only unbound.
 # --------------------------------------------------------------------------- #
 def test_run_sector_html_picks_the_review_matching_the_requested_date(monkeypatch):
     """Two stored reviews exist; --date must select the one asked for, not whichever
@@ -374,7 +376,7 @@ def test_run_sector_html_picks_the_review_matching_the_requested_date(monkeypatc
     monkeypatch.setattr(viz, "build_bundle", _fake_build_bundle)
     monkeypatch.setattr(viz, "write_html", lambda bundle, folder: "/x/out.html")
 
-    rc = cli.run_sector_html("test_sector", date=old.as_of.date().isoformat())
+    rc = cli.run_sector_html.__wrapped__("test_sector", date=old.as_of.date().isoformat())
     assert rc == 0
     assert calls["review"] is old
     assert calls["date"] == old.as_of.date().isoformat()
@@ -401,7 +403,7 @@ def test_run_sector_html_defaults_to_the_latest_review_without_a_date(monkeypatc
     monkeypatch.setattr(viz, "build_bundle", lambda *a, **k: {"b": 1})
     monkeypatch.setattr(viz, "write_html", lambda bundle, folder: "/x/out.html")
 
-    assert cli.run_sector_html("test_sector") == 0
+    assert cli.run_sector_html.__wrapped__("test_sector") == 0
     assert calls["date"] == latest.as_of.date().isoformat()
 
 
@@ -417,7 +419,7 @@ def test_run_sector_html_reports_missing_review_for_the_requested_date(monkeypat
     monkeypatch.setattr("ats.config.load_sector_config", lambda name: cfg)
     monkeypatch.setattr("ats.memory.get_store", lambda: _Store())
 
-    assert cli.run_sector_html("test_sector", date="2020-01-01") == 1
+    assert cli.run_sector_html.__wrapped__("test_sector", date="2020-01-01") == 1
     assert "没有存档" in capsys.readouterr().out
 
 
@@ -440,7 +442,7 @@ def test_run_sector_html_reports_when_output_dir_is_unset(monkeypatch):
     monkeypatch.setattr(viz, "build_bundle", lambda *a, **k: {"b": 1})
     monkeypatch.setattr(viz, "write_html", lambda bundle, folder: None)
 
-    assert cli.run_sector_html("test_sector") == 1
+    assert cli.run_sector_html.__wrapped__("test_sector") == 1
 
 
 def test_a_historical_allocation_value_is_read_back_but_never_drives_the_call():

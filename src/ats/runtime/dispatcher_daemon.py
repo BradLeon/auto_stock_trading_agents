@@ -104,7 +104,7 @@ def start(*, run_once: bool = False) -> None:
     from ..execution.broker_write_guard import startup
 
     startup(caller="ats.runtime.dispatcher_daemon.start")
-    from ..workflow.cutover import assert_runtime_startup
+    from ..execution.route_registry import assert_runtime_startup
 
     assert_runtime_startup(caller="ats.runtime.dispatcher_daemon.start")
     from ..workflow.schedule_runtime import reload_authority
@@ -122,7 +122,13 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
     from ..workflow.ownership import install_product_health_gate
 
     install_product_health_gate()
+    from ..workflow.trade_schedules import (is_trading_day, resumed_at, run_trade_workflow,
+                                            trade_schedule_entries)
+
     entries = research_schedule_entries()
+    trade_entries = trade_schedule_entries()      # empty while both trade workflows are switched off
+    entries = {**entries, **trade_entries}
+    resumed = {workflow_id: resumed_at(workflow_id) for workflow_id in trade_entries}
     policies = load_trigger_policies()
 
     def dispatch_tick(workflow_id: str, entry: dict, planned: datetime) -> None:
@@ -133,6 +139,10 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
 
         observe("wake", workflow_id, {"owner": "dispatcher", "trigger": context.model_dump(mode="json")})
         try:
+            if workflow_id in trade_entries:
+                result = run_trade_workflow(workflow_id, entry, context, now=planned)
+                log.info("workflow %s -> %s", workflow_id, result.get("status") or result.get("outcome"))
+                return
             result = run_owned_workflow(
                 workflow_id, scope=entry["scope"], trigger=context,
                 request={"requested_tasks": list(entry["task_ids"]),
@@ -195,6 +205,12 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
         ticks = []
         planned = trigger.get_next_fire_time(None, start_at)
         while planned is not None and planned <= startup_now:
+            if workflow_id in trade_entries and (
+                    not is_trading_day(planned.astimezone(ET).date())
+                    or (resumed.get(workflow_id) and planned < resumed[workflow_id])):
+                # A closed market has no tick; a tick from before the workflow was resumed was never its to run.
+                planned = trigger.get_next_fire_time(planned, planned)
+                continue
             context = TriggerContext(kind="schedule", workflow_id=workflow_id,
                                      schedule_id=workflow_id, scheduled_for=planned.isoformat())
             frozen_request = {
@@ -205,8 +221,15 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
             }
             ticks.append((context, frozen_request))
             planned = trigger.get_next_fire_time(planned, planned)
-        decisions = reconcile_schedule(workflow_store_for_owner(workflow_id, scope=entry["scope"]),
-                                       expected=ticks, now=startup_now, policy=policy)
+        if workflow_id in trade_entries:
+            # Missed ticks inside the grace window are replayed under their original planned instants; the claim
+            # keyed by workflow + scope + instant returns the first run's result, so a restart never runs one twice.
+            for context, _ in ticks:
+                dispatch_tick(workflow_id, entry, datetime.fromisoformat(context.scheduled_for))
+            decisions = []
+        else:
+            decisions = reconcile_schedule(workflow_store_for_owner(workflow_id, scope=entry["scope"]),
+                                           expected=ticks, now=startup_now, policy=policy)
         for decision in decisions:
             if decision["status"] == "planned":
                 key = decision["trigger_key"]
@@ -247,13 +270,22 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
                     log.exception("published calendar consumption failed: %s", operation.__name__)
 
         cron = CronTrigger(day_of_week="*", hour=refresh_schedule.get("hour", 6),
-                           minute=int(refresh_schedule.get("minute", 10)),
+                           minute=str(refresh_schedule.get("minute", 10)),
                            timezone=refresh_schedule.get("timezone", "UTC"))
         scheduler.add_job(consume_calendar, cron, id="phase_e:calendar-consume", coalesce=True,
                           max_instances=1, misfire_grace_time=None)
 
-    log.info("dispatcher started: workflows=%s; calendar_consume=%s",
-             ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)))
+    # TWS returns only the account's executions since its local midnight, so the day's fills are read once more
+    # before it (trader/fills_capture.py). A read that would run more than 10 minutes late is skipped: after
+    # midnight it can no longer see what it is for.
+    from ..trader.fills_capture import CRON as CAPTURE_CRON, capture_job
+
+    scheduler.add_job(capture_job, CronTrigger(day_of_week="*", **CAPTURE_CRON), id="phase_e:fills-capture",
+                      coalesce=True, max_instances=1, misfire_grace_time=600)
+
+    log.info("dispatcher started: workflows=%s; calendar_consume=%s; fills_capture=%02d:%02d %s",
+             ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)),
+             CAPTURE_CRON["hour"], CAPTURE_CRON["minute"], CAPTURE_CRON["timezone"])
     print(f"⏰ dispatcher workflows: {', '.join(entries) or 'none'}; "
           f"published calendar consume: {'enabled' if refresh_schedule.get('enabled', False) else 'disabled'}")
     try:

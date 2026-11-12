@@ -8,7 +8,7 @@ needing to un-consume anything — only the final score is ever actionable.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -151,86 +151,11 @@ def _seed_scored_dossier(label="Q2 2026"):
         scorecard=_card(1.5), decision_summary="达成门槛→小仓位做多 | 建议: buy GOOG $1,500"))
 
 
-def test_v1_is_background_to_the_chief():
-    from ats.agents.chief.assemble import _pead_block
-
-    store = get_store()
-    _seed_scored_dossier()
-    store.record_score_run(symbol="GOOG", fiscal_label="Q2 2026", version=1,
-                           earnings_date=date(2026, 7, 22), has_transcript=False)
-
-    block = _pead_block()
-    assert "仅背景（v1 缺电话会纪要" in block
-    assert "新鲜可行动" not in block
-    assert "无电话会纪要" in block                    # the evidence warning is shown
-    assert "PEAD 分析师建议" not in block             # ...but not the actionable line
 
 
-def test_v2_is_actionable_to_the_chief():
-    from ats.agents.chief.assemble import ChiefContext, _pead_block
-
-    store = get_store()
-    _seed_scored_dossier()
-    store.record_score_run(symbol="GOOG", fiscal_label="Q2 2026", version=1,
-                           earnings_date=date(2026, 7, 22), has_transcript=False)
-    store.record_score_run(symbol="GOOG", fiscal_label="Q2 2026", version=2,
-                           earnings_date=date(2026, 7, 22), has_transcript=True,
-                           transcript_source="tavily:investing.com")
-
-    ctx = ChiefContext(as_of=NOW)
-    block = _pead_block(ctx=ctx)
-    assert "新鲜可行动" in block
-    assert "PEAD 分析师建议" in block
-    assert ("GOOG", "Q2 2026") in ctx.actionable_scores
 
 
-def test_promoted_v1_becomes_actionable():
-    """The transcript never arrived; the v1 is promoted so the quarter isn't lost."""
-    from ats.agents.chief.assemble import _pead_block
-
-    store = get_store()
-    _seed_scored_dossier()
-    store.record_score_run(symbol="GOOG", fiscal_label="Q2 2026", version=1,
-                           earnings_date=date(2026, 7, 22), has_transcript=False)
-    assert store.promote_score_run("GOOG", "Q2 2026") is True
-
-    block = _pead_block()
-    assert "新鲜可行动" in block
-    assert "无电话会纪要" in block          # still flagged as thin evidence
-    assert store.promote_score_run("GOOG", "Q2 2026") is False   # idempotent
 
 
-def test_consumed_score_stays_background():
-    """score_consumption still governs — this is the invariant we did not touch."""
-    from ats.agents.chief.assemble import _pead_block
-
-    store = get_store()
-    _seed_scored_dossier()
-    store.record_score_run(symbol="GOOG", fiscal_label="Q2 2026", version=1,
-                           earnings_date=date(2026, 7, 22), has_transcript=True)
-    store.mark_score_consumed("GOOG", "Q2 2026", "chief-20260722-200500")
-
-    block = _pead_block()
-    assert "score 已消费" in block
-    assert "新鲜可行动" not in block
 
 
-def test_score_age_comes_from_the_run_not_the_monitor_bump():
-    """The daily monitor rewrites the dossier and bumps updated_at, so a scored
-    dossier looks 0 days old forever. Freshness must come from the score run."""
-    from ats.agents.chief.assemble import FRESH_SCORE_DAYS, _pead_block
-    from ats.schemas.pead import PeadDossier
-
-    store = get_store()
-    old = NOW - timedelta(days=FRESH_SCORE_DAYS + 3)
-    store.save_dossier(PeadDossier(symbol="GOOG", fiscal_label="Q2 2026", phase="score",
-                                   updated_at=NOW,          # monitor touched it today
-                                   scorecard=_card(1.5),
-                                   decision_summary="buy GOOG"))
-    store.conn.execute(
-        "INSERT OR REPLACE INTO pead_score_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("GOOG", "Q2 2026", 1, old.isoformat(), "2026-07-22", 1, "x", "amc",
-         None, 1.5, "band", "buy GOOG", 1))
-    store.conn.commit()
-
-    assert "新鲜可行动" not in _pead_block()

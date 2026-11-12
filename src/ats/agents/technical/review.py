@@ -234,10 +234,13 @@ def projection_extras(r, review) -> dict:
         out.append("评分升到 3 及以上：信号不再为看空")
     else:
         out.append("评分升到 5 及以上转看多；降到 2 及以下转看空")
+    missing = [name for name, value in (("vix", review.vix), ("vix3m", review.vix3m)) if value is None]
     return {"trend_state": trend, "score": r.score, "score_detail": detail,
             "suggested_exposure": round(float(r.target_exposure), 4),
             "previous_exposure": (None if r.prev_exposure is None else round(float(r.prev_exposure), 4)),
-            "invalidation": out, "panic_fired": bool(r.panic_fired), "bear_fired": bool(r.bear_fired)}
+            "invalidation": out, "panic_fired": bool(r.panic_fired), "bear_fired": bool(r.bear_fired),
+            "vix": review.vix, "vix3m": review.vix3m,
+            "volatility_status": "_and_".join(missing) + "_unavailable" if missing else ""}
 
 
 def _prior_exposures(store, name: str, symbols, today: str) -> dict[str, float]:

@@ -187,10 +187,10 @@ def test_3_5_risk_check_fails_on_an_action_outside_the_vocabulary():
         setup="unknown", stop_price=None, target_price=None,
         planned_horizon_days=None, invalidation="")
 
-    approved, notes, _review = risk_checks.pre_trade([decision], pf)
+    result = risk_checks.review_revision([decision], pf)
 
-    assert approved == []
-    assert any("BLOCK" in n and "rotate" in n for n in notes), notes
+    assert [ov.verdict for ov in result.order_verdicts] == ["rejected"]
+    assert any("BLOCK" in n and "rotate" in n for n in result.notes), result.notes
 
 
 def test_3_6_direction_helpers_agree_with_the_vocabulary():

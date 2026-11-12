@@ -29,6 +29,11 @@ FIELDS = ("cycle_id", "revision_no", "decision_hash", "review_id", "review_at",
 # remedy, and the graph routes back to the risk gate for exactly these.
 RECOVERABLE = frozenset({"snapshot_stale"})
 
+#: Rejections that only say "no active trade route is bound". While the live lock is on there is
+#: no route to bind, and these are recorded as a finding of the pre-execution checks rather than
+#: stopping them; the broker handover is still refused by the lock itself.
+ROUTE_REASONS = frozenset({"route_unbound", "route_mismatch", "route_generation_stale"})
+
 
 def _round_of(record_id: str) -> int:
     """Parse the round suffix of a round-scoped record id (`...:approval:r3`)."""

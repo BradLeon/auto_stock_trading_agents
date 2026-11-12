@@ -1,0 +1,30 @@
+version: "1"
+
+# The trade path's two daily workflows (design D5), kept apart from `research_schedules.yaml` so pausing or
+# resuming one never touches the other. Both start `enabled: false`: with that, nothing is registered with the
+# scheduler, they are not in the expected-trigger set, and a running dispatcher is unchanged. They are turned
+# on one at a time (switch-trade-path-and-retire-r5 S4, S5), each with the user's approval:
+# `enabled: true` -> `ats dispatch resume <workflow>` -> restart `com.ats.dispatcher` (it registers trade workflows
+# at start-up by owner, so the restart must come after the resume).
+#
+# Both run only on NYSE trading sessions. The owner of a workflow that is switched off is `legacy`
+# (externally: paused); `ats dispatch pause/resume` moves it.
+workflows:
+  clerk-daily:
+    enabled: true       # S4, switched on 2026-11-01 (user approved S4.2–S4.6 to be completed in their absence)
+    consumer: clerk
+    scope: {kind: portfolio, id: portfolio}
+    # After the close (2026-11-02: 16:30 -> 18:00): the ledger window runs from the last successful reconcile to
+    # today; a missed day is picked up by the Clerk's own missed-window register, and one window is idempotent.
+    cron: {day_of_week: "mon-fri", hour: 18, minute: 0, timezone: America/New_York}
+  chief-daily:
+    enabled: true       # S5, switched on 2026-11-02 (user: "现在启用")
+    consumer: chief
+    scope: {kind: portfolio, id: portfolio}
+    # 2026-11-02: 10:30 -> 09:00 NY, after the 08:00/08:30 research runs. 2026-11-03: 09:00 -> 09:45 NY (22:45 in
+    # Taipei in winter). Order normalization prices only from a live bid/ask inside the regular session (09:30-16:00
+    # NY, quote no older than 30 s), so a pre-open cycle can never normalize its orders (blockers B9). The Boss
+    # approves the same night, while the market is still open.
+    cron: {day_of_week: "mon-fri", hour: 9, minute: 45, timezone: America/New_York}
+    decision_profile: ai_hardware
+    fundamental_mode: routine

@@ -16,6 +16,9 @@ from ats.trader import reconcile as rec
 
 NOW = datetime.now(timezone.utc)
 TODAY = NOW.date().isoformat()
+# Before `journal.manual_classification_since` (2026-07-27): the era in which an
+# untagged fill proves nothing, so it stays unattributed.
+PRE_CUTOFF = "2026-07-20T14:00:00+00:00"
 
 
 class FakeBroker:
@@ -88,7 +91,7 @@ def test_manual_tws_fill_is_not_claimed(store):
     _trade(store, order_id="4", symbol="GOOG")
     rec.reconcile(FakeBroker([_fill(exec_id="mine", order_id="4", symbol="GOOG", pnl=10.0),
                               _fill(exec_id="theirs", order_id="34", symbol="SPCX",
-                                    pnl=-60.01)]), store=store)
+                                    pnl=-60.01, time=PRE_CUTOFF)]), store=store)
     origins = dict(store.conn.execute("SELECT exec_id, origin FROM fills").fetchall())
     # Phase C (task 2.4): "theirs" carries no orderRef and matches nothing —
     # that is UNATTRIBUTED, not manual. The old behaviour collapsed the two,
@@ -124,8 +127,40 @@ def test_order_id_reuse_across_sessions_is_rejected(store):
            submitted=(NOW - timedelta(days=30)).isoformat())
     rec.reconcile(FakeBroker([_fill(order_id="4", symbol="GOOG", pnl=999.0)]), store=store)
     assert _row(store)["realized_pnl"] is None                 # not claimed
-    # Phase C (task 2.4): no human orderRef and no match -> unattributed.
+    # Untagged and after the cutoff: the absence of the `ats:` tag every system
+    # order carries is the evidence -> manual (Boss ruling 2026-10-29).
+    assert tuple(store.conn.execute(
+        "SELECT origin, link_confidence FROM fills").fetchone()) == (
+        "manual", "untagged_after_cutoff")
+
+
+def test_untagged_fill_before_the_cutoff_stays_unattributed(store):
+    """Phase C (task 2.4): before system orders were tagged, no human orderRef
+    and no match proves nothing -> unattributed, with an exception."""
+    rec.reconcile(FakeBroker([_fill(exec_id="old", time=PRE_CUTOFF)]), store=store)
     assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "unattributed"
+    assert store.conn.execute(
+        "SELECT COUNT(*) FROM ledger_exceptions WHERE subject_key = 'fill:old'"
+    ).fetchone()[0] == 1
+
+
+def test_untagged_fill_after_the_cutoff_is_manual_without_an_exception(store):
+    out = rec.reconcile(FakeBroker([_fill(exec_id="hand")]), store=store)
+    assert out["manual"] == 1 and out["unattributed"] == 0
+    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "manual"
+    assert store.conn.execute("SELECT COUNT(*) FROM ledger_exceptions").fetchone()[0] == 0
+
+
+def test_an_ats_tag_that_matches_nothing_stays_unattributed_after_the_cutoff(store):
+    """A lost system order is not a human order, whatever its date."""
+    rec.reconcile(FakeBroker([_fill(exec_id="lost", order_ref="ats:cX:GOOG")]), store=store)
+    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "unattributed"
+
+
+def test_a_tagged_system_fill_after_the_cutoff_is_still_system(store):
+    _trade(store, order_ref="ats:c1:GOOG")
+    rec.reconcile(FakeBroker([_fill(order_ref="ats:c1:GOOG")]), store=store)
+    assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "system"
 
 
 def test_order_id_match_requires_same_symbol(store):

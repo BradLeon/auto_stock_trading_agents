@@ -19,7 +19,11 @@ no fresh material is a warning, not a failure: quiet tickers are normal.
 """
 from __future__ import annotations
 
+import json
+import sqlite3
+from contextlib import closing
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 DOCUMENT_LOOKBACK_DAYS = 7
@@ -550,6 +554,66 @@ CHECKS["sector"] = _sector
 
 
 # --------------------------------------------------------------------------------------------------------
+# Decision and trading consumers (2026-10-28). They read internal state, not published data products, so the
+# check asks the one question that makes their route unsafe to rely on: can what they read be read at all.
+# Opened read-only, like the research checks: a health check must never write the production file.
+# --------------------------------------------------------------------------------------------------------
+_DECISION_READS = {
+    "chief": ("task_projection_envelopes", "decision_cycles", "trades", "fills", "performance"),
+    "risk": ("decision_cycles", "decision_revisions", "decision_risk_reviews"),
+    "trader": ("decision_cycles", "decision_revisions", "decision_risk_reviews", "boss_approvals", "trades"),
+    "clerk": ("trades", "fills", "performance", "decision_cycles", "boss_approvals"),
+}
+# One published projection per role must exist for the Chief to have anything to decide from. Missing
+# ones are what its snapshot gate would block on, so the route is not switched over them.
+_CHIEF_ROLES = ("layer_analysis", "information_brief", "sector_allocation", "macro_review", "technical_review")
+_CHIEF_FUNDAMENTAL_ROLES = ("fundamental_event_review", "fundamental_expectation_update")
+
+
+def _decision_consumer(consumer: str, now: datetime) -> dict[str, Any]:
+    import sqlite3
+    from contextlib import closing
+    from pathlib import Path
+
+    from ..memory import _db_path
+
+    problems, warnings, detail = [], [], {}
+    path = Path(_db_path()).resolve()
+    if not path.is_file():
+        return _result(consumer, [f"memory database not found at {path}"], warnings, detail)
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as conn:
+        present = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = [t for t in _DECISION_READS[consumer] if t not in present]
+        detail["tables"] = {t: t in present for t in _DECISION_READS[consumer]}
+        if missing:
+            problems.append(f"tables not readable: {', '.join(missing)}")
+        if consumer == "chief" and "task_projection_envelopes" in present:
+            roles = {row[0] for row in conn.execute(
+                "SELECT DISTINCT agent_role FROM task_projection_envelopes WHERE status='published'")}
+            detail["published_roles"] = sorted(roles)
+            absent = [r for r in _CHIEF_ROLES if r not in roles]
+            if not roles.intersection(_CHIEF_FUNDAMENTAL_ROLES):
+                absent.append("fundamental")
+            if absent:
+                problems.append("no published projection for: " + ", ".join(absent))
+    if consumer == "risk":
+        try:
+            from ..config import get_config
+
+            limit = get_config().app.risk.max_snapshot_age_seconds
+            detail["max_snapshot_age_seconds"] = limit
+            if not limit or limit <= 0:
+                problems.append("risk.max_snapshot_age_seconds is not a positive number")
+        except Exception as exc:  # noqa: BLE001 - unreadable rules are the failure we look for
+            problems.append(f"risk rules unreadable ({type(exc).__name__}: {exc})")
+    return _result(consumer, problems, warnings, detail)
+
+
+for _consumer in _DECISION_READS:
+    CHECKS[_consumer] = (lambda now, _c=_consumer: _decision_consumer(_c, now))
+
+
+# --------------------------------------------------------------------------------------------------------
 # When the checks run (2026-10-20): after the data refresh controller publishes, and before a Dispatcher
 # task. Both log and alert only when a consumer's status changes, so an hourly refresh over a broken
 # product sends one alert, not one per hour.
@@ -572,16 +636,72 @@ def feishu_notify(title: str, body: str) -> None:
     get_channel().push(Notification(kind="error", title=title, body=body))
 
 
+_HEALTH_LOG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS data_health_log (
+ seq INTEGER PRIMARY KEY AUTOINCREMENT, consumer_id TEXT NOT NULL, status TEXT NOT NULL,
+ health_json TEXT NOT NULL, actor TEXT NOT NULL, reason TEXT NOT NULL, recorded_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_data_health_log_consumer ON data_health_log(consumer_id, seq);
+CREATE TRIGGER IF NOT EXISTS data_health_log_no_update BEFORE UPDATE ON data_health_log
+BEGIN SELECT RAISE(ABORT, 'data health log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS data_health_log_no_delete BEFORE DELETE ON data_health_log
+BEGIN SELECT RAISE(ABORT, 'data health log is append-only'); END;
+"""
+
+
+def _health_log_path(path=None) -> Path:
+    """The health log lives in the workflow memory database (switch-trade r5 9.3, user ruling D3). Observations made
+    before 2026-11 stay readable in the retired `consumer_cutover_log` of `var/phase_f_cutover.sqlite`."""
+    from ..memory import _db_path
+
+    return Path(path or _db_path())
+
+
+def record_health(consumer_id: str, health: dict[str, Any], *, actor: str,
+                  reason: str = "data-product health check", path=None) -> None:
+    """Append one health observation of a consumer's data products."""
+
+    with closing(sqlite3.connect(_health_log_path(path), timeout=30)) as conn:
+        conn.executescript(_HEALTH_LOG_SCHEMA)
+        conn.execute("INSERT INTO data_health_log (consumer_id, status, health_json, actor, reason, recorded_at) "
+                     "VALUES (?,?,?,?,?,?)",
+                     (consumer_id, str(health.get("status", "")), json.dumps(health, ensure_ascii=False, default=str),
+                      actor, reason, datetime.now(UTC).isoformat()))
+        conn.commit()
+
+
+def health_log(*, consumer_id: str | None = None, path=None) -> list[dict[str, Any]]:
+    """Recorded health changes, oldest first."""
+    target = _health_log_path(path)
+    if not target.exists():
+        return []
+    with closing(sqlite3.connect(target, timeout=30)) as conn:
+        conn.row_factory = sqlite3.Row
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='data_health_log'").fetchone():
+            return []
+        query, args = "SELECT * FROM data_health_log", ()
+        if consumer_id:
+            query, args = query + " WHERE consumer_id=?", (consumer_id,)
+        return [dict(row) for row in conn.execute(query + " ORDER BY seq", args)]
+
+
+def latest_health(consumer_id: str, *, path=None) -> dict[str, Any] | None:
+    """The most recent health observation logged for one consumer, if any."""
+    rows = health_log(consumer_id=consumer_id, path=path)
+    if not rows:
+        return None
+    try:
+        return json.loads(rows[-1]["health_json"] or "{}")
+    except json.JSONDecodeError:
+        return None
+
+
 def observe(consumer_id: str, health: dict[str, Any], *, actor: str, notify=None, path=None) -> bool:
     """Log `health` and alert when the consumer's status differs from the last logged one. Returns changed."""
-    from . import consumer_cutover
-
-    previous = consumer_cutover.latest_health(consumer_id, path=path)
+    previous = latest_health(consumer_id, path=path)
     status = health.get("status")
     if previous is not None and previous.get("status") == status:
         return False
-    consumer_cutover.record_health(consumer_id, health, actor=actor,
-                                   reason=f"data-product health {status} ({actor})", path=path)
+    record_health(consumer_id, health, actor=actor, reason=f"data-product health {status} ({actor})", path=path)
     if notify is not None and (status != "ok" or previous is not None):
         title = (f"数据产品健康检查未通过：{consumer_id}" if status != "ok"
                  else f"数据产品健康检查已恢复：{consumer_id}")

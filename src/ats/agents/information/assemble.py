@@ -26,19 +26,18 @@ def admitted_events(store, symbol: str, *, cutoff: datetime,
     published_at; the cutoff here is applied on the record's published time so
     late-arriving old material is excluded from "this window's new facts".
     """
-    from ...workflow.isolation import verified_isolation_root
     from ...workflow.runtime_reads import current_read_context
 
     context = current_read_context()
-    if context and (context.route == "target" or verified_isolation_root() is not None):
+    if context:
         from ...data.consumer_api import read_input
 
         packet = read_input(consumer="information", product="DOC_DATA",
                             scope={"entities": context.identity.scope["entities"], "limit": limit})
         if packet.status not in {"complete", "partial", "no_coverage"}:
-            from ...workflow.cutover_routing import RouteUnavailable
+            from ...workflow.read_scope import ReadUnavailable
 
-            raise RouteUnavailable("Information admitted documents unavailable")
+            raise ReadUnavailable("Information admitted documents unavailable")
         from ...data.document_quality import completeness_assessment
 
         rows = []
@@ -86,13 +85,13 @@ def admitted_articles(store, *, since: datetime, limit: int = 500, entities: lis
     if context is not None:
         from ...data.consumer_api import read_input
         from ...data.products.unstructured import AdmittedDocument
-        from ...workflow.cutover_routing import RouteUnavailable
+        from ...workflow.read_scope import ReadUnavailable
 
         packet = read_input(consumer="information", product="DOC_DATA", scope={
             "entities": entities if entities is not None else context.identity.scope["entities"],
             "document_types": types, "limit": limit})
         if packet.status not in {"complete", "partial", "no_coverage"}:
-            raise RouteUnavailable("Information research documents unavailable")
+            raise ReadUnavailable("Information research documents unavailable")
         documents = [AdmittedDocument(**row) for row in packet.payload or []]
     else:
         documents = admitted_documents(document_types=types, entities=entities,

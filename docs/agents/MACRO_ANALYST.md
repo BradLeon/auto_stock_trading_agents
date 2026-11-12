@@ -349,8 +349,8 @@ MacroReview
 - 风控官 memo 追加 `quadrant_line()`——信用利差走阔、"最差组合成形"属于风控输入，
   不是背景色。
 
-**必须保留的既有保护**：`agents/macro/context.py` 会拦截 `regime` 以 `(` 开头的 stub
-评审，使其不被注入下游。`--no-llm` 现在也会产出真实象限，反而更容易让人想注入它——
+**必须保留的既有保护**：发布投影时（`agents/macro/review.py` 的 `_publish_projection`）拦截 `regime` 以 `(` 开头的 stub
+评审，使其不被发布到下游（原在 `agents/macro/context.py`，该模块 2026-11-07 无调用方后删除）。`--no-llm` 现在也会产出真实象限，反而更容易让人想注入它——
 但它没有叙事层，注入下去只会得到一句空话。这条保护有专门的回归测试。
 
 另有一条相关约束：没有确定性层的评审（离线跑、或本框架之前的历史行）**不得输出
@@ -461,7 +461,7 @@ MOVE 就能参与 z-score 判定）。
 ### ⚠️ 一个运维陷阱
 
 不带模型的宏观评审（`ats workflow run --task macro-review … --inputs-json '{"macro-review": {"use_llm": false}}'`，旧入口 `ats macro review --no-llm` 已退役）会把一条 `regime="(no-llm)"` 的评审写进库。下游注入有
-stub 保护（`agents/macro/context.py` 拦截以 `(` 开头的 regime），所以不会污染决策，
+stub 保护（`agents/macro/review.py` 发布投影时拦截以 `(` 开头的 regime），所以不会污染决策，
 但 `latest_macro_review()` 从此返回这条 stub，**等于让 5 个下游消费方在下次正式
 评审前都读不到宏观背景**。要核对数字请直接调 `data.macro.fetch_series()` +
 `regime.assess()`，不要对生产库跑 `--no-llm`。

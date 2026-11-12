@@ -129,3 +129,26 @@ def test_a_publisher_failure_is_reported_and_never_raised(monkeypatch):
     monkeypatch.setattr(rp, "PUBLISHERS", {"technical-review": (boom,)})
     results = rp.publish("technical-review", {"result": {"outcomes": []}}, store_path=None)
     assert results == [{"report": "boom", "status": "failed", "error": "RuntimeError: disk full"}]
+
+
+def _text(out_dir):
+    return list(out_dir.glob("*.md"))[0].read_text(encoding="utf-8")
+
+
+def test_the_report_shows_the_vix_readings_the_run_used(out_dir):
+    refs = _publish(_review())
+    rp.technical_report(_outcomes(refs), store_path=_store_path())
+    text = _text(out_dir)
+    assert "VIX 18.00 · VIX3M 19.50" in text and "期限结构 0.923" in text
+    assert "Tier1 恐慌（期限结构倒挂）: 否" in text and "n/a" not in text
+
+
+def test_a_missing_vix3m_is_reported_as_not_evaluated_not_as_no_panic(out_dir):
+    review = _review().model_copy(update={"vix3m": None})
+    refs = _publish(review)
+    rp.technical_report(_outcomes(refs), store_path=_store_path())
+    text = _text(out_dir)
+    assert "VIX3M 不可用" in text and "Tier1 恐慌（期限结构倒挂）: 未评估" in text
+    payload = get_store().task_projection_envelopes(agent_role="technical_review", status="published",
+                                                    limit=5)[0]["payload"]
+    assert payload["volatility_status"] == "vix3m_unavailable" and "vix3m" not in payload

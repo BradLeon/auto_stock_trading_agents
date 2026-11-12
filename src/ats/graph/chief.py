@@ -49,7 +49,7 @@ def assemble_context(state: ChiefDecisionState) -> dict:
 
     out: dict = {}
     boundary = workflow_data_boundary("chief_graph")
-    log.info("chief input boundary: consumer=%s mode=%s", boundary.consumer, boundary.mode)
+    log.info("chief input boundary: consumer=%s", boundary.consumer)
     if not state.event_data:
         out["event_data"] = texec.pead_event_data()
     if not state.decide:
@@ -60,8 +60,15 @@ def assemble_context(state: ChiefDecisionState) -> dict:
     store = get_store()
     from ..workflow import decision_requirements as dr
 
-    requirements = (state.decision_requirements or state.research_snapshot.get("requirements")
-                    or dr.standalone(state))
+    try:
+        requirements = (state.decision_requirements or state.research_snapshot.get("requirements")
+                        or dr.standalone(state, store))
+    except dr.EventCycleWithoutEvents as exc:
+        report = f"事件周期没有可用的事件评审，决策周期被阻断（不创建周期、不产出决策）：{exc}"
+        print(f"🚧 {report}")
+        out.update(gap_report=report, context_text="", context_stats={},
+                   net_liquidation=0, actionable_scores=[])
+        return out
     plan = dr.restore(requirements)
     selected_plan = dr.query_plan(plan)
     # Phase D 7.1: fix the research snapshot BEFORE any decision context is
@@ -83,19 +90,33 @@ def assemble_context(state: ChiefDecisionState) -> dict:
                    net_liquidation=0, actionable_scores=[])
         return out
     dr.validate(store, snapshot.to_payload(), at=state.as_of)
-    ctx = assemble.build(live_broker=state.use_broker, query_plan=selected_plan,
-                         projection_manifest=snapshot.requirements["manifest"])
+    account = None
+    if state.use_broker:
+        # The book the Chief sees and the posture it proposes inside are taken from
+        # one live read; without it there is no account to decide on.
+        from ..data.consumer_api import read_input
+        from ..broker.account import account_broker
+
+        account = read_input("chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"},
+                             broker=account_broker())
+        if account.status != "complete" or not account.payload:
+            report = ("账户实时状态不可用，决策周期被阻断（不创建周期、不产出决策）："
+                      + ("；".join(account.gaps) or account.status))
+            print(f"🚧 {report}")
+            out.update(gap_report=report, context_text="", context_stats={},
+                       net_liquidation=0, actionable_scores=[])
+            return out
+        from ..agents.risk_officer.review import record_posture
+        from ..schemas.portfolio import PortfolioSnapshot
+
+        record_posture(PortfolioSnapshot.model_validate(account.payload))
+    ctx = assemble.build(query_plan=selected_plan,
+                         projection_manifest=snapshot.requirements["manifest"], account=account,
+                         fundamental_focus={key: plan.task_inputs.get(key) or []
+                                            for key in ("event_entities", "fundamental_uncovered")})
     log.info("chief context: %s", ctx.stats())
-    # 7.4: the projection read path rides along with the legacy blocks and the
-    # per-category presence disagreement is recorded (never used to gate).
-    ctx.blocks["研究快照（六类投影）"] = assemble.projection_context_block(detail)
-    diffs = assemble.dual_read_diffs(ctx, detail)
-    if any(diffs.values()):
-        log.info("chief dual-read diffs: %s", diffs)
-    out.update(context_text=ctx.as_context(),
-               context_stats={**ctx.stats(), "dual_read_diffs": diffs},
-               net_liquidation=ctx.net_liquidation,
-               actionable_scores=[list(x) for x in ctx.actionable_scores])
+    out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
+               net_liquidation=ctx.net_liquidation, actionable_scores=[])
     return out
 
 
@@ -109,7 +130,7 @@ def route_after_assemble(state: ChiefDecisionState) -> str:
 
 def chief_decide(state: ChiefDecisionState) -> dict:
     if not state.decide:
-        return {"decisions": list(state.seed_decisions)}
+        return {"decisions": list(state.seed_decisions), "proposed_at": _now()}
     from ..agents.chief import decide
     from ..memory import get_store
     from ..workflow.decision_requirements import validate_chief
@@ -121,11 +142,12 @@ def chief_decide(state: ChiefDecisionState) -> dict:
     print(f"👔 chief {state.cycle_id}\n{result.summary}")
     for d in result.decisions:
         size = f"${d.notional_usd:,.0f}" if d.notional_usd else (
-            f"w={d.target_weight:.0%}" if d.target_weight else "?")
+            f"w={d.target_weight:.0%}" if d.target_weight is not None else "?")
         print(f"   {d.action.upper()} {d.symbol} {size} conv={d.conviction:.2f} — {d.rationale[:70]}")
     if not result.decisions:
         print("   (无行动 — 零决策)")
-    return {"summary": result.summary, "decisions": result.decisions}
+    return {"summary": result.summary, "decisions": result.decisions, "proposed_at": _now(),
+            "chief_reasoning": result.reasoning, "option_actions": result.option_actions}
 
 
 @decision_read("risk")
@@ -143,7 +165,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     if not decisions:
         print("(no actionable decisions)")
         return {"decisions": [], "approved_decisions": [],
-                "risk_round": state.risk_round + 1}
+                "risk_round": state.risk_round + 1, "reviewed_at": _now()}
 
     if state.decide and not state.revision_no:
         from ..workflow.decision_requirements import validate_chief
@@ -151,11 +173,13 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         validate_chief(_decision_repo().store, state.research_snapshot, at=_now())
 
     from ..risk import checks as risk_checks
-    from ..trader import portfolio as tport
+    from ..risk import inputs as risk_inputs
 
-    pf = tport.snapshot() if state.use_broker else None
+    # The book this revision is reviewed against, read by the risk role itself (task 6.4).
+    pf = risk_inputs.account() if state.use_broker else None
     from ..data.execution_prices import PriceUnavailable, normalize_orders, session_context
-    from ..workflow.cutover_routing import RouteUnavailable
+    from ..data.runtime.execution_prices import overnight_session_candidate
+    from ..workflow.read_scope import ReadUnavailable
 
     normalization_notes, normalization_errors = [], []
     try:
@@ -164,14 +188,26 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         # Operational normalization precedes review: its result is the actual
         # revision, card and order, rather than an unbound qty_by_symbol cache.
         from ..config import load_pead_global
-        overnight = state.source == "pead-chief" and not session_context(_now())[0]
+        # The event-trade chief (`pead-chief`) and the scheduled daily chief (`scheduled`, chief-daily) are the system's own
+        # runs; a manual run (`chief`) keeps the regular-session rule.
+        off_session = state.source in ("pead-chief", "scheduled", "rehearsal") and not session_context(_now())[0]
+        # Outside the regular session a candidate overnight session is traded on IBKR's overnight venue from a live quote;
+        # a closed market (premarket, weekend, Friday night) is, for an event trade, still priced from the previous close
+        # and deferred, and, for the daily chief, refused (blockers B9).
+        venue = "overnight" if off_session and overnight_session_candidate(_now()) else "regular"
+        overnight = off_session and state.source == "pead-chief" and venue != "overnight"
         slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", .5)
         decisions, normalization_notes = normalize_orders(
             decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
-            overnight=overnight, slippage_pct=slip,
-            net_liquidation=pf.net_liquidation if pf else 0)
-    except (PriceUnavailable, RouteUnavailable, PermissionError) as exc:
-        normalization_errors = [f"订单规范化拒绝，需重新审查：{exc}"]
+            overnight=overnight, slippage_pct=slip, venue=venue,
+            net_liquidation=pf.net_liquidation if pf else 0, skip_unquotable=venue == "overnight",
+            positions={p.symbol: p.qty for p in pf.positions if p.sec_type == "STK"})
+    except (PriceUnavailable, ReadUnavailable, PermissionError) as exc:
+        from ..data.execution_prices import proposal_error, proposal_hint
+
+        fixable = isinstance(exc, PriceUnavailable) and proposal_error(str(exc))
+        normalization_errors = [f"订单规范化拒绝（{'提案需修改' if fixable else '执行环境不可用'}）："
+                                f"{proposal_hint(str(exc)) if fixable else exc}"]
     if normalization_errors:
         from ..schemas.risk import DecisionRiskReview, OrderRiskVerdict, RiskViolation
 
@@ -184,8 +220,9 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                                       detail=normalization_errors[0], severity="hard")])
         return {"decisions": decisions, "approved_decisions": [], "portfolio": pf,
                 "risk_review": review, "risk_notes": normalization_errors,
-                "normalization_errors": normalization_errors, "qty_by_symbol": {},
-                "risk_round": state.risk_round + 1,
+                "normalization_errors": normalization_errors, "normalization_fixable": fixable,
+                "qty_by_symbol": {},
+                "risk_round": state.risk_round + 1, "reviewed_at": _now(),
                 "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else "",
                 "approval_summary": "\n".join(normalization_errors)}
     # Allocate the immutable revision before Risk consumes it. persist_decision
@@ -208,11 +245,15 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                       created_at=state.as_of.isoformat())
     revision = repo.append_revision(
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
-        rationale=state.summary or "", parent_revision_no=state.parent_revision_no,
-        revision_source="chief", created_at=state.as_of.isoformat())
+        rationale=_revision_rationale(state), parent_revision_no=state.parent_revision_no,
+        revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
+    from ..workflow.decision_requirements import uncovered_fundamental
+
     review = risk_checks.review_revision(decisions, pf,
                                          event_data=state.event_data or None,
-                                         cycle_id=state.cycle_id)
+                                         cycle_id=state.cycle_id,
+                                         uncovered_fundamental=uncovered_fundamental(
+                                             (state.research_snapshot or {}).get("requirements")))
     risk_notes = list(review.notes)
     approved = [d for d, ov in zip(decisions, review.order_verdicts)
                 if ov.verdict == "approved"]
@@ -221,8 +262,9 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     out: dict = {"decisions": decisions, "approved_decisions": approved,
                  "revision_no": revision["revision_no"],
                  "revision_hash": revision["decision_hash"], "normalization_errors": [],
+                 "normalization_fixable": False,
                  "portfolio": pf, "risk_notes": risk_notes, "risk_review": review,
-                 "risk_round": state.risk_round + 1,
+                 "risk_round": state.risk_round + 1, "reviewed_at": _now(),
                  "portfolio_snapshot_id": f"pf:{pf.as_of.isoformat()}" if pf else ""}
     if not approved:
         print("(所有决策被风控硬约束拦下 — 无单可下，等待修订或人工复核)")
@@ -231,6 +273,12 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     risk_notes = list(risk_notes) + normalization_notes
     sized = texec.size_decisions(approved)
     summary = texec.build_approval_summary(sized, risk_notes, state.source)
+    if state.option_actions:
+        import json
+
+        from ..decision.repository import option_advice_lines
+
+        summary += "\n".join(option_advice_lines(json.dumps({"option_actions": state.option_actions})))
     out.update(risk_notes=risk_notes,
                qty_by_symbol={d.symbol: q for d, q in sized},
                approval_summary=summary)
@@ -255,6 +303,40 @@ def _orders_payload(decisions) -> list[dict]:
     return [d.model_dump(mode="json") for d in decisions]
 
 
+def _proposed_at(state: ChiefDecisionState) -> str:
+    return (state.proposed_at or _now()).isoformat()
+
+
+def _revision_rationale(state: ChiefDecisionState):
+    """The revision's rationale: the card summary, plus — when a Chief reasoned — the full
+    reasoning, option advice and an audit of the references against this round's snapshot.
+    References are recorded, never enforced: a gap is noted for review, not a refusal."""
+    if not (state.chief_reasoning or state.option_actions):
+        return state.summary or ""
+    known = {item.get("projection_id") for item in state.research_snapshot.get("items") or []}
+    cited: list[str] = []
+    for part in ([d.references for d in state.decisions]
+                 + [h.get("references") or [] for h in state.chief_reasoning.get("holdings_review") or []]
+                 + [e.get("references") or [] for e in state.chief_reasoning.get("evidence_weighing") or []]
+                 + [a.get("references") or [] for a in state.option_actions]):
+        cited.extend(part)
+    return {"summary": state.summary or "", "reasoning": state.chief_reasoning,
+            "option_actions": state.option_actions,
+            "reference_audit": {
+                "unknown": sorted({r for r in cited if r not in known}),
+                "orders_without_references": [d.symbol for d in state.decisions
+                                              if d.action != "hold" and not d.references]}}
+
+
+def _revision_versions(state: ChiefDecisionState) -> dict[str, str]:
+    """The model and prompt that produced this revision; seeded or stub runs are deterministic."""
+    from ..agents.base import execution_versions
+    from ..agents.chief import decide
+
+    return execution_versions("chief", "chief", use_llm=state.decide and state.use_llm,
+                              template_source=decide.__file__)
+
+
 def _ruleset_version() -> str:
     # Phase D 6.4: one shared computation — a review's basis and the audit row
     # recorded against it must never name different rulesets.
@@ -275,7 +357,7 @@ def _consume_scores(state: ChiefDecisionState) -> None:
             log.warning("score consume failed for %s: %s", pair, exc)
 
 
-def _write_chief_report(state: ChiefDecisionState) -> None:
+def _write_chief_report(state: ChiefDecisionState, outcome_note: str = "") -> None:
     if not (state.use_llm and state.decide):   # audit report; skip for stubs
         return
     from ..agents.chief import report as chief_report
@@ -288,7 +370,12 @@ def _write_chief_report(state: ChiefDecisionState) -> None:
         out_dir = ""
     path = chief_report.write(ChiefResult(cycle_id=state.cycle_id, as_of=state.as_of,
                                           summary=state.summary, decisions=state.decisions,
-                                          context_text=state.context_text), out_dir)
+                                          reasoning=state.chief_reasoning,
+                                          option_actions=state.option_actions,
+                                          context_text=state.context_text, outcome_note=outcome_note,
+                                          skipped_note="；".join(
+                                              n.removeprefix("未下单：") for n in (state.risk_notes or [])
+                                              if str(n).startswith("未下单："))), out_dir)
     if path:
         print(f"📝 {path}")
 
@@ -316,7 +403,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
             reason = "; ".join(stale)
             print(f"⏸️  研究快照已失效 — 周期转 superseded：{reason}")
             supersede_cycle(repo, state.cycle_id, reason=reason, actor="chief",
-                            created_at=state.as_of.isoformat())
+                            created_at=_now().isoformat())
             return {"cycle_status": "superseded", "decisions": [],
                     "approved_decisions": []}
     # 7.2 (belt and braces): a decide-path cycle is never written from an
@@ -335,7 +422,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
                       created_at=state.as_of.isoformat())
     decisions = [d for d in state.decisions if d.action != "hold"]
     if not decisions:
-        if state.parent_revision_no is not None or state.risk_round > 1:
+        if _chief_failed(state) or state.parent_revision_no is not None or state.risk_round > 1:
             # 修订被驳空（chief_revise 无合规方案可形成）：这不是主理人主动
             # 决定不交易，而是交易意图被风控整体否决 — 静默记为 No Action 会
             # 吞掉原交易意图，必须转人工复核（spec：无法形成合规方案 → 人工
@@ -348,7 +435,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
 
         changed = record_no_action(
             repo, state.cycle_id, reason=state.summary or "无行动决策",
-            actor="chief", created_at=state.as_of.isoformat())
+            actor="chief", created_at=_proposed_at(state))
         if changed:
             _consume_scores(state)
             _write_chief_report(state)
@@ -356,9 +443,8 @@ def persist_decision(state: ChiefDecisionState) -> dict:
 
     rev = repo.append_revision(
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
-        rationale=state.summary or "", model_version="",
-        parent_revision_no=state.parent_revision_no, revision_source="chief",
-        created_at=state.as_of.isoformat())
+        rationale=_revision_rationale(state), parent_revision_no=state.parent_revision_no,
+        revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
     if state.risk_review is not None and not state.normalization_errors:
         # Review ids are round-scoped: a stale-snapshot re-review (task 7.5)
         # re-examines the SAME revision under a NEW snapshot and must land as a
@@ -376,7 +462,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
             before_metrics=state.risk_review.before_metrics,
             after_metrics=state.risk_review.after_metrics,
             notes="\n".join(state.risk_review.notes),
-            created_at=state.as_of.isoformat())
+            created_at=(state.reviewed_at or _now()).isoformat())
     from ..decision.state import CycleStatus
 
     to_status = (CycleStatus.PENDING_APPROVAL
@@ -389,10 +475,7 @@ def persist_decision(state: ChiefDecisionState) -> dict:
                     idempotency_key=_transition_key(
                         state.cycle_id, to_status.value, rev["revision_no"],
                         state.risk_round),
-                    created_at=state.as_of.isoformat())
-    # Legacy mirror (D2): keep `cycles`/`decisions` read entry points serving.
-    repo.mirror_revision_to_legacy(state.cycle_id, rev["revision_no"],
-                                   as_of=state.as_of.isoformat())
+                    created_at=_now().isoformat())
     # Pre-register the plan BEFORE the approval interrupt. A plan written after the
     # outcome is known can no longer be wrong, so it proves nothing.
     try:
@@ -417,14 +500,14 @@ def route_after_persist(state: ChiefDecisionState) -> str:
     if state.cycle_status == "superseded":
         return "end"                        # 7.7: inputs invalidated mid-cycle
     if not state.decisions:
-        if state.parent_revision_no is not None or state.risk_round > 1:
-            return "manual_review"          # revision emptied after a rejection
+        if _chief_failed(state) or state.parent_revision_no is not None or state.risk_round > 1:
+            return "manual_review"          # model failed, or revision emptied after a rejection
         return "end"                        # No Action terminal already recorded
     if not state.execute:
         return "end"
     review = state.risk_review
-    if state.normalization_errors:
-        return "manual_review"
+    if state.normalization_errors and not state.normalization_fixable:
+        return "manual_review"          # prices/session/route: a new proposal cannot help
     if review is None:
         # Degraded no-portfolio mode: legacy pass-through to approval (the
         # execution gate remains the real-order backstop).
@@ -437,14 +520,30 @@ def route_after_persist(state: ChiefDecisionState) -> str:
 
 
 def chief_revise(state: ChiefDecisionState) -> dict:
-    """Accept the review's counterproposal and draft the next revision (5.5).
+    """Risk rejected the revision: the Chief drafts the next one (5.5).
 
-    The boundary comes from the review's `allowed_boundary` — the CHIEF chooses
-    to adopt it and cites the parent revision; risk never rewrote anything.
+    With a Chief in the run, the model re-decides with the review's violations and
+    boundary in front of it (2026-10-30 ruling). Seeded and stub runs have no Chief,
+    so the boundary is adopted mechanically. Either way risk never rewrote anything:
+    the result is a new revision citing its parent.
     """
     from ..schemas.decision import is_increasing_action
 
     review = state.risk_review
+    if state.decide and state.use_llm and review is not None:
+        from ..agents.chief import decide
+
+        result = decide.revise_after_risk(
+            state.context_text, prior_summary=state.summary,
+            prior_decisions=list(state.decisions), review=review, round_no=state.risk_round,
+            cycle_id=state.cycle_id, as_of=state.as_of, use_llm=state.use_llm)
+        print(f"👔 chief {state.cycle_id} 按第 {state.risk_round} 轮风控驳回修订\n{result.summary}")
+        return {"summary": result.summary, "decisions": result.decisions,
+                "approved_decisions": [], "parent_revision_no": state.revision_no or None,
+                "proposed_at": _now(), "chief_reasoning": result.reasoning,
+                "option_actions": result.option_actions,
+                "risk_notes": list(state.risk_notes)
+                + [f"chief_revise: 主理人按第 {state.risk_round} 轮风控驳回重新决策"]}
     revised: list[TradeDecision] = []
     notes = list(state.risk_notes)
     notes.append(f"chief_revise: 采纳第 {state.risk_round} 轮风控边界，生成修订")
@@ -465,7 +564,25 @@ def chief_revise(state: ChiefDecisionState) -> dict:
                 notes.append(f"chief_revise: 放弃 {d.action} {d.symbol}（{', '.join(ov.reasons) or '不可修订'}）")
     return {"decisions": revised, "approved_decisions": [],
             "parent_revision_no": state.revision_no or None,
-            "risk_notes": notes}
+            "proposed_at": _now(), "risk_notes": notes}
+
+
+def _chief_failed(state: ChiefDecisionState) -> bool:
+    """The model produced nothing (decide.from_context's fallback): not a decision to stand still."""
+    return state.decide and state.summary.startswith("[fallback]")
+
+
+def _manual_review_reason(state: ChiefDecisionState) -> str:
+    """Why the loop stopped, as it actually happened."""
+    if _chief_failed(state):
+        return f"主理人模型调用失败：{state.summary}"
+    if state.normalization_errors and not state.normalization_fixable:
+        return "执行环境不可用，订单无法规范化：" + "；".join(state.normalization_errors)
+    if not state.decisions:
+        return f"第 {state.risk_round} 轮驳回后，修订没有形成可下的单"
+    last = ("；".join(state.normalization_errors) if state.normalization_errors
+            else "；".join(v.detail for v in state.risk_review.violations) if state.risk_review else "")
+    return f"{state.risk_round} 轮后仍被驳回" + (f"：{last}" if last else "")
 
 
 def manual_review(state: ChiefDecisionState) -> dict:
@@ -475,16 +592,16 @@ def manual_review(state: ChiefDecisionState) -> dict:
     repo = _decision_repo()
     event, changed = repo.transition(
         state.cycle_id, to_status=CycleStatus.MANUAL_REVIEW, actor="risk_gate",
-        payload={"reason": f"{state.risk_round} 轮修订后仍被驳回"},
-        created_at=state.as_of.isoformat())
+        payload={"reason": _manual_review_reason(state)},
+        created_at=_now().isoformat())
     if changed:
         repo.conn.execute(
             "UPDATE decision_cycles SET final_outcome = ?, updated_at = ? "
             "WHERE cycle_id = ?",
-            ("manual_review", state.as_of.isoformat(), state.cycle_id))
+            ("manual_review", event["created_at"], state.cycle_id))
         repo.conn.commit()
         _consume_scores(state)
-        _write_chief_report(state)
+        _write_chief_report(state, outcome_note=_manual_review_reason(state))
     return {"cycle_status": CycleStatus.MANUAL_REVIEW.value}
 
 
@@ -494,6 +611,12 @@ def narrow_approval(approval: BossApproval) -> BossApproval:
     edited quantities, symbol filters, direct instructions, `modified` status —
     is recorded as a rejection whose comment carries the modification note; the
     executor never receives instructions derived from it."""
+    if approval.status == "revise":
+        if not approval.comment.strip():
+            return approval.model_copy(update={
+                "status": "rejected", "comment": "驳回修改缺少修改意见，按拒绝记录"})
+        return approval.model_copy(update={
+            "overrides": [], "direct_instructions": [], "approved_symbols": [], "rejected_symbols": []})
     has_modifications = bool(approval.overrides or approval.direct_instructions
                              or approval.approved_symbols
                              or approval.rejected_symbols)
@@ -527,6 +650,7 @@ def _record_approval(state: ChiefDecisionState, approval: BossApproval) -> None:
             cycle_id=state.cycle_id, revision_no=state.revision_no,
             decision_hash=state.revision_hash,
             decision=("approved" if approval.status == "approved"
+                      else "revise" if approval.status == "revise"
                       else "rejected"),
             reviewer=approval.reviewer, comment=approval.comment,
             channel=approval.channel,
@@ -536,9 +660,9 @@ def _record_approval(state: ChiefDecisionState, approval: BossApproval) -> None:
             created_at=approval.reviewed_at.isoformat()
             if approval.reviewed_at else None)
     except Exception as exc:  # noqa: BLE001 - preserve ordinary audit error handling
-        from ..workflow.cutover_wiring import BoundaryWriteRefused
+        from ..workflow.isolation import IsolatedWriteRefused
 
-        if isinstance(exc, BoundaryWriteRefused):
+        if isinstance(exc, IsolatedWriteRefused):
             raise
         log.warning("boss_approvals write failed for %s: %s", state.cycle_id, exc)
 
@@ -554,14 +678,54 @@ def boss_review(state: ChiefDecisionState) -> dict:
                                   decisions=state.approved_decisions,
                                   context_summary=state.approval_summary,
                                   revision_no=state.revision_no,
-                                  decision_hash=state.revision_hash)
+                                  decision_hash=state.revision_hash,
+                                  boss_revisions=state.boss_revisions,
+                                  max_boss_revisions=state.max_boss_revisions)
         verdict = interrupt(request.model_dump(mode="json"))
         approval = BossApproval.model_validate(verdict)
         if approval.reviewed_at is None:
             approval.reviewed_at = _now()
     approval = narrow_approval(approval)
+    if approval.status == "revise" and not (state.decide and state.boss_revisions < state.max_boss_revisions):
+        # Nothing to send it back to (no Chief in this run) or the change requests are used up:
+        # the only remaining answers are approve and reject, so the request is recorded as a rejection.
+        why = ("本次运行没有主理人可修订" if not state.decide
+               else f"已用完 {state.max_boss_revisions} 次驳回修改")
+        approval = approval.model_copy(update={
+            "status": "rejected", "comment": f"{approval.comment}（{why}，按拒绝记录）"})
     _record_approval(state, approval)
     return {"approval": approval}
+
+
+def route_after_review(state: ChiefDecisionState) -> str:
+    """A change request goes back to the Chief; every other verdict goes on to the trader."""
+    if state.approval is not None and state.approval.status == "revise":
+        return "revise"
+    return "trader"
+
+
+def boss_revise(state: ChiefDecisionState) -> dict:
+    """The Boss rejected this revision with a change request: the Chief revises once, with it (D6).
+
+    The new revision goes through risk again and comes back for approval. The change request is
+    counted so it cannot loop: after `max_boss_revisions` the Boss can only approve or reject.
+    """
+    from ..agents.chief import decide
+
+    note = state.approval.comment if state.approval else ""
+    result = decide.revise_with_note(
+        state.context_text, prior_summary=state.summary, prior_decisions=list(state.decisions),
+        note=note, cycle_id=state.cycle_id, as_of=state.as_of, use_llm=state.use_llm)
+    print(f"👔 chief {state.cycle_id} 按 Boss 意见修订（第 {state.boss_revisions + 1} 次）\n{result.summary}")
+    notes = list(state.risk_notes) + [f"boss_revise: Boss 意见「{note}」，主理人重新修订"]
+    return {"summary": result.summary or state.summary, "decisions": result.decisions,
+            "chief_reasoning": result.reasoning, "option_actions": result.option_actions,
+            "approved_decisions": [], "approval": None,
+            "parent_revision_no": state.revision_no or None,
+            "boss_revisions": state.boss_revisions + 1, "proposed_at": _now(),
+            # a fresh allowance of automatic risk rounds for the revised proposal
+            "max_risk_rounds": state.risk_round + 3,
+            "risk_notes": notes}
 
 
 @decision_read("trader")
@@ -579,9 +743,14 @@ def trader(state: ChiefDecisionState) -> dict:
 
     if state.dry_run or not approved:
         print(f"→ {approval.status}: no orders placed (dry_run={state.dry_run})")
+        # An approval that stands but may not send anything (a rehearsal) is its own outcome, not
+        # "cancelled" and not "executed".
+        held_back = bool(approved)
         return {"order_results": texec.cancelled_entries(sized_all, state.cycle_id,
                                                          approval.status),
-                "gate_outcome": "cancelled", "gate_rejections": [], "authorization": None}
+                "gate_outcome": "approved_not_executed" if held_back else "cancelled",
+                "execution_checks": {"reason": "dry_run", "checks": []} if held_back else {},
+                "gate_rejections": [], "authorization": None}
 
     # Only symbols the risk gate sized may execute — no approval-time additions.
     to_place = []
@@ -595,6 +764,7 @@ def trader(state: ChiefDecisionState) -> dict:
     from ..decision.state import CycleStatus as _CS
     from ..execution.authorization import (
         RECOVERABLE,
+        ROUTE_REASONS,
         AuthorizationError,
         active_route_state,
         bind_to_active_route,
@@ -622,6 +792,13 @@ def trader(state: ChiefDecisionState) -> dict:
             route_state=active_route_state())
     except AuthorizationError as exc:
         rejections = [str(exc)]
+
+    # While the live lock is on there is no trade route to bind: that finding is recorded by the
+    # pre-execution checks below instead of ending the run before they happen. Every other
+    # rejection still refuses.
+    locked = texec.execution_locked()
+    if locked:
+        rejections = [r for r in rejections if r.split(":")[0] not in ROUTE_REASONS]
 
     recoverable = bool(auth) and rejections and all(
         r.split(":")[0] in RECOVERABLE for r in rejections)
@@ -653,18 +830,22 @@ def trader(state: ChiefDecisionState) -> dict:
         return {"order_results": entries, "gate_outcome": "refused",
                 "gate_rejections": rejections, "authorization": None}
 
-    entries, fills = texec.place_orders(to_place, state.cycle_id,
-                                        revision_no=auth.revision_no,
-                                        authorization=auth.model_dump())
+    pre = None
+    if locked:
+        pre = texec.preflight_checks(to_place, state.cycle_id, revision_no=auth.revision_no,
+                                     authorization=auth.model_dump())
+    if pre is not None and not pre["ok"]:
+        entries, fills = pre["entries"], []
+    else:
+        entries, fills = texec.place_orders(to_place, state.cycle_id,
+                                            revision_no=auth.revision_no,
+                                            authorization=auth.model_dump())
     if entries and all(e.status == "rejected" and e.error.startswith("price conditions rejected")
                        for e in entries):
         from ..memory import get_store
 
         reasons = [e.error for e in entries]
-        from ..execution.shadow_execution import publish_shadow_results
-
-        shadow_published = publish_shadow_results(entries)
-        for entry in ([] if shadow_published else entries):
+        for entry in entries:
             import json
 
             get_store().save_trades([entry], cycle_id=state.cycle_id, source=state.source,
@@ -681,9 +862,18 @@ def trader(state: ChiefDecisionState) -> dict:
     for e in entries:
         print(f"   {e.action} {e.symbol} x{e.qty:.0f} [{e.status}]"
               + (f" @ {e.avg_fill_price}" if e.avg_fill_price else ""))
-    outcome = "shadow_refused" if entries and all(e.status == "rejected" and e.error.startswith("shadow broker write prohibited:") for e in entries) else "placed"
+    outcome = "placed"  # the "shadow_refused" outcome went with the shadow transport (r5 8.4)
+    execution_checks = {}
+    if pre is not None and pre["ok"] and entries and all(
+            e.status == "rejected" and e.error.startswith("auto execution disabled") for e in entries):
+        # Every check passed and the broker handover was refused by the lock: the approval stands,
+        # nothing was sent. The cycle ends approved-not-executed with the checks on record.
+        outcome = "approved_not_executed"
+        execution_checks = {"reason": "live_lock", "checks": pre["checks"]}
+        for entry in entries:
+            entry.execution_price_audit = pre["execution_price_audit"]
     return {"order_results": entries, "fills": fills, "gate_outcome": outcome,
-            "authorization": auth.model_dump()}
+            "execution_checks": execution_checks, "authorization": auth.model_dump()}
 
 
 def route_after_trader(state: ChiefDecisionState) -> str:
@@ -702,19 +892,11 @@ def persist(state: ChiefDecisionState) -> dict:
     from ..trader import execute as texec
 
     store = get_store()
-    # The verdict is only known here — persist_decision runs BEFORE the interrupt, so
-    # it wrote approval_status = None and nothing ever came back to fill it in.
-    if state.approval is not None:
-        store.set_cycle_approval(state.cycle_id, state.approval.status)
-        # The full approval record is written in boss_review (before the
-        # execution gate can derive its authorization); this legacy column and
-        # the journal approval column keep their writes (task 6.5).
+    # The approval record is written in boss_review, before the execution gate derives its
+    # authorization; the legacy `cycles.approval_status` column is no longer written (switch-trade r5 7.1).
 
-    from ..execution.shadow_execution import publish_shadow_results
-
-    shadow_published = publish_shadow_results(state.order_results, state.fills)
     by_symbol = {d.symbol: d for d in state.approved_decisions or state.decisions}
-    for entry in ([] if shadow_published else state.order_results):
+    for entry in state.order_results:
         context = texec.trade_context_json(
             state.source, state.approval, state.approved_decisions or state.decisions,
             decision=by_symbol.get(entry.symbol), risk_notes=state.risk_notes)
@@ -738,19 +920,22 @@ def persist(state: ChiefDecisionState) -> dict:
     executed = any(e.status == "filled" for e in state.order_results)
     submitted = any(e.status in {"submitted", "partial", "pending", "filled"} for e in state.order_results)
     incomplete = any(e.status in {"rejected", "error"} for e in state.order_results)
+    held_back = state.gate_outcome == "approved_not_executed"
     status = (CycleStatus.MANUAL_REVIEW if submitted and incomplete else
-              CycleStatus.EXECUTED if submitted or (state.dry_run and state.approval
-              and state.approval.status == "approved") else
+              CycleStatus.EXECUTED if submitted else
+              CycleStatus.APPROVED_NOT_EXECUTED if held_back else
               CycleStatus.MANUAL_REVIEW if state.approval and state.approval.status == "approved" else
               CycleStatus.APPROVAL_REJECTED)
-    outcome = ("shadow_refused" if shadow_published and state.gate_outcome == "shadow_refused" else
-               "partial_execution_requires_reconciliation" if submitted and incomplete else
+    held_reason = (state.execution_checks or {}).get("reason", "")
+    outcome = ("partial_execution_requires_reconciliation" if submitted and incomplete else
+               f"approved_not_executed:{held_reason}" if held_back else
                "dry_run" if state.dry_run else
                "executed" if executed else str(state.approval.status if state.approval else "unknown"))
     try:
         event, changed = repo.transition(
             state.cycle_id, to_status=status, actor="trader",
-            payload={"outcome": outcome},
+            payload={"outcome": outcome, **({"execution_checks": state.execution_checks}
+                                            if held_back else {})},
             idempotency_key=_transition_key(state.cycle_id, status.value,
                                             state.revision_no, 0),
             created_at=_now().isoformat())
@@ -774,7 +959,7 @@ def build_chief_graph(checkpointer=None):
         ("assemble_context", assemble_context), ("chief_decide", chief_decide),
         ("risk_gate", risk_gate), ("persist_decision", persist_decision),
         ("chief_revise", chief_revise), ("manual_review", manual_review),
-        ("boss_review", boss_review), ("trader", trader), ("persist", persist),
+        ("boss_review", boss_review), ("boss_revise", boss_revise), ("trader", trader), ("persist", persist),
     ]:
         g.add_node(name, fn)
 
@@ -788,7 +973,9 @@ def build_chief_graph(checkpointer=None):
                              "manual_review": "manual_review", "end": END})
     g.add_edge("chief_revise", "risk_gate")     # bounded by max_risk_rounds
     g.add_edge("manual_review", END)
-    g.add_edge("boss_review", "trader")
+    g.add_conditional_edges("boss_review", route_after_review,
+                            {"revise": "boss_revise", "trader": "trader"})
+    g.add_edge("boss_revise", "risk_gate")      # bounded by max_boss_revisions
     g.add_conditional_edges("trader", route_after_trader,
                             {"risk_gate": "risk_gate", "persist": "persist", "manual_review": "manual_review"})
     g.add_edge("persist", END)

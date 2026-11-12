@@ -17,6 +17,10 @@ def get_channel(kind: str | None = None) -> BossChannel:
     kind = kind or get_config().app.channel.kind
     if kind == "cli":
         return CLIChannel()
+    if kind == "pending":
+        from .pending_channel import PendingApprovalChannel
+
+        return PendingApprovalChannel()
     if kind == "feishu":
         from .feishu_channel import FeishuChannel
 

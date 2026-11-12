@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 import httpx
 
 from ... import sec as extractor
+from ... import sec_rate
 
 _ACCESSION = re.compile(r"^\d{10}-\d{2}-\d{6}$")
 
@@ -89,12 +90,26 @@ class SECTransport:
                     failures.append(extractor.SecFetchFailure(
                         stage, url, "RequestBudgetExceeded", "run request budget exhausted"))
                     break
-                time.sleep(max(0, 0.15 - (time.monotonic() - self.last_request)))
+                try:
+                    sec_rate.wait()
+                except sec_rate.SECRateLimited as exc:
+                    # SEC is throttling this machine: stop the run, the filings left are deferred, not failed.
+                    self.remaining = 0
+                    failures.append(extractor.SecFetchFailure(
+                        stage, url, "RequestBudgetExceeded", f"sec rate cooldown: {exc}"))
+                    break
                 self.last_request = time.monotonic()
                 try:
                     with httpx.Client(timeout=self.timeout, follow_redirects=False,  # noqa: SIM117
                                       headers={"User-Agent": self.user_agent}) as client:
                         with client.stream("GET", url) as response:
+                            if response.status_code in {403, 429} and \
+                                    sec_rate.observe(response.status_code, response.read()):
+                                self.remaining = 0
+                                failures.append(extractor.SecFetchFailure(
+                                    stage, url, "RequestBudgetExceeded",
+                                    f"sec throttled the request (http {response.status_code})"))
+                                break
                             response.raise_for_status()
                             if response.is_redirect:
                                 raise ValueError("sec_redirect_not_allowed")

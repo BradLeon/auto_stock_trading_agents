@@ -52,7 +52,13 @@ class _Client:
         if self._http is not None:
             return self._http(url)
         import httpx
+
+        from .. import sec_rate
+        if "sec.gov" in url:
+            sec_rate.wait()
         response = httpx.get(url, headers=self._headers, timeout=30, follow_redirects=True)
+        if "sec.gov" in url and sec_rate.observe(response.status_code, response.content):
+            raise sec_rate.SECRateLimited(f"sec throttled the request (http {response.status_code})")
         response.raise_for_status()
         return response.content
 

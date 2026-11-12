@@ -16,9 +16,9 @@ log = logging.getLogger("ats.agents.risk_officer.review")
 
 
 def _context(review: RiskReview) -> str:
-    from ...config import get_config
+    from ...risk import inputs
 
-    rc = get_config().app.risk
+    rc = inputs.rules().limits
     limits = (
         f"硬限额: 单票≤{rc.max_position_pct:.0%} · 杠杆≤{rc.max_gross_leverage} · "
         f"现金地板≥{rc.cash_floor_pct:.0%} · beta≤{rc.beta_cap} · "
@@ -38,20 +38,32 @@ def _context(review: RiskReview) -> str:
 from ...workflow.runtime_reads import scoped_read  # noqa: E402
 
 
-@scoped_read("risk")
-def run(*, use_llm: bool = True) -> RiskMemo | None:
-    """Snapshot -> assess -> persist -> LLM memo. Returns None if IBKR is unavailable."""
+def record_posture(portfolio):
+    """Deterministic review of one live book, persisted as the current risk posture.
+
+    The decision cycle calls this on the same snapshot the Chief is shown, so the
+    posture the Chief proposes inside is never older than the book it sees.
+    """
     from ...memory import get_store
     from ...risk import assess as risk_assess
-    from ...trader import portfolio as tport
 
-    pf = tport.snapshot()
-    if pf is None:
-        return None
+    pf = portfolio.model_copy(deep=True)
     risk_assess.enrich_beta(pf)
     risk_assess.enrich_options(pf)
     review = risk_assess.assess(pf)
     get_store().save_risk_review(review)
+    return review
+
+
+@scoped_read("risk")
+def run(*, use_llm: bool = True) -> RiskMemo | None:
+    """Snapshot -> assess -> persist -> LLM memo. Returns None if IBKR is unavailable."""
+    from ...risk import inputs
+
+    pf = inputs.account()
+    if pf is None:
+        return None
+    review = record_posture(pf)
 
     if not use_llm:
         return RiskMemo(as_of=review.as_of, assessment="(no-llm) 仅确定性读数", review=review)

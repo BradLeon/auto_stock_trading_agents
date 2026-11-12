@@ -1,12 +1,24 @@
-# Broadcom (AVGO) — PEAD stub, uses the _defaults scorecard.
+# Broadcom (AVGO) — PEAD config.
 # L4 定制 ASIC/网络：Google TPU 与多家云厂自研加速器的主要合作方，AI 网络
 # （Tomahawk/Jericho）与定制硅双轮；AI 营收指引是全链最直接的需求读数之一。
-# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+# 财年 10 月底结：12 月中报 FQ4，3 月报 FQ1。fiscal_label 由财报日历派生，无需手填。
+# 2026-11-04 由 stub 补全打分卡与叙事。依据（网络检索，二手来源为主）：FQ3 FY2026 营收约 $29.6B（+86%），
+# AI 半导体 $16.7B（+221%），FQ4 指引 AI 营收 $21.7B；毛利率指引从 75% 降到 73%（定制芯片 + HBM 拉低结构）。
 
 symbol: AVGO
 company_name: "Broadcom"
 sector_etf: SMH
 benchmark: QQQ
+long_threshold: 1.0
+
+# 权重之和 = 1.00。AI 半导体营收与次季 AI 指引是股价主锚；毛利率结构稀释是本轮新变量。
+scorecard_dims:
+  - {key: ai_revenue,      weight: 0.25, label: AI 半导体营收（定制加速器 + 网络）}
+  - {key: forward_guide,   weight: 0.25, label: 次季总营收与 AI 营收指引}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率（定制芯片/HBM 占比上升的稀释）}
+  - {key: customers,       weight: 0.15, label: 定制加速器客户数与长约（TPU/MTIA/新客户）}
+  - {key: software,        weight: 0.10, label: 基础设施软件（VMware）增速与利润}
+  - {key: call_tone,       weight: 0.10, label: 电话会语气：下一财年 AI 营收展望}
 
 # 产业链关系：定制 ASIC + 网络交换，利润来自"替客户把 GPU 换成自研芯片"。
 signal_chain:
@@ -18,3 +30,9 @@ signal_chain:
   - {symbol: GOOG, role: downstream}   # TPU 合作方，最大定制客户
   - {symbol: META,  role: downstream}   # MTIA 自研加速器 + 网络设备采购
   - {symbol: MSFT,  role: downstream}
+
+narrative_seed: >
+  定制 AI 加速器（TPU、MTIA 等）与 AI 网络双轮驱动，AI 营收在 2026 年同比两到三倍增长，定制硅已从"对冲"变成主业；
+  股价锚在次季 AI 营收指引与下一财年 AI 营收展望；
+  定制芯片与 HBM 占比上升带来毛利率结构性下滑，市场在"量"与"利润率"之间权衡；
+  客户集中度高，单一大客户长约的延续与新客户落地是主要变量。

@@ -21,8 +21,8 @@ from ats.config import load_sector_config
 from ats.graph import chief
 from ats.graph.chief_state import ChiefDecisionState
 from ats.runtime import cli
-from ats.workflow.consumer_reads import trace_reads
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import trace_reads
+from ats.workflow.read_scope import ReadUnavailable
 from ats.workflow.runtime_reads import bind_read
 
 
@@ -62,14 +62,15 @@ def test_chief_actual_render_requires_every_scope_and_keeps_full_references(isol
     envelopes = seed_research(isolated, plan)
     seed_performance(isolated)
     with bind_read(scope()), trace_reads() as rows:
-        context = assemble.build(live_broker=False)
+        context = assemble.build()
         snapshot, _detail = assemble.build_chief_snapshot(isolated)
     assert snapshot.complete and len(snapshot.items) == 7
-    assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in envelopes)
+    shown = [e for e in envelopes if e.agent_role not in assemble.NOT_RENDERED]   # D3-2
+    assert all(e.projection_id in context.as_context() and e.content_hash in context.as_context() for e in shown)
     isolated.conn.execute("DELETE FROM task_projection_envelopes WHERE projection_id=?", (envelopes[-1].projection_id,))
     isolated.conn.commit()
-    with bind_read(scope()), pytest.raises(RouteUnavailable, match="required Chief"):
-        assemble.build(live_broker=False)
+    with bind_read(scope()), pytest.raises(ReadUnavailable, match="required Chief"):
+        assemble.build()
     record_property("read_trace", json.dumps(rows))
     record_property("snapshot", json.dumps(snapshot.to_payload()))
     record_property("rendered_context", context.as_context())
@@ -95,8 +96,8 @@ def test_chief_refuses_damaged_or_unusable_required_projection(isolated, monkeyp
                     "expired": ("valid_until", (datetime.now(UTC)-timedelta(seconds=1)).isoformat())}[damage]
     isolated.conn.execute(f"UPDATE task_projection_envelopes SET {field}=? WHERE projection_id=?", (value,envelopes[0].projection_id))
     isolated.conn.commit()
-    with bind_read(scope()), pytest.raises((RouteUnavailable, ValueError)):
-        assemble.build(live_broker=False)
+    with bind_read(scope()), pytest.raises((ReadUnavailable, ValueError)):
+        assemble.build()
 
 
 def test_sector_actual_cli_html_uses_governed_projection(isolated, monkeypatch, tmp_path, record_property):
@@ -116,7 +117,7 @@ def test_sector_actual_cli_html_uses_governed_projection(isolated, monkeypatch, 
 def test_sector_actual_cli_missing_projection_is_explicit_failure(isolated, tmp_path, monkeypatch):
     config = load_sector_config("ai_hardware").model_copy(update={"output_dir":str(tmp_path)})
     monkeypatch.setattr("ats.config.load_sector_config", lambda name: config)
-    with pytest.raises(RouteUnavailable, match="Sector allocation"):
+    with pytest.raises(ReadUnavailable, match="Sector allocation"):
         cli.main(["sector", "html", "ai_hardware"])
     assert not list(tmp_path.glob("*.html"))
 
@@ -131,7 +132,7 @@ def test_references_resolve_after_new_process(isolated, tmp_path, record_propert
 from ats.memory import get_store
 from ats.agents.chief.assemble import _envelope_from_row
 from ats.agent.task_projection import ProjectionScope
-from ats.workflow.consumer_reads import read_projection
+from ats.workflow.read_scope import read_projection
 rows=json.load(open(sys.argv[1]))
 for r in rows:
  s=ProjectionScope(kind=r['scope_kind'],id=r['scope_id'])
@@ -141,21 +142,6 @@ print(json.dumps(rows))"""
     result = subprocess.run([sys.executable,"-c",program,str(manifest)],env=os.environ.copy(),capture_output=True,text=True,check=True)
     assert json.loads(result.stdout) == selected
     record_property("reopened_refs", result.stdout)
-
-
-def test_sector_exact_scope_qualification_rechecked_before_html(isolated, monkeypatch, tmp_path):
-    from test_phase_f_safe_reads import activate
-
-    from ats.workflow import runtime_reads as rr
-    now = datetime.now(UTC)
-    identity = rr.business_identity("sector", kind="sector", scope_id="ai_hardware",
-        entities=rr.configured_entities("sector","ai_hardware"),
-        explicit={"kind":"sector","id":"ai_hardware","entities":rr.configured_entities("sector","ai_hardware"),
-                  "time_range":{"start":(now-timedelta(minutes=5)).isoformat(),"end":(now+timedelta(minutes=5)).isoformat()}})
-    seed_research(isolated)
-    activate(identity, tmp_path, monkeypatch)
-    with pytest.raises(RouteUnavailable):
-        cli.main(["--read-scope-json",json.dumps({"sector":identity.scope}),"sector","html","ai_hardware"])
 
 
 def test_sector_legacy_report_reader_remains_compatible(isolated, monkeypatch):
@@ -483,7 +469,7 @@ def test_fixed_requirement_damage_blocks_actual_cycle_write(business_inputs, iso
         requirement["requirements_hash"]=_hash({k:v for k,v in requirement.items() if k!="requirements_hash"})
     state=ChiefDecisionState(cycle_id="must-not-exist",as_of=datetime.now(UTC),
         use_broker=False,use_llm=False,research_snapshot=payload)
-    with pytest.raises((RouteUnavailable,ValueError)):
+    with pytest.raises((ReadUnavailable,ValueError)):
         chief.persist_decision(state)
     assert DecisionAuditRepository(isolated).get_cycle("must-not-exist") is None
 

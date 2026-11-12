@@ -16,6 +16,7 @@ from ats.workflow.evaluation_clock import now as evaluation_now
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -196,6 +197,13 @@ CREATE TABLE IF NOT EXISTS trade_episodes (
 -- Single-row bookkeeping, e.g. tracking_start_date: before it we did not observe,
 -- which is NOT the same as "no trades happened".
 CREATE TABLE IF NOT EXISTS journal_meta (key TEXT PRIMARY KEY, value TEXT);
+-- A Boss-confirmed contract classification for a fill captured before fills
+-- carried contract fields. The fill row's own facts are never rewritten; this is
+-- the record of who decided its instrument, and on what evidence.
+CREATE TABLE IF NOT EXISTS fill_classifications (
+    exec_id TEXT PRIMARY KEY, sec_type TEXT, instrument_key TEXT, multiplier REAL,
+    basis TEXT, decided_by TEXT, decided_at TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_journal_symbol ON journal_entries(symbol);
 CREATE INDEX IF NOT EXISTS idx_pred_symbol ON predictions(symbol);
 CREATE INDEX IF NOT EXISTS idx_episode_symbol ON trade_episodes(symbol);
@@ -548,6 +556,14 @@ _CLERK_LEDGER_TABLES = frozenset({
 })
 
 
+
+def _audit_order(cycle_id: str, order: dict) -> dict:
+    """One order of an audited revision, shaped like the legacy `decisions` row readers expect."""
+    return {"cycle_id": cycle_id, "symbol": order.get("symbol"), "action": order.get("action"),
+            "notional_usd": order.get("notional_usd"), "limit_price": order.get("limit_price"),
+            "conviction": order.get("conviction"), "rationale": order.get("rationale")}
+
+
 class TradingMemory:
     def __init__(self, db_path: str | Path, *, initialize: bool = True):
         self.path = str(db_path)
@@ -685,7 +701,16 @@ class TradingMemory:
         for ddl in ("perm_id TEXT", "order_ref TEXT", "origin TEXT",
                     "link_confidence TEXT", "captured_at TEXT",
                     "entry_id TEXT", "episode_id TEXT",
-                    "late_backfill INTEGER"):
+                    "late_backfill INTEGER",
+                    # Contract identity (journal.episodes "Instrument identity"). NULL on rows captured
+                    # before 2026-10-29: read as a stock unless fill_classifications
+                    # says otherwise.
+                    "sec_type TEXT", "instrument_key TEXT", "multiplier REAL",
+                    "right TEXT", "strike REAL", "expiry TEXT", "currency TEXT",
+                    "con_id TEXT", "local_symbol TEXT",
+                    # USD per one unit of `currency`, and where the rate came from (trader/fx.py). The price,
+                    # realized P&L and commission columns stay in the contract currency.
+                    "fx_to_usd REAL", "fx_source TEXT"):
             if ddl.split()[0] not in fcols:
                 self.conn.execute(f"ALTER TABLE fills ADD COLUMN {ddl}")
         # Phase C compensation semantics (§11, tasks 3.1/3.4): filled_qty backs
@@ -698,7 +723,8 @@ class TradingMemory:
         # episodes table so old rows simply read as "no LLM judgement yet".
         ecols = {r["name"] for r in self.conn.execute(
             "PRAGMA table_info(trade_episodes)")}
-        for ddl in ("invalidation_source TEXT", "invalidation_checked_at TEXT"):
+        for ddl in ("invalidation_source TEXT", "invalidation_checked_at TEXT",
+                    "instrument_key TEXT", "sec_type TEXT", "multiplier REAL"):
             if ecols and ddl.split()[0] not in ecols:
                 self.conn.execute(f"ALTER TABLE trade_episodes ADD COLUMN {ddl}")
         # Decision-audit linkage (§12.3, Phase B). Nullable on purpose: forcing
@@ -1129,7 +1155,7 @@ class TradingMemory:
         errors must never erase a fill the first attempt achieved — and keep the
         original submit time, while advancing status/error and bumping `attempt`.
         """
-        from ..execution.shadow_execution import assert_trade_publication
+        from ..execution.trade_publication import assert_trade_publication
 
         assert_trade_publication(self, entries)
         for t in entries:
@@ -1219,10 +1245,17 @@ class TradingMemory:
         self.conn.commit()
 
     def upsert_fills(self, fills: list[dict]) -> int:
-        """Insert IBKR fills, deduped by exec_id (accumulates per-trade realized P&L)."""
+        """Insert IBKR fills, deduped by exec_id (accumulates per-trade realized P&L).
+
+        FX conversions are dropped here, the one write point every capture path
+        shares: they move cash between markets and are not positions."""
+        from ..journal.episodes import NOT_RECORDED
+        from ..trader import fx
+
+        fills = [f for f in fills if f.get("sec_type") not in NOT_RECORDED]
         if not fills:
             return 0
-        from ..execution.shadow_execution import assert_trade_publication
+        from ..execution.trade_publication import assert_trade_publication
 
         assert_trade_publication(self, fills)
         before = self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"]
@@ -1230,27 +1263,20 @@ class TradingMemory:
         # INSERT silently breaks the moment one is added.
         self.conn.executemany(
             "INSERT OR IGNORE INTO fills (exec_id, symbol, side, shares, price, time, "
-            "realized_pnl, commission, order_id, perm_id, order_ref, captured_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "realized_pnl, commission, order_id, perm_id, order_ref, captured_at, "
+            "sec_type, instrument_key, multiplier, right, strike, expiry, currency, "
+            "con_id, local_symbol, fx_to_usd, fx_source) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(f["exec_id"], f["symbol"], f.get("side", ""), f.get("shares", 0), f.get("price", 0),
               f.get("time", ""), f.get("realized_pnl"), f.get("commission", 0),
               f.get("order_id", ""), f.get("perm_id"), f.get("order_ref"),
-              evaluation_now(timezone.utc).isoformat())
+              evaluation_now(timezone.utc).isoformat(),
+              f.get("sec_type"), f.get("instrument_key"), f.get("multiplier"),
+              f.get("right"), f.get("strike"), f.get("expiry"), f.get("currency"),
+              f.get("con_id"), f.get("local_symbol"), *fx.resolve(f))
              for f in fills])
         self.conn.commit()
         return self.conn.execute("SELECT COUNT(*) c FROM fills").fetchone()["c"] - before
-
-    def set_cycle_approval(self, cycle_id: str, status: str) -> None:
-        """Record the Boss's verdict once it is known.
-
-        `save_chief_run` writes the cycle row BEFORE the approval interrupt (so a card
-        the Boss never answers still leaves an audit trail), which is why
-        approval_status was NULL on every cycle ever recorded — nothing came back to
-        fill it in.
-        """
-        self.conn.execute("UPDATE cycles SET approval_status = ? WHERE cycle_id = ?",
-                          (status, cycle_id))
-        self.conn.commit()
 
     # --- journal entries (one row per INTENT) ------------------------------ #
     # The typed columns; `risk_notes` and `approval` are objects in Python and JSON
@@ -1347,7 +1373,8 @@ class TradingMemory:
         "risk_unit_source", "mae_pct", "mfe_pct", "mae_source", "excess_vs_sector_pct",
         "setup", "primary_entry_id", "exit_reason", "exit_as_planned",
         "invalidation_triggered", "horizon_overdue_days",
-        "invalidation_source", "invalidation_checked_at")
+        "invalidation_source", "invalidation_checked_at",
+        "instrument_key", "sec_type", "multiplier")
 
     def save_episode(self, episode) -> None:
         """Upsert by episode_id — the reducer re-derives episodes from fills each run,
@@ -1398,6 +1425,43 @@ class TradingMemory:
     def symbols_with_fills(self) -> list[str]:
         return [r[0] for r in self.conn.execute(
             "SELECT DISTINCT symbol FROM fills ORDER BY symbol")]
+
+    # A fill's instrument: its own contract columns, else a Boss-confirmed
+    # classification, else (legacy rows) a stock named by its symbol.
+    _FILL_INSTRUMENT = (
+        "SELECT f.*, COALESCE(f.instrument_key, c.instrument_key, f.symbol) AS ikey, "
+        "COALESCE(f.sec_type, c.sec_type, 'STK') AS itype, "
+        "COALESCE(f.multiplier, c.multiplier, 1.0) AS imult "
+        "FROM fills f LEFT JOIN fill_classifications c ON c.exec_id = f.exec_id")
+
+    def instruments_with_fills(self) -> list[tuple[str, str, str, float]]:
+        """(instrument_key, symbol, sec_type, multiplier), FX excluded."""
+        from ..journal.episodes import NOT_RECORDED
+
+        rows = self.conn.execute(
+            f"SELECT ikey, symbol, itype, MAX(imult) m FROM ({self._FILL_INSTRUMENT}) "
+            "GROUP BY ikey ORDER BY ikey").fetchall()
+        return [(r[0], r[1], r[2], float(r[3] or 1.0)) for r in rows
+                if r[2] not in NOT_RECORDED]
+
+    def fills_for_instrument(self, key: str) -> list[dict]:
+        """Raw fill rows for one instrument, oldest first."""
+        return [dict(r) for r in self.conn.execute(
+            f"SELECT * FROM ({self._FILL_INSTRUMENT}) WHERE ikey = ? ORDER BY time ASC",
+            (key,))]
+
+    def classify_fill(self, exec_id: str, *, sec_type: str, instrument_key: str,
+                      multiplier: float, basis: str, decided_by: str) -> None:
+        if not self.conn.execute("SELECT 1 FROM fills WHERE exec_id = ?",
+                                 (exec_id,)).fetchone():
+            raise KeyError(exec_id)
+        self.conn.execute(
+            "INSERT OR REPLACE INTO fill_classifications (exec_id, sec_type, "
+            "instrument_key, multiplier, basis, decided_by, decided_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (exec_id, sec_type, instrument_key, multiplier, basis, decided_by,
+             evaluation_now(timezone.utc).isoformat()))
+        self.conn.commit()
 
     def legs_for_episode(self, episode_id: str) -> list[dict]:
         """Raw fill rows belonging to one episode, oldest first. The last row is the
@@ -1502,26 +1566,27 @@ class TradingMemory:
                 "SELECT * FROM fills ORDER BY time DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
-    # --- chief runs (reuse cycles + decisions tables) ---------------------- #
-    def save_chief_run(self, *, cycle_id: str, as_of, summary: str, decisions) -> None:
-        self.conn.execute("INSERT OR REPLACE INTO cycles VALUES (?,?,?,?)",
-                          (cycle_id, as_of.isoformat(), None, summary))
-        self.conn.executemany(
-            "INSERT INTO decisions VALUES (?,?,?,?,?,?,?)",
-            [(cycle_id, d.symbol, d.action, d.notional_usd, d.limit_price, d.conviction,
-              d.rationale) for d in decisions])
-        self.conn.commit()
-
+    # --- chief runs (read from the decision audit; legacy cycles/decisions are read-only history) --- #
     def last_chief_run(self) -> dict | None:
+        """The latest Chief cycle, read from the decision audit (not the legacy mirror).
+
+        `as_of` is the cycle's creation time and `manager_summary` the current revision's
+        rationale; `decisions` are that revision's orders.
+        """
+        from ..decision.repository import rationale_summary
+
         row = self.conn.execute(
-            "SELECT * FROM cycles WHERE cycle_id LIKE 'chief-%' ORDER BY as_of DESC LIMIT 1"
-        ).fetchone()
+            "SELECT c.cycle_id, c.created_at, c.status, c.final_outcome, r.rationale, r.orders_json "
+            "FROM decision_cycles c LEFT JOIN decision_revisions r "
+            "ON r.cycle_id = c.cycle_id AND r.revision_no = c.current_revision_no "
+            "WHERE c.cycle_id LIKE 'chief-%' ORDER BY c.rowid DESC LIMIT 1").fetchone()
         if row is None:
             return None
-        out = dict(row)
-        out["decisions"] = [dict(r) for r in self.conn.execute(
-            "SELECT * FROM decisions WHERE cycle_id = ?", (row["cycle_id"],)).fetchall()]
-        return out
+        return {"cycle_id": row["cycle_id"], "as_of": row["created_at"],
+                "status": row["status"], "final_outcome": row["final_outcome"],
+                "manager_summary": rationale_summary(row["rationale"]),
+                "decisions": [_audit_order(row["cycle_id"], order)
+                              for order in json.loads(row["orders_json"] or "[]")]}
 
     def save_risk_review(self, review) -> None:
         self.conn.execute(
@@ -1536,6 +1601,16 @@ class TradingMemory:
         row = self.conn.execute(
             "SELECT payload FROM risk_reviews ORDER BY as_of DESC LIMIT 1").fetchone()
         return RiskReview.model_validate_json(row["payload"]) if row else None
+
+    def recent_decision_risk_reviews(self, since_iso: str, limit: int = 4) -> list[dict]:
+        """The risk gate's reviews of Chief revisions since `since_iso`, newest first, each joined to the
+        revision's orders (`orders_json` is None when the revision row is gone)."""
+        rows = self.conn.execute(
+            "SELECT r.cycle_id, r.revision_no, r.verdict, r.violations_json, r.notes, r.created_at, v.orders_json "
+            "FROM decision_risk_reviews r LEFT JOIN decision_revisions v "
+            "ON v.cycle_id = r.cycle_id AND v.revision_no = r.revision_no "
+            "WHERE r.created_at >= ? ORDER BY r.created_at DESC LIMIT ?", (since_iso, limit)).fetchall()
+        return [dict(r) for r in rows]
 
     def recent_risk_reviews(self, limit: int = 10) -> list[dict]:
         rows = self.conn.execute(
@@ -1680,14 +1755,24 @@ class TradingMemory:
             [PerformanceRecord.model_validate_json(r["payload"]) for r in rows]))
 
     def recent_decisions(self, symbol: str | None = None, limit: int = 20) -> list[dict]:
-        if symbol:
-            rows = self.conn.execute(
-                "SELECT * FROM decisions WHERE symbol = ? ORDER BY rowid DESC LIMIT ?",
-                (symbol, limit)).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT * FROM decisions ORDER BY rowid DESC LIMIT ?", (limit,)).fetchall()
-        return [dict(r) for r in rows]
+        """Newest orders first, from each cycle's current revision in the decision audit.
+
+        A revised order is read once, as its latest revision; a revision with no recoverable
+        content (`legacy_unknown`) contributes nothing.
+        """
+        cycles = self.conn.execute(
+            "SELECT c.cycle_id, r.orders_json FROM decision_cycles c JOIN decision_revisions r "
+            "ON r.cycle_id = c.cycle_id AND r.revision_no = c.current_revision_no "
+            "WHERE r.orders_json IS NOT NULL AND r.orders_json != '' ORDER BY c.rowid DESC")
+        out: list[dict] = []
+        for cycle in cycles:
+            for order in json.loads(cycle["orders_json"]):
+                if symbol and order.get("symbol") != symbol:
+                    continue
+                out.append(_audit_order(cycle["cycle_id"], order))
+                if len(out) >= limit:
+                    return out
+        return out
 
     def recent_trades(self, symbol: str | None = None, limit: int = 10) -> list[dict]:
         if symbol:
@@ -2002,7 +2087,7 @@ class TradingMemory:
                                      processor_version: str, *, version_id: str,
                                      retry_failed: bool = False) -> str | None:
         """Own-role analysis state belongs to Memory, not the ingestion ledger."""
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
         from ..workflow.runtime_reads import current_read_context
         context = current_read_context()
         if context and (context.identity.consumer_id != 'information' or
@@ -2010,7 +2095,7 @@ class TradingMemory:
             raise PermissionError('Information processing escapes bound target')
         if not all((document_id, target_id, processor_version, version_id)):
             raise ValueError('Information processing requires exact version and target')
-        guard_analyst_output(store=self, what='Information processing state')
+        assert_write_destination(self, what='Information processing state')
         stamp=evaluation_now(timezone.utc).isoformat()
         cur=self.conn.execute(
             "INSERT INTO information_processing_runs "
@@ -2023,17 +2108,31 @@ class TradingMemory:
         self.conn.commit()
         return version_id if cur.rowcount else None
 
+    def information_content_failures(self, version_id: str, target_id: str, processor_version: str) -> int:
+        """How many times this article version failed with unusable model content for this target (0 if never).
+
+        The count rides in the processing row's note as `content_failure:N`; a network failure never adds to it.
+        """
+        row = self.conn.execute(
+            "SELECT status,note FROM information_processing_runs "
+            "WHERE version_id=? AND target_id=? AND processor_version=?",
+            (version_id, target_id, processor_version)).fetchone()
+        if row is None or row["status"] != "failed":
+            return 0
+        match = re.match(r"content_failure:(\d+)", row["note"] or "")
+        return int(match.group(1)) if match else 0
+
     @publication_write
     def finish_information_processing(self, version_id: str, target_id: str,
                                       processor_version: str, *, ok: bool,
                                       outputs: int = 0, note: str = '') -> None:
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
         from ..workflow.runtime_reads import current_read_context
         context=current_read_context()
         if context and (context.identity.consumer_id != 'information' or
                         context.identity.scope.get('id') != target_id):
             raise PermissionError('Information processing escapes bound target')
-        guard_analyst_output(store=self,what='Information processing completion')
+        assert_write_destination(self, what='Information processing completion')
         self.conn.execute(
             "UPDATE information_processing_runs SET status=?,completed_at=?,outputs=?,note=? "
             "WHERE version_id=? AND target_id=? AND processor_version=? AND status='running'",
@@ -2325,9 +2424,9 @@ class TradingMemory:
         import hashlib
         import json
 
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
 
-        guard_analyst_output(store=self, what="a legacy task projection")
+        assert_write_destination(self, what="a legacy task projection")
 
         stamp = created_at or evaluation_now(timezone.utc).isoformat(timespec="seconds")
         projection_id = hashlib.sha1(
@@ -2391,9 +2490,9 @@ class TradingMemory:
         """
         import json
 
-        from ..workflow.cutover_wiring import guard_analyst_output
+        from ..workflow.isolation import assert_write_destination
 
-        guard_analyst_output(store=self, what="a task projection envelope")
+        assert_write_destination(self, what="a task projection envelope")
 
         # Timed-out/retried Dispatcher attempts may finish after their caller has
         # moved on. Do not allow such a late worker to publish into the durable
@@ -2619,10 +2718,9 @@ class TradingMemory:
 
         now = evaluation_now(timezone.utc).isoformat()
         from ..workflow.runtime_reads import current_read_context
-        from ..workflow.isolation import verified_isolation_root
 
         context = current_read_context()
-        if context and (context.route == "target" or verified_isolation_root() is not None):
+        if context:
             # Target extraction already carries the canonical admitted document
             # ID. Resolve its immutable version through the product boundary.
             from ..data.products.unstructured import admitted_documents

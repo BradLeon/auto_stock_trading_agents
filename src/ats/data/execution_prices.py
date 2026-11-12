@@ -16,6 +16,10 @@ from .runtime.execution_prices import ExecutionPrice, session_context
 
 POLICY_VERSION = "phase-f-execution-price-v1"
 PURPOSES = {"preapproval_normalization", "approved_execution_check"}
+# Half-width of the business window one price_request block reads under. The window is opened when the block
+# starts, so how long the node ran before it does not matter; it only has to cover the block's own quote reads.
+# Quote freshness is judged separately (`validate_quote`), so a wider window does not loosen prices.
+PRICE_READ_WINDOW_MINUTES = 10
 
 
 class PriceUnavailable(ValueError):
@@ -65,14 +69,16 @@ def price_request(consumer, orders, *, cycle_id, purpose, currency="USD", audit=
             raise PermissionError("execution_price_approval_required")
     parent = current_read_context()
     point = evaluation_now(UTC)
+    window = {"start": (point - timedelta(minutes=PRICE_READ_WINDOW_MINUTES)).isoformat(),
+              "end": (point + timedelta(minutes=PRICE_READ_WINDOW_MINUTES)).isoformat()}
     scope = {"kind": "decision", "id": cycle_id, "entities": list(symbols),
-             "time_range": {"start": (point - timedelta(minutes=5)).isoformat(),
-                            "end": (point + timedelta(minutes=5)).isoformat()},
-             "purpose": purpose, "currency": currency}
+             "time_range": window, "purpose": purpose, "currency": currency}
     if parent is not None:
-        # Preserve the originating request's frozen entity/time identity. Each role
-        # still gates its OWN domain/version/qualification, rather than borrowing Chief's.
-        scope = {**parent.identity.scope, "purpose": purpose, "currency": currency}
+        # Preserve the originating request's frozen entity identity. Each role still gates its OWN
+        # domain/version/qualification, rather than borrowing Chief's. The time window is this block's
+        # own: the parent's is a single instant taken when the node was entered, and a quote read after
+        # a slow portfolio snapshot would fall outside it.
+        scope = {**parent.identity.scope, "time_range": window, "purpose": purpose, "currency": currency}
         if not set(symbols) <= set(scope["entities"]):
             raise PermissionError("execution_price_order_escapes_business_scope")
     if parent is not None and parent.identity.scope.get("time_policy") == "per_invocation":
@@ -126,11 +132,25 @@ def runtime_quote(scope):
         if scope.get("approval_quote_ref") not in fixed:
             raise PriceUnavailable("review_quote_missing")
         return fixed[scope["approval_quote_ref"]]
+    venue = scope.get("venue", "regular")
     return fetch_execution_price(scope["entity"], currency=scope["currency"],
-                                 overnight=bool(scope.get("overnight")))
+                                 overnight=bool(scope.get("overnight")), **({"venue": venue} if venue != "regular" else {}))
 
 
-def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
+def fixed_quotes_active() -> bool:
+    """True only inside a risk review of orders that already carry their normalized quote."""
+    return _FIXED_QUOTES.get() is not None
+
+
+def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, as_reference=False, venue="regular"):
+    """Fail closed on a quote that cannot be priced from.
+
+    `as_reference` is for the quote stored in an approved-to-be revision when it is reviewed again later (at
+    approval): it keeps every rule about what the quote itself is (schema, symbol, currency, source, precision,
+    live bid/ask or session close, spread) and drops only the two that ask how long ago it was taken — its age and
+    whether the market is open now. Whether the price still holds is judged where an order is handed to the broker
+    (`check_execution`), on a freshly read quote that this function validates in full.
+    """
     q = ExecutionPrice.model_validate(quote)
     point = now or evaluation_now(UTC)
     if q.schema_version != "runtime-execution-price-v1":
@@ -150,13 +170,15 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
             or (q.source_as_of - point).total_seconds() > 2 \
             or (q.queried_at - point).total_seconds() > 2:
         raise PriceUnavailable("quote_timestamp_future")
-    try:
-        regular, last_close = session_context(point)
-    except Exception as exc:
-        raise PriceUnavailable("calendar_unavailable") from exc
-    age = (point - q.source_as_of).total_seconds()
+    regular, last_close, age = True, q.source_as_of, 0.0
+    if not as_reference:
+        try:
+            regular, last_close = session_context(point)
+        except Exception as exc:
+            raise PriceUnavailable("calendar_unavailable") from exc
+        age = (point - q.source_as_of).total_seconds()
     if overnight:
-        if (regular or q.price_kind != "previous_session_close"
+        if (regular and not as_reference or q.price_kind != "previous_session_close"
                 or q.session != "previous_completed_regular"
                 or q.market_data_mode != "historical"
                 or q.source_precision != "session_date"
@@ -164,7 +186,12 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
             raise PriceUnavailable("previous_session_close_invalid")
         values = [q.close]
     else:
-        if not regular or q.session != "regular":
+        if venue == "overnight":
+            # IBKR's overnight venue: the same live two-sided quote rules, read while the regular session is closed
+            # (the broker read already refused outside the contract's own overnight hours).
+            if (regular and not as_reference) or q.session != "overnight":
+                raise PriceUnavailable("quote_outside_overnight_session")
+        elif not regular or q.session != "regular":
             raise PriceUnavailable("quote_outside_regular_session")
         if q.price_kind != "bid_ask" or q.market_data_mode != "live" or q.source_precision != "tick":
             raise PriceUnavailable("quote_not_current_bid_ask")
@@ -178,7 +205,8 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None):
     return q
 
 
-def read_price(consumer, decision, *, overnight=False):
+def read_price(consumer, decision, *, overnight=False, as_reference=False, venue="regular"):
+    """`as_reference` reads the quote stored on `decision` (risk review only) and validates it as a reference."""
     from .consumer_api import read_input
 
     request = _REQUEST.get()
@@ -186,13 +214,15 @@ def read_price(consumer, decision, *, overnight=False):
         raise PermissionError("execution_price_order_binding_required")
     scope = {"kind": "execution_price", "entity": decision.symbol,
              "currency": request.currency, "cycle_id": request.cycle_id,
-             "purpose": request.purpose, "overnight": overnight,
+             "purpose": request.purpose, "overnight": overnight, "venue": venue,
              "approval_quote_ref": decision.execution_basis.get("quote_ref")}
+    if as_reference:
+        scope["reference_quote"] = True
     packet = read_input(consumer, "MARKET_DATA", scope=scope)
     if packet.status != "complete":
         raise PriceUnavailable(";".join(packet.gaps))
     return validate_quote(packet.payload, symbol=decision.symbol, currency=request.currency,
-                          overnight=overnight)
+                          overnight=overnight, as_reference=as_reference, venue=venue)
 
 
 def directional_price(quote, action):
@@ -202,14 +232,59 @@ def directional_price(quote, action):
         quote.ask if action_direction(action) > 0 else quote.bid)
 
 
+# Normalization refusals the Chief can fix by proposing differently; anything else
+# (prices, session, routes) is the environment, and re-asking the model cannot help.
+PROPOSAL_ERRORS = frozenset({
+    "quantity_or_budget_missing", "no_position_to_sell", "action_contradicts_target",
+    "quantity_exceeds_position", "no_action_below_minimum_quantity",
+    "quantity_precision_invalid", "budget_invalid", "quantity_exceeds_budget",
+    "limit_precision_invalid"})
+
+
+MONEY_ROUNDING_TOLERANCE = 0.05
+
+# What the Chief must change, said where it will read it (the rejection goes back into its next round).
+PROPOSAL_HINTS = {
+    "quantity_or_budget_missing": "这一单没有给规模：请在该单里填 qty（股数）、notional_usd（金额）或 target_weight 之一；"
+                                  "清仓写 action=sell, target_weight=0。理由里写的数字不算规模",
+    "quantity_exceeds_position": "卖出数量超过持仓：qty 不得大于持仓股数；要清仓请写 target_weight=0",
+    "no_position_to_sell": "没有这只股票的持仓可卖：请去掉这一单",
+}
+
+
+def proposal_hint(message: str) -> str:
+    """`SYMBOL:code` -> the refusal plus what to change, or the refusal itself when there is no hint."""
+    hint = PROPOSAL_HINTS.get(message.rsplit(":", 1)[-1])
+    return f"{message}（{hint}）" if hint else message
+
+
+def proposal_error(message: str) -> bool:
+    """True when a `SYMBOL:code` normalization refusal is the proposal's to fix."""
+    return message.rsplit(":", 1)[-1] in PROPOSAL_ERRORS
+
+
 def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
-                     slippage_pct=.5, net_liquidation=0, business_scope=None):
-    """Freeze executable fields BEFORE risk review. An unavailable order rejects the batch."""
+                     slippage_pct=.5, net_liquidation=0, business_scope=None, positions=None, venue="regular",
+                     skip_unquotable=False):
+    """Freeze executable fields BEFORE risk review. An unavailable order rejects the batch.
+
+    `positions` (symbol -> held shares, stock only) sizes a `target_weight` order as the
+    gap from the current holding — the same reading the risk projection uses — and keeps
+    a sell or trim from exceeding what is held. Without it only explicit sizes normalize.
+
+    `venue="overnight"` prices from a LIVE two-sided quote on IBKR's overnight venue and sends the order there as a
+    limit (the same slippage rule as a deferred order); the approval-time check reads the same venue and refuses once
+    the session has closed. `overnight=True` is the other, older case: a closed market, priced from the previous close
+    and deferred to the next regular session.
+    """
     from ..schemas.decision import action_direction
+    from ..schemas.instruments import normalize_symbol
+
+    held_by = {normalize_symbol(k): float(v) for k, v in (positions or {}).items()}
 
     if not math.isfinite(slippage_pct) or slippage_pct < 0 or slippage_pct > 1:
         raise PriceUnavailable("limit_slippage_policy_invalid")
-    normalized, notes = [], []
+    normalized, notes, skipped = [], [], []
     with price_request("trader", orders, cycle_id=cycle_id,
                        purpose="preapproval_normalization", currency=currency,
                        business_scope=business_scope):
@@ -222,8 +297,8 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 if quote_ref(captured) != basis.get("quote_ref") or basis.get("policy_version") != POLICY_VERSION:
                     raise PriceUnavailable("normalized_quote_binding_invalid")
                 try:
-                    validate_quote(captured, symbol=decision.symbol,
-                                   currency=currency, overnight=overnight)
+                    validate_quote(captured, symbol=decision.symbol, currency=currency, overnight=overnight,
+                                   venue=basis.get("venue", "regular"))
                 except PriceUnavailable:
                     # Expired/session-changed input is refreshed BEFORE the next
                     # immutable revision and review, never inside execution.
@@ -236,11 +311,23 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                     normalized.append(decision.model_copy(deep=True))
                     notes.append(f"{decision.symbol}: 复核同一规范订单；{basis['quote_ref']}")
                     continue
-            quote = read_price("trader", decision, overnight=overnight)
+            try:
+                quote = read_price("trader", decision, overnight=overnight, venue=venue)
+            except PriceUnavailable as exc:
+                # One thin name must not take the whole batch down. On the overnight venue a name whose book is
+                # unusable tonight (spread past the limit, no two-sided quote) is left out and said so; the rest are
+                # sized, reviewed and sent. Every name unusable = an outage, not a thin name: refuse as before.
+                if skip_unquotable and venue == "overnight" and str(exc).startswith("input_unavailable:"):
+                    skipped.append((decision.symbol, exc))
+                    notes.append(f"未下单：{decision.symbol} 隔夜盘口今晚不可用（{str(exc).rsplit(':', 1)[-1]}），"
+                                 "本轮不下，常规时段再处理")
+                    continue
+                raise
             ref = directional_price(quote, decision.action)
             increasing = action_direction(decision.action) > 0
             limit = decision.limit_price
-            if ((decision.order_type == "limit" and limit is None or overnight)
+            deferred_limit = overnight or venue == "overnight"
+            if ((decision.order_type == "limit" and limit is None or deferred_limit)
                     and (limit is None or decision.order_type == "market")):
                 raw = Decimal(str(ref)) * (1 + Decimal(str(slippage_pct)) / 100
                                            * (1 if increasing else -1))
@@ -252,13 +339,28 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 raise PriceUnavailable(f"{decision.symbol}:limit_precision_invalid")
             # Review and sizing use the worst permitted price, not a cheaper quote.
             cap_price = max(ref, limit or ref) if increasing else ref
+            held = held_by.get(normalize_symbol(decision.symbol), 0.0) if positions is not None else None
+            if not increasing and held is not None and held <= 0:
+                raise PriceUnavailable(f"{decision.symbol}:no_position_to_sell")
             budget = decision.notional_usd
-            if budget is None and decision.target_weight:
-                budget = decision.target_weight * net_liquidation
+            step = Decimal(str(quote.size_increment))
+            target_qty = None
+            if budget is None and decision.qty is None and decision.target_weight is not None:
+                if held is None:
+                    raise PriceUnavailable(f"{decision.symbol}:quantity_or_budget_missing")
+                if decision.target_weight == 0 and not increasing:
+                    target_qty = held              # close: exactly what is held, no rounding residue
+                else:
+                    gap = (Decimal(str(decision.target_weight * net_liquidation)) / Decimal(str(cap_price))
+                           - Decimal(str(held)))
+                    if (gap > 0) != increasing or gap == 0:
+                        raise PriceUnavailable(f"{decision.symbol}:action_contradicts_target")
+                    target_qty = float((abs(gap) / step).to_integral_value(rounding=ROUND_DOWN) * step)
             if budget is not None and (not math.isfinite(budget) or budget < 0):
                 raise PriceUnavailable(f"{decision.symbol}:budget_invalid")
-            step = Decimal(str(quote.size_increment))
-            if decision.qty is not None:
+            if target_qty is not None:
+                qty = target_qty
+            elif decision.qty is not None:
                 qty = abs(decision.qty)
                 if not math.isfinite(qty) or Decimal(str(qty)) % step != 0:
                     raise PriceUnavailable(f"{decision.symbol}:quantity_precision_invalid")
@@ -269,20 +371,36 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 raise PriceUnavailable(f"{decision.symbol}:quantity_or_budget_missing")
             if qty < quote.min_size:
                 raise PriceUnavailable(f"{decision.symbol}:no_action_below_minimum_quantity")
+            if not increasing and held is not None and qty > held + 1e-9:
+                # A SIZE given as money rounds to a share count with the bid, which can land a share or two above
+                # what is held (sell "$3,746" of 100 shares quoted 37.46 -> 101 at a lower bid). That is the
+                # intent to close, not a mistake: sell what is held. An explicit share count, or an overshoot
+                # beyond rounding, is still refused.
+                if (decision.qty is None and target_qty is None and budget is not None
+                        and qty <= held * (1 + MONEY_ROUNDING_TOLERANCE) + 1e-9):
+                    notes.append(f"{decision.symbol}: 金额折算 {qty:g} 股略超持仓 {held:g}，按持仓全部卖出")
+                    qty = held
+                else:
+                    raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_position")
             notional = qty * cap_price
-            if budget is not None and notional > budget + 1e-8:
+            # A budget caps what a BUY may spend. On a sale with an explicit share count the amount the Chief
+            # also wrote is an estimate of the same sale, and a one-tick move in the bid made 100 shares
+            # "exceed" $3,987 by a dollar — refusing a forced stop-loss sale and costing a model round.
+            if increasing and budget is not None and notional > budget + 1e-8:
                 raise PriceUnavailable(f"{decision.symbol}:quantity_exceeds_budget")
             basis = {"policy_version": POLICY_VERSION, "quote": quote.model_dump(mode="json"),
                      "requested_order": decision.model_dump(mode="json"),
                      "quote_ref": quote_ref(quote), "reference_price": ref,
                      "max_deviation": .01, "max_notional": notional,
-                     "currency": currency, "defer_to_regular_session": overnight}
+                     "currency": currency, "defer_to_regular_session": overnight, "venue": venue}
             normalized.append(decision.model_copy(update={
                 "qty": qty, "notional_usd": notional, "limit_price": limit,
-                "order_type": "limit" if overnight else decision.order_type,
+                "order_type": "limit" if deferred_limit else decision.order_type,
                 "execution_basis": basis}))
             notes.append(f"{decision.symbol}: {qty:g} 股；{quote.price_kind} 参考 {ref:g} "
                          f"{currency}，来源 {quote.source_as_of.isoformat()}；{basis['quote_ref']}")
+    if skipped and not normalized:
+        raise skipped[0][1]
     return normalized, notes
 
 
@@ -294,7 +412,8 @@ def check_execution(decision, qty, quote, *, now=None):
     reference = ExecutionPrice.model_validate(basis["quote"])
     if basis.get("quote_ref") != quote_ref(reference):
         raise PriceUnavailable("approval_quote_hash_mismatch")
-    quote = validate_quote(quote, symbol=decision.symbol, currency=basis["currency"], now=now)
+    quote = validate_quote(quote, symbol=decision.symbol, currency=basis["currency"], now=now,
+                           venue=basis.get("venue", "regular"))
     ref = directional_price(reference, decision.action)
     if ref is None or not math.isfinite(ref) or ref <= 0 or ref != basis.get("reference_price"):
         raise PriceUnavailable("approval_reference_mismatch")
@@ -310,8 +429,12 @@ def check_execution(decision, qty, quote, *, now=None):
         if (action_direction(decision.action) > 0 and price > decision.limit_price
                 or action_direction(decision.action) < 0 and price < decision.limit_price):
             raise PriceUnavailable("execution_limit_not_marketable")
-    if not math.isfinite(basis["max_notional"]) or basis["max_notional"] <= 0 \
-            or qty * price > basis["max_notional"] + 1e-8:
+    # The funds cap bounds what a BUY may spend. A sale spends nothing: a bid that ticked UP since approval
+    # means more proceeds, and the 1% deviation band and the limit price above already bound it. Applying the
+    # cap to a sale refused every de-risk order for a one-tick move in its favour.
+    if action_direction(decision.action) > 0 and (
+            not math.isfinite(basis["max_notional"]) or basis["max_notional"] <= 0
+            or qty * price > basis["max_notional"] + 1e-8):
         raise PriceUnavailable("execution_funds_exceeded_reapprove")
     if Decimal(str(qty)) % Decimal(str(quote.size_increment)) != 0 or qty < quote.min_size:
         raise PriceUnavailable("execution_instrument_precision_changed")

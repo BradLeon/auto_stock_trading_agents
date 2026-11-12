@@ -146,5 +146,10 @@ def test_full_ledger_chain_paper_mode(store, monkeypatch):
     # 7) Chief 的 track-record 段经 Internal State API 读到成交。
     from ats.agents.chief import assemble
 
-    block = assemble._track_record_block()
+    from types import SimpleNamespace
+
+    history = SimpleNamespace(status=state.completeness.status, source_as_of=[state.as_of],
+                              payload={"trades": state.trades, "fills": state.fills,
+                                       "performance": state.performance})
+    block = assemble._track_record_block(store, history)
     assert "近期成交" in block and "NVDA" in block

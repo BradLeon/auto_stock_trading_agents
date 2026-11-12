@@ -1,0 +1,37 @@
+# FormFactor (FORM) — PEAD config · L6 测试：探针卡（DRAM/HBM、先进逻辑、先进封装）。
+# 2026-11-04 新入 targets，新建。季报约在 2/5/7/10 月下旬。
+# 叙事依据（2026-11 网络检索，二手来源为主）：Q3 2026 营收创纪录约 $280M；DRAM 探针卡持平于高位，
+# 但客户把晶圆从 HBM 挪向 DDR5（DDR 价格更高），HBM 占比下降；管理层称 HBM 仍是 2026–2027 主驱动，在做 HBM4E/HBM5 设计。
+# Q3 毛利含约 $10.5M 不可重复项与关税退税，读当季毛利率时要剔除。
+
+symbol: FORM
+company_name: "FormFactor"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 6.0
+long_threshold: 1.2           # 中盘、高 beta
+
+# 权重之和 = 1.00
+scorecard_dims:
+  - {key: forward_guide,   weight: 0.25, label: 次季营收/EPS 指引}
+  - {key: dram_hbm,        weight: 0.20, label: DRAM 探针卡营收与 HBM/DDR5 结构}
+  - {key: gross_margin,    weight: 0.20, label: 探针卡毛利率（剔除一次性项目后）}
+  - {key: adv_packaging,   weight: 0.10, label: 先进封装/CoWoS 相关探针与系统需求}
+  - {key: logic,           weight: 0.10, label: 先进逻辑（代工/GPU/ASIC）探针卡}
+  - {key: revenue,         weight: 0.10, label: 营收超预期}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：HBM 节奏与 HBM4E/HBM5 设计导入}
+
+signal_chain:
+  - {symbol: SKHY,  role: downstream}   # HBM/DRAM 探针卡大客户
+  - {symbol: MU,    role: downstream}
+  - {symbol: "005930.KS", role: downstream}
+  - {symbol: TSM,   role: downstream}   # 先进逻辑与先进封装
+  - {symbol: NVDA,  role: downstream}   # 终端：GPU 出货决定 HBM 测试量
+  - {symbol: LRCX,  role: peer}         # 同吃存储扩产预算
+
+narrative_seed: >
+  探针卡龙头，HBM 与 DRAM 测试是近两年的主增长源；DRAM 紧缺下客户在 HBM 与 DDR5 之间来回调配晶圆，
+  使 HBM 探针卡占比按季波动，这是读数时最易误判的地方；
+  当季毛利率含一次性项目，需剔除后看趋势；先进封装与先进逻辑是第二曲线；
+  股价对次季指引与 HBM 下一代（HBM4E/HBM5）设计导入的表态敏感。

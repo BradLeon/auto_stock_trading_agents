@@ -92,6 +92,17 @@ def _period(value: str) -> tuple[int, int] | None:
     return (year, quarter) if year is not None and quarter is not None else None
 
 
+_GENERIC_NAME_TOKENS = frozenset({
+    "inc", "corp", "ltd", "plc", "the", "and", "group", "co", "holding",
+    "holdings", "technologies", "technology", "corporation", "company",
+    "international", "electronics", "electronic", "semiconductor",
+    "semiconductors", "advanced", "micro", "devices", "device", "systems",
+    "system", "solutions", "digital", "global", "industries", "materials",
+    "products", "research", "manufacturing", "instruments", "labs",
+    "laboratories", "microelectronics", "limited", "sa", "nv", "ag",
+})
+
+
 def mentions_entity(text: str, symbol: str, company_name: str = "") -> bool:
     """Conservatively verify issuer identity near the document opening."""
     head = re.sub(r"https?://\S+|\[[^\]]*\]\([^)]*\)", " ", (text or "")[:40000]).lower()
@@ -122,21 +133,53 @@ def mentions_entity(text: str, symbol: str, company_name: str = "") -> bool:
             normalized_names.append(name)
     if any(len(name.split()) > 1 and name in head for name in normalized_names):
         return True
-    generic = {
-        "inc", "corp", "ltd", "plc", "the", "and", "group", "co", "holding",
-        "holdings", "technologies", "technology", "corporation", "company",
-        "international", "electronics", "electronic", "semiconductor",
-        "semiconductors", "advanced", "micro", "devices", "device", "systems",
-        "system", "solutions", "digital", "global", "industries", "materials",
-        "products", "research", "manufacturing", "instruments", "labs",
-        "laboratories", "microelectronics", "limited", "sa", "nv", "ag",
-    }
     return any(
         hit(token)
         for name in normalized_names
         for token in name.split()
-        if len(token) >= 3 and token not in generic
+        if len(token) >= 3 and token not in _GENERIC_NAME_TOKENS
     )
+
+
+# A transcript identifies its issuer in the opening (the operator's welcome, the page
+# title). 4k characters covers both on fool.com / investing.com bodies; a mention
+# further in is somebody's partner or customer, not the speaker.
+TRANSCRIPT_OPENING_CHARS = 4000
+
+
+def transcript_opening_names_entity(text: str, symbol: str, company_name: str = "") -> bool:
+    """Issuer named in the opening of a transcript body, not anywhere in its first 40k."""
+    return mentions_entity((text or "")[:TRANSCRIPT_OPENING_CHARS], symbol, company_name)
+
+
+def locator_names_entity(locator: str, symbol: str, company_name: str = "") -> bool:
+    """Positive identification from a web source's own locator (URL slug and/or title).
+
+    Transcript sites put the issuer in both ("alphabet-googl-q3-2026-earnings-call-
+    transcript"). The body cannot establish identity on its own: Estee Lauder's call names
+    Microsoft as a partner, Seagate's and Marvell's name their customers. Tokens are
+    compared whole, so "el" never matches "intel" and "msft" never matches "msfts".
+    """
+    tokens = set(re.split(r"[^a-z0-9]+", (locator or "").lower())) - {""}
+    if not tokens:
+        return False
+    ticker = (symbol or "").lower()
+    if ticker and (ticker in tokens or ticker.split(".")[0] in tokens):
+        return True
+    names = [company_name]
+    try:
+        from ..config import entity_meta
+
+        meta = entity_meta(symbol)
+        names.extend([meta.get("name", ""), *(meta.get("aliases", []) or [])])
+    except Exception:  # pragma: no cover - identity checking must stay fail-closed
+        pass
+    for value in names:
+        words = [w for w in re.split(r"[^a-z0-9]+", str(value or "").lower())
+                 if len(w) >= 3 and w not in _GENERIC_NAME_TOKENS]
+        if words and all(w in tokens for w in words):
+            return True
+    return False
 
 
 def validate_candidate(

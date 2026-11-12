@@ -77,6 +77,12 @@ def _article_sources() -> dict[str, Any]:
         if not isinstance(ingestion, dict):
             raise ValueError(
                 f"unstructured source {source_id!r} lacks its governed ingestion contract")
+        params = ingestion.get("params") or {}
+        if isinstance(params.get("symbols"), dict):          # `{from_pead: [...]}` (config.pead_selection)
+            from ....config import pead_selection
+
+            ingestion = {**ingestion, "params": {**params, "symbols": pead_selection(
+                params["symbols"], where=f"{source_id}.ingestion.params.symbols")}}
         output[source_id] = ArticleSourceDef(
             id=source_id, label=str(row.get("provider") or ""),
             adapter=str(row.get("adapter") or ""),

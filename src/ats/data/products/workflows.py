@@ -13,7 +13,6 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class WorkflowDataBoundary:
     consumer: str
-    mode: str
     persistent_inputs: tuple[str, ...]
     runtime_inputs: tuple[str, ...]
     memory_outputs: tuple[str, ...]
@@ -33,16 +32,18 @@ _BOUNDARIES = {
 
 
 def workflow_data_boundary(consumer: str) -> WorkflowDataBoundary:
-    """Return the configured rollout mode plus the non-overlapping I/O boundary."""
+    """Return the non-overlapping I/O boundary.
+
+    The boundary carried a rollout mode until 2026-11-12. It was only ever logged (the Chief reads
+    through its own declared consumer contracts), and `chief_graph: shadow` read as if the Chief had
+    never switched, so the mode was removed rather than set to platform.
+    """
     normalized = consumer.strip().lower().replace("-", "_")
     if normalized not in _BOUNDARIES:
         raise ValueError(f"unknown workflow data boundary: {consumer}")
-    from ..rollout_modes import read_mode
-
     body = _BOUNDARIES[normalized]
     return WorkflowDataBoundary(
         consumer=normalized,
-        mode=read_mode(normalized),
         persistent_inputs=body["persistent_inputs"],
         runtime_inputs=body["runtime_inputs"],
         memory_outputs=body["memory_outputs"],

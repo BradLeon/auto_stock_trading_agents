@@ -497,3 +497,75 @@ def test_nt_dollar_is_taiwan_dollar_only():
 
     assert quantity("NT$1.45万亿") == (1.45e12, "TWD") and mixes_currencies("NT$1.45万亿") is False
     assert quantity("$4.45") == (4.45, "USD") and mixes_currencies("EPS $4.45 / US$") is False
+
+
+# --- 来源自己的建议可以被转述，系统自己的建议仍然拦截（2026-11-05 22:45 首席因 GOOG 例行失败） ------------- #
+
+SOURCE_FACT = ("来源信息（Barron's（Steven M. Sears））：作者以Alphabet股价280.03美元为基准，建议卖出2027年1月到期、"
+               "行权价270美元的看跌期权，并建议分批使用不同行权价和到期日建仓以管理风险。")
+
+
+def _brief_payload(fact=SOURCE_FACT, *, actor="Barron's（Steven M. Sears）", complete=True):
+    summary = fact.split("：", 1)[1]
+    row = {"fact_index": 0, "source_actor": actor, "source_summary": summary, "evidence_quote": "q",
+           "document_ref": "d1", "extraction_projection_id": "x1", "publication_id": "p1",
+           "locator": {"start": 0, "end": 10}}
+    if not complete:
+        row.pop("evidence_quote")
+    return {"fact_changes": [fact], "source_evidence": [row]}
+
+
+def test_verified_source_facts_are_only_the_evidence_bound_program_wording():
+    from ats.agents.information.briefs import verified_source_fact_indices
+
+    assert verified_source_fact_indices(_brief_payload()) == {0}
+    assert verified_source_fact_indices(_brief_payload(complete=False)) == set()          # evidence missing
+    forged = _brief_payload(fact="来源信息（Barron's（Steven M. Sears））：我们建议买入")
+    forged["source_evidence"][0]["source_summary"] = "别的话"                              # wording != evidence
+    assert verified_source_fact_indices(forged) == set()
+    assert verified_source_fact_indices({"fact_changes": [SOURCE_FACT]}) == set()         # no evidence at all
+
+
+def test_the_routine_restates_a_sources_recommendation_but_not_a_system_one():
+    from ats.agent.task_projection import EnvelopeValidationError
+    from ats.agents.fundamental import routine
+
+    store = _store()
+    _seed_baseline_dossier(store)
+    baseline = routine.load_baseline(store, "COHR")
+    drafts = routine.build_expectation_updates([SOURCE_FACT], [routine.PENDING], baseline)
+    with pytest.raises(EnvelopeValidationError):                                           # unproven: still blocked
+        routine.publish_expectation_update(store, drafts[0])
+    routine.publish_expectation_update(store, drafts[0], source_statement=True)
+    system = routine.build_expectation_updates(["来源信息（X）：我们应当买入"], [routine.PENDING], baseline)
+    with pytest.raises(EnvelopeValidationError):                                           # system directive: blocked
+        routine.publish_expectation_update(store, system[0], source_statement=True)
+
+
+def test_one_refused_fact_is_skipped_and_disclosed_the_rest_publish(monkeypatch):
+    from ats.agent.task_projection import EnvelopeValidationError, ProjectionScope, build_envelope
+    from ats.agents.fundamental import entry
+
+    store = _store()
+    _seed_baseline_dossier(store)
+    payload = {
+        "entity": "COHR", "headline": "供应链读数", "summary": "两条读数",
+        "relevance": "high", "sources": ["rss:test"],
+        "fact_changes": ["gross_margin 毛利率实际读数 25.5%", "我们应当买入 COHR"],
+        "impact_candidates": ["margin"], "entities": ["COHR"],
+        "confidence": 0.6, "freshness": "published now", "unverified": ["节奏待核验"],
+    }
+    store.save_task_projection_envelope(build_envelope(
+        role="information_brief", payload=payload, scope=ProjectionScope(kind="entity", id="COHR"),
+        as_of=NOW.isoformat()))
+    monkeypatch.setattr("ats.memory.get_store", lambda: store)
+    out = entry.run_fundamental_pass(entry.routine_request("COHR", trigger="information_brief_update", use_llm=False))
+    assert len(out["published"]) == 1 and [row["index"] for row in out["skipped"]] == [1]
+
+    # a pass in which nothing at all can be published still fails
+    bad = dict(payload, fact_changes=["我们应当买入 COHR"])
+    store.save_task_projection_envelope(build_envelope(
+        role="information_brief", payload=bad, scope=ProjectionScope(kind="entity", id="COHR"),
+        as_of=(NOW.replace(microsecond=1)).isoformat()))
+    with pytest.raises(EnvelopeValidationError):
+        entry.run_fundamental_pass(entry.routine_request("COHR", trigger="information_brief_update", use_llm=False))

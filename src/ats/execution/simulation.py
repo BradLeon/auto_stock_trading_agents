@@ -16,15 +16,13 @@ _CURRENT: ContextVar[object | None] = ContextVar("isolated_simulation_broker", d
 
 
 def _assert_isolated(store):
-    from ..workflow.cutover import CLERK_PUBLICATION
-    from ..workflow.cutover_wiring import assert_write_destination
-    from ..workflow.isolation import verified_isolation_root
+    from ..workflow.isolation import assert_write_destination, verified_isolation_root
     from .broker_write_guard import assert_broker_writes_prohibited
 
     if verified_isolation_root() is None:
         raise PermissionError("simulation_requires_complete_isolation")
     assert_broker_writes_prohibited(operation="simulation", caller="FakeBroker")
-    assert_write_destination(store, CLERK_PUBLICATION)
+    assert_write_destination(store, what="a simulated fill")
 
 
 class FakeBroker:

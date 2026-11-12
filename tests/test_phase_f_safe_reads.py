@@ -1,4 +1,4 @@
-"""Real consumption points; candidate fixtures never authorize production."""
+"""Real consumption points (the read-route fallback cases went with the route tables, switch-trade r5 9.3)."""
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -20,29 +20,17 @@ from ats.graph.pead_state import PeadState
 from ats.memory import get_store
 from ats.schemas.decision import TradeDecision
 from ats.schemas.memory import PerformanceRecord
-from ats.workflow import cutover as co
-from ats.workflow import cutover_wiring as cw
 from ats.workflow import runtime_reads as rr
-from ats.workflow.assurance_surface import fingerprint, load_surface
-from ats.workflow.consumer_reads import (
-    InternalFallback,
-    consume_read,
-    implementation_hash,
-    read_internal,
-    read_projection,
-    revoke_fallback,
-    trace_reads,
-)
-from ats.workflow.cutover_routing import FallbackUnsafe, RouteUnavailable
-from ats.workflow.intake_verification import isolated_verification
-from ats.workflow.scoped_routes import transition_route
+from ats.workflow.isolation import isolated_run
+from ats.workflow.read_scope import ReadUnavailable, read_projection, trace_reads
 
 
 @pytest.fixture
 def isolated(tmp_path):
     guard.reset_for_tests()
-    with isolated_verification("safe-reads", root=tmp_path / "iso"):
-        cw.bootstrap_wired()
+    # isolated_verification (intake_verification) was isolated_run plus a production side-effect check; it was
+    # retired in r5 8.7 and the long-term isolation entry is used directly.
+    with isolated_run("safe-reads", root=tmp_path / "iso"):
         yield get_store()
     guard.reset_for_tests()
 
@@ -57,160 +45,12 @@ def scope(consumer="chief", entity=False):
                                                          "end": (now+timedelta(minutes=5)).isoformat()}})
 
 
-def activate(identity, tmp_path, monkeypatch, *, reader=read_internal, changes=None):
-    surface = load_surface()
-    proof = {"identity": identity.as_row(), "legacy_identifier": "store.direct_trade_reads",
-             "implementation_sha256": implementation_hash(reader),
-             "dependency_hashes": fingerprint([surface.manifest, *surface.paths_for(identity.consumer_id)]),
-             "valid_until": (datetime.now(UTC)+timedelta(hours=1)).isoformat()}
-    proof.update(changes or {})
-    reference = tmp_path / "scope-proof.json"
-    reference.write_text(json.dumps(proof))
-    evidence = {"identity": identity.as_row(), "valid": True, "reference": str(reference),
-                "sha256": hashlib.sha256(reference.read_bytes()).hexdigest()}
-    monkeypatch.setattr("ats.workflow.boundary_evidence.assert_enforced", lambda *a, **k: None)
-    transition_route(co.PROJECTION_READ, identity, "target", actor="fixture", reason="candidate",
-        expected_generation=0, qualification=lambda i: {"identity": i.as_row(), "status": "eligible"},
-        report=lambda i: {"identity": i.as_row(), "valid": True, "reference": "fixture-report"},
-        fallback=lambda i: evidence,mode="isolated")
-    monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {"status": "ineligible",
-                                                                             "reasons": ["revoked"]})
-    return reference
-
-
 def seed_performance(store):
     record = PerformanceRecord(cycle_id="fixture-state", as_of=datetime.now(UTC),
         net_liquidation=1_000_000, daily_pnl=2, cumulative_pnl=100)
     store.save_performance(record)
     store.set_meta("last_reconcile_at", record.as_of.isoformat())
     return record
-
-
-def test_actual_chief_read_falls_back_using_once_checked_state(isolated, tmp_path, monkeypatch):
-    identity = scope()
-    seed_performance(isolated)
-    activate(identity, tmp_path, monkeypatch)
-    from ats.execution import state_api
-    original, calls = state_api.get_internal_state, []
-    def counted(*a, **k):
-        calls.append(1)
-        return original(*a, **k)
-    monkeypatch.setattr(state_api, "get_internal_state", counted)
-    with trace_reads() as rows:
-        text = assemble._track_record_block(read_scope=identity.scope,
-                                           read_fallback=InternalFallback(isolated))
-    assert "1,000,000" in text and "内部状态" in text
-    assert len(calls) == 1
-    assert rows[0]["fallback"] is True and rows[0]["refs"]
-    assert rows[0]["identity"] == identity.as_row() and rr.current_read_context() is None
-    assert co.read_boundary(co.LIVE_TRADER).route == "disabled"
-
-
-@pytest.mark.parametrize("failure,code", [
-    ("missing", "fallback_proof_invalid"), ("expired", "fallback_proof_invalid"),
-    ("scope", "fallback_proof_invalid"), ("digest", "fallback_proof_invalid"),
-    ("dependency", "fallback_proof_invalid"), ("implementation", "fallback_proof_invalid"),
-    ("retired", "fallback_target_retired"), ("unreadable", "fallback_target_unavailable")])
-def test_actual_read_refuses_each_unsafe_fallback(isolated, tmp_path, monkeypatch, failure, code):
-    identity = scope()
-    changes = {"expired": {"valid_until": (datetime.now(UTC)-timedelta(seconds=1)).isoformat()},
-               "scope": {"identity": scope("risk").as_row()},
-               "dependency": {"dependency_hashes": {}},
-               "implementation": {"implementation_sha256": "old"}}.get(failure)
-    proof = activate(identity, tmp_path, monkeypatch, changes=changes)
-    if failure == "missing":
-        proof.unlink()
-    if failure == "digest":
-        proof.write_text(proof.read_text() + " ")
-    if failure == "retired":
-        monkeypatch.setattr("ats.workflow.legacy_retirement.load_registry", lambda: SimpleNamespace(
-            tombstone=lambda identifier: SimpleNamespace(status="retired")))
-    if failure == "unreadable":
-        isolated.conn.execute("DROP TABLE performance")
-    with trace_reads() as rows, pytest.raises(FallbackUnsafe) as exc:
-        assemble._track_record_block(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
-    assert exc.value.reason_code == code and rows[-1]["status"] in {"blocked", "unavailable"}
-    assert isolated.conn.execute("SELECT COUNT(*) FROM boss_approvals").fetchone()[0] == 0
-    assert rr.current_read_context() is None
-
-
-def test_failed_scope_does_not_stop_unrelated_legacy_reader(isolated, tmp_path, monkeypatch):
-    blocked, unaffected = scope(), scope("risk")
-    activate(blocked, tmp_path, monkeypatch, changes={"dependency_hashes": {}})
-    with pytest.raises(FallbackUnsafe):
-        read_internal(isolated, consumer="chief", business_scope=blocked)
-    assert read_internal(isolated, consumer="risk", business_scope=unaffected).owner == "ats.execution.state_api"
-
-
-def test_revoked_proof_is_append_only_and_scope_specific(isolated, tmp_path, monkeypatch):
-    import sqlite3
-
-    identity = scope()
-    seed_performance(isolated)
-    proof = activate(identity, tmp_path, monkeypatch)
-    original = proof.read_bytes()
-    revoke_fallback(scope("risk"), proof, actor="fixture", reason="another consumer")
-    assert read_internal(isolated, consumer="chief", business_scope=identity).portfolio
-    revoke_fallback(identity, proof, actor="fixture", reason="withdraw")
-    with pytest.raises(FallbackUnsafe) as exc:
-        read_internal(isolated, consumer="chief", business_scope=identity)
-    assert exc.value.reason_code == "fallback_proof_revoked" and proof.read_bytes() == original
-    from ats.workflow.scoped_routes import resolve_route
-    assert resolve_route(co.PROJECTION_READ, identity)["route"] == "target"
-    with sqlite3.connect(co.default_cutover_db_path()) as conn, pytest.raises(sqlite3.IntegrityError):
-        conn.execute("DELETE FROM fallback_revocations")
-
-
-def test_emergency_disable_is_not_a_fallback_opportunity(isolated, tmp_path, monkeypatch):
-    identity = scope()
-    activate(identity, tmp_path, monkeypatch)
-    co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="stop")
-    with pytest.raises(RouteUnavailable, match="disabled"):
-        assemble._track_record_block(read_scope=identity.scope, read_fallback=InternalFallback(isolated))
-
-
-def test_actual_risk_node_blocks_before_account_or_dependent_execution(isolated, tmp_path, monkeypatch):
-    requested = {**scope("risk", entity=True).scope, "kind": "decision", "id": "blocked-cycle"}
-    identity = rr.business_identity("risk", kind="decision", scope_id="blocked-cycle",
-                                    entities=["COHR"], explicit=requested)
-    activate(identity, tmp_path, monkeypatch)
-    def forbidden():
-        pytest.fail("unqualified Risk reached account provider")
-    monkeypatch.setattr("ats.trader.portfolio.snapshot", forbidden)
-    state = ChiefDecisionState(cycle_id="blocked-cycle", as_of=datetime.now(UTC), decide=False,
-        decisions=[TradeDecision(symbol="COHR", action="buy", qty=1)])
-    with pytest.raises(RouteUnavailable):
-        chief.risk_gate(state, read_scope=identity.scope)
-    assert isolated.conn.execute("SELECT COUNT(*) FROM decision_cycles").fetchone()[0] == 0
-
-
-def test_actual_clerk_stops_next_step_after_read_revocation(isolated, tmp_path, monkeypatch):
-    from ats.execution import clerk
-    identity = scope("clerk")
-    activate(identity, tmp_path, monkeypatch)
-    active, calls = [True], []
-    monkeypatch.setattr("ats.data.assurance.qualification", lambda **k: {
-        "status": "eligible" if active[0] else "ineligible"})
-    def first(*a, **k):
-        calls.append("first")
-        active[0] = False
-        return {}
-    monkeypatch.setattr(clerk, "_STEPS", {"first": first, "next": lambda *a, **k: calls.append("next")})
-    with pytest.raises(RouteUnavailable):
-        clerk_run(store=isolated, broker=object(), steps=("first", "next"), read_scope=identity.scope)
-    assert calls == ["first"]
-    assert isolated.conn.execute("SELECT status FROM clerk_runs").fetchone()[0] == "running"
-
-
-def test_actual_read_rechecks_control_change_during_probe(isolated, tmp_path, monkeypatch):
-    identity = scope()
-    def reader():
-        co.set_route(co.PROJECTION_READ, "disabled", actor="test", reason="race")
-        return {"value": 1}
-    activate(identity, tmp_path, monkeypatch, reader=reader)
-    with pytest.raises(RouteUnavailable, match="changed during"):
-        consume_read(identity, target_reader=reader, legacy_reader=reader,
-                     legacy_identifier="store.direct_trade_reads", usable=lambda v: True, refs=lambda v: ["state"])
 
 
 def test_actual_routine_consumes_published_brief_and_preserves_refs(isolated, record_property):
@@ -241,6 +81,7 @@ def test_actual_routine_consumes_published_brief_and_preserves_refs(isolated, re
                         scope=ProjectionScope(kind="portfolio"))
 
 
+@pytest.mark.governed_decision_reads
 def test_actual_trader_and_clerk_consume_auth_quotes_reports_and_audit(execution, record_property):  # noqa: F811
     state = ready_state(execution, cycle="consumption-chain")
     # No fixture inserts submitted/filled orders: actual Trader/FakeBroker do so.
@@ -256,10 +97,12 @@ def test_actual_trader_and_clerk_consume_auth_quotes_reports_and_audit(execution
                                        shares=state.order_results[0].qty, price=100.1)
         result = clerk_run(store=execution.store, broker=Readback())
     assert result["status"] == "completed", result["errors"]
-    for consumer, api in [("trader", "ats.data.consumer_api.read_input"),
-                          ("clerk", "ats.data.runtime.clerk_reads.get_fills"),
-                          ("clerk", "ats.decision.repository.DecisionAuditRepository.read_chain")]:
-        assert any(row["consumer"] == consumer and row["api"] == api and row["refs"] for row in rows)
+    # Since task 6.4 Clerk's broker and decision-chain reads are governed reads too (BROKER_STATE steps,
+    # DECISION_APPROVAL_CONTEXT).
+    for consumer, product in [("trader", "APPROVED_EXECUTION_AUTHORIZATION"), ("clerk", "BROKER_STATE"),
+                              ("clerk", "DECISION_APPROVAL_CONTEXT")]:
+        assert any(row["consumer"] == consumer and row["api"] == "ats.data.consumer_api.read_input"
+                   and row.get("product") == product and row["refs"] for row in rows), (consumer, product)
     assert {row.get("product") for row in rows if row["consumer"] == "trader"} >= {
         "MARKET_DATA", "APPROVED_EXECUTION_AUTHORIZATION"}
     assert execution.store.conn.execute("SELECT COUNT(*) FROM performance").fetchone()[0] > 0
@@ -330,6 +173,7 @@ def test_actual_event_graph_keeps_data_document_refs(isolated, company_products,
     record_property("projection", json.dumps(published))
 
 
+@pytest.mark.governed_decision_reads
 def test_actual_risk_entry_reads_runtime_and_internal_state(isolated, monkeypatch, record_property):
     from ats.agents.risk_officer.review import run
     from ats.schemas.portfolio import PortfolioSnapshot
@@ -337,14 +181,14 @@ def test_actual_risk_entry_reads_runtime_and_internal_state(isolated, monkeypatc
     seed_performance(isolated)
     pf = PortfolioSnapshot(as_of=datetime.now(UTC), net_liquidation=1_000_000, cash=1_000_000,
         daily_pnl=0, gross_exposure=0, positions=[])
-    monkeypatch.setattr("ats.trader.portfolio.IBKRBroker", lambda **k: SimpleNamespace(get_portfolio=lambda: pf))
+    monkeypatch.setattr("ats.broker.account.IBKRBroker", lambda **k: SimpleNamespace(get_portfolio=lambda: pf))
     monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda pf: None)
     monkeypatch.setattr("ats.risk.assess.enrich_options", lambda pf: None)
     with trace_reads() as rows:
         result = run(use_llm=False)
-    assert result.review and {row["api"] for row in rows} >= {
-        "ats.data.runtime.broker.portfolio_snapshot", "ats.config.get_config",
-        "ats.execution.state_api.performance_history"}
+    # Since task 6.4 every one of these is a governed read: the book, the ruleset and the NAV history.
+    assert result.review and {row["api"] for row in rows} == {"ats.data.consumer_api.read_input"}
+    assert {row.get("product") for row in rows} >= {"PORTFOLIO_DATA", "RISK_RULES", "HISTORY_DATA"}
     assert all(row["refs"] for row in rows)
     record_property("read_trace", json.dumps(rows))
     record_property("risk_review", result.review.model_dump_json())
@@ -364,25 +208,18 @@ def test_chief_candidate_context_consumes_projection_and_state(isolated, monkeyp
     plan["information_brief"]["scopes"] = [brief.scope]
     seed_research(isolated, {k: v for k, v in plan.items() if k != "information_brief"})
     monkeypatch.setattr(assemble, "projection_query_plan", lambda: plan)
-    def forbidden(*a, **k):
-        pytest.fail("candidate Chief read legacy research/provider")
-    for name in ("_pead_block", "_sector_block", "_macro_block", "_portfolio_block"):
-        monkeypatch.setattr(assemble, name, forbidden)
+    from ats.data.consumer_api import read_input
+    from ats.schemas.portfolio import PortfolioSnapshot
+
+    book = PortfolioSnapshot(as_of=datetime.now(UTC) - timedelta(seconds=1),
+                             net_liquidation=1_000_000.0, positions=[])
     with rr.bind_read(identity), trace_reads() as rows:
-        result = assemble.build()
-    assert result.net_liquidation == 1_000_000 and brief.projection_id[:18] in result.as_context()
+        account = read_input("chief", "PORTFOLIO_DATA", scope={"kind": "portfolio"},
+                             broker=SimpleNamespace(get_portfolio=lambda: book))
+        result = assemble.build(account=account)
+    # the account is the live book; the brief is read into the snapshot but not shown (D3-2)
+    assert result.net_liquidation == 1_000_000 and brief.projection_id not in result.as_context()
     assert any(brief.projection_id in row["refs"] and row.get("content_hash") for row in rows)
-    assert any(row["refs"] and row["api"] == "store.direct_trade_reads" for row in rows)
+    assert any(row["refs"] and row["api"] == "ats.data.consumer_api.read_input" for row in rows)
     record_property("read_trace", json.dumps(rows))
     record_property("context", result.as_context())
-
-
-def test_isolated_entry_persists_actual_read_refs(isolated, tmp_path):
-    from ats.workflow.isolated_entry import run_isolated_entry
-    result = run_isolated_entry(run_id="trace-entry", entry=assemble._track_record_block,
-                                root=tmp_path / "entry")
-    import sqlite3
-    with sqlite3.connect(result.record_path) as conn:
-        body = json.loads(conn.execute("SELECT body FROM isolated_business_entries").fetchone()[0])
-    assert body["read_trace"] and body["tradable"] is False
-    assert body["read_trace"][0]["consumer"] == "chief"

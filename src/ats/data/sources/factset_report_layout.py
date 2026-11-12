@@ -143,7 +143,8 @@ def declared_report_groups(report_date: date, *, policy: dict | None = None):
     return groups
 
 
-def discovered_core_groups(report_date: date, charts, *, policy: dict | None = None):
+def discovered_core_groups(report_date: date, charts, *, policy: dict | None = None,
+                           scopes: tuple[str, ...] = ('technology',)):
     """Auto-declare a new month's IT inventory from located chart headings.
 
     This inventory is independent of extracted numeric cells. A changed or
@@ -164,6 +165,13 @@ def discovered_core_groups(report_date: date, charts, *, policy: dict | None = N
     for chart in charts:
         if not chart.groups or chart.groups[0] not in required:
             continue
+        if (chart.status == 'pending_review' and chart.reasons == ('target_period_unresolved',)
+                and len(chart.groups) == 1 and not chart.periods):
+            # A chart whose own title names no period (2026-11-03: the 2026-10-30 report titles a Q4 chart "FY ...
+            # Guidance" with no year) stays `pending_review`, is never admitted, and is listed as a failed chart in
+            # the release manifest. It no longer blocks the charts around it: the inventory check below still
+            # requires every required group to be found in full from charts that did resolve.
+            continue
         if (chart.status != 'located' or len(chart.groups) != 1
                 or len(chart.periods) != 1 or not chart.period_basis):
             raise ValueError('factset_core_chart_ambiguous')
@@ -171,11 +179,13 @@ def discovered_core_groups(report_date: date, charts, *, policy: dict | None = N
             (chart.periods[0], chart.period_basis))
     if {name: len(found.get(name, ())) for name in required} != required:
         raise ValueError('factset_core_chart_inventory_changed')
-    entities = tuple(policy['scope_policy']['scopes']['technology']['entities'])
-    return [GroupIdentity(chart_id=name, period=period, period_basis=basis,
-                          scope_id='technology',
+    # The same inventory is declared once per scope. It comes from the located chart headings, not from extracted
+    # cells, so declaring the eleven-sector scope adds no trust in the numbers: each scope's groups are still read,
+    # structurally validated and admitted (or not) on their own.
+    return [GroupIdentity(chart_id=name, period=period, period_basis=basis, scope_id=scope,
                           scope_version=policy['scope_policy']['version'],
-                          entity_ids=entities)
+                          entity_ids=tuple(policy['scope_policy']['scopes'][scope]['entities']))
+            for scope in scopes
             for name in required for period, basis in sorted(found[name])]
 
 

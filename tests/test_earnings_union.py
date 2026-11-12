@@ -160,3 +160,53 @@ def test_next_print_is_strictly_future(monkeypatch):
                         _fh(date(2026, 10, 27), "amc", q=3)], [])
     nxt = ec.next_print("GOOG", as_of=today)
     assert nxt is not None and nxt.date == date(2026, 10, 27)
+
+
+def _finnhub_key(monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(ec, "get_config", lambda: SimpleNamespace(secrets=SimpleNamespace(finnhub_api_key="k")))
+
+
+def test_finnhub_connection_failures_are_retried(monkeypatch):
+    import httpx
+
+    _finnhub_key(monkeypatch)
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(url)
+        if len(calls) < 3:
+            raise httpx.ConnectError("reset")
+        return httpx.Response(200, json={"earningsCalendar": [{"date": "2026-10-28", "hour": "amc"}]},
+                              request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    slept = []
+    rows = ec._finnhub_window("GOOG", date(2026, 10, 1), date(2026, 11, 30), sleep=slept.append)
+    assert len(calls) == 3 and slept == list(ec.FINNHUB_RETRY_SECONDS)
+    assert rows[0]["date"] == date(2026, 10, 28)
+
+
+def test_finnhub_gives_up_after_the_retries(monkeypatch):
+    import httpx
+
+    _finnhub_key(monkeypatch)
+    monkeypatch.setattr(httpx, "get", lambda url, **k: (_ for _ in ()).throw(httpx.ConnectError("reset")))
+    with pytest.raises(httpx.ConnectError):
+        ec._finnhub_window("GOOG", date(2026, 10, 1), date(2026, 11, 30), sleep=lambda _s: None)
+
+
+def test_finnhub_http_errors_are_not_retried(monkeypatch):
+    import httpx
+
+    _finnhub_key(monkeypatch)
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(url)
+        return httpx.Response(429, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    with pytest.raises(httpx.HTTPStatusError):
+        ec._finnhub_window("GOOG", date(2026, 10, 1), date(2026, 11, 30), sleep=lambda _s: None)
+    assert len(calls) == 1

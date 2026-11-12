@@ -369,8 +369,7 @@ def _column_legend(basket) -> list[str]:
               "标准差，**换一层就没有可比性** |"]
     lines.append("| `q→b` | 纯量化排名 → 混合结构因子后的排名 | 两者的差就是结构层改变了什么 |"
                  if basket.structural else "| `rank` | 排名 | 按复合分降序 |")
-    lines += ["| `wt%` | 建议权重（占 NAV） | softmax(comp) × 1/beta × 流动性折价，"
-              "单票 ≤ 本层预算 × 40% |",
+    lines += ["| `wt%` | 建议权重（占 NAV） | softmax(comp) × 1/beta × 流动性折价 |",
               "", "⚠️ 数据取不到的票标 `⚠无数据`：**排最后且不参与定权**，它不是「评价为差」，"
               "是「没有评价」。", "</details>", ""]
     return lines

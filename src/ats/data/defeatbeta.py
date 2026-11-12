@@ -40,9 +40,17 @@ from pathlib import Path
 log = logging.getLogger("ats.data.defeatbeta")
 
 REPO = "defeatbeta/yahoo-finance-data"
-TRANSCRIPTS = (f"https://huggingface.co/datasets/{REPO}/resolve/main/data/"
-               "stock_earning_call_transcripts.parquet")
-NEWS = (f"https://huggingface.co/datasets/{REPO}/resolve/main/data/stock_news.parquet")
+# 2026-11-05: upstream moved every file under `data/US/`. The managed ingestion jobs read
+# the location from config/data/unstructured.yaml (`policy.file`) and kept working; these
+# hard-coded legacy URLs still pointed at `data/<file>` and returned 404, so every live
+# transcript lookup here silently came back empty and callers fell through to web search
+# (which is how other companies' calls were admitted for MSFT and NVDA). One directory
+# constant now, and tests/test_defeatbeta_paths.py pins it to the catalog's `policy.file`.
+DATASET_DIR = "data/US"
+TRANSCRIPTS_FILE = "stock_earning_call_transcripts.parquet"
+NEWS_FILE = "stock_news.parquet"
+TRANSCRIPTS = f"https://huggingface.co/datasets/{REPO}/resolve/main/{DATASET_DIR}/{TRANSCRIPTS_FILE}"
+NEWS = f"https://huggingface.co/datasets/{REPO}/resolve/main/{DATASET_DIR}/{NEWS_FILE}"
 SPEC = f"https://huggingface.co/datasets/{REPO}/resolve/main/spec.json"
 
 
@@ -187,8 +195,10 @@ def dataset_snapshot(config: DefeatBetaConfig | None = None, *,
         log.info("defeatbeta: spec snapshot unavailable (%s)", exc)
         return DatasetSnapshot(checked_at=checked.isoformat(timespec="seconds"),
                                spec_uri=config.spec_uri)
-    file_stamp = ((payload.get("files") or {}).get(dataset_file)
-                  if isinstance(payload, dict) else None)
+    files = (payload.get("files") or {}) if isinstance(payload, dict) else {}
+    # spec.json keys are relative to `data/` ("US/stock_news.parquet" since the move).
+    file_stamp = (files.get(f"{DATASET_DIR.removeprefix('data/')}/{dataset_file}")
+                  or files.get(dataset_file))
     updated = _parse_timestamp(file_stamp) or _find_snapshot_timestamp(payload)
     lag = max(0.0, (checked - updated).total_seconds() / 3600) if updated else None
     return DatasetSnapshot(
@@ -232,7 +242,10 @@ def fetch(symbol: str, *, fiscal_year: int | None = None,
         con = _connect(config.transcripts_uri)
         row = con.execute(sql, args).fetchone()
     except Exception as exc:  # noqa: BLE001 - third-party mirror; degrade, never break
-        log.info("defeatbeta: query failed for %s (%s)", sym, exc)
+        # Loud on purpose: a query failure (404 after an upstream move, outage) is not
+        # "no transcript", and logging it at INFO hid a dead source for a month.
+        log.error("defeatbeta: transcript query FAILED for %s (%s) — not the same as no "
+                  "transcript; check the dataset path", sym, exc)
         return None
     if not row:
         log.info("defeatbeta: no transcript for %s%s", sym,

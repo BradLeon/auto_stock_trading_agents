@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
@@ -31,8 +32,72 @@ from ..schemas.portfolio import ExposureBreakdown, PortfolioSnapshot, Position
 log = logging.getLogger("ats.broker")
 
 
+# Message prefix of a failed connection (TWS not running, not logged in, API off). The Clerk tells this apart
+# from a broker that answered but cannot return old data: nothing is known about the windows in the first case.
+UNREACHABLE_MARK = "cannot reach IBKR"
+
+
+
+GREEKS_WAIT_SECONDS = 10.0
+
+
+def _with_exchange(contract, exchange: str = "SMART"):
+    """A copy of `contract` with an exchange, so a market-data request for it is accepted."""
+    import copy
+
+    if getattr(contract, "exchange", ""):
+        return contract
+    routed = copy.copy(contract)
+    routed.exchange = exchange
+    return routed
+
 class IBKRUnavailable(RuntimeError):
     """Raised when TWS/Gateway cannot be reached or the API is disabled."""
+
+
+# ib_async waits forever on a blocking request unless RequestTimeout is set, and TWS may simply never
+# answer one (reqCompletedOrders did not on 2026-11-01). The ledger reads below must fail, not hang.
+LEDGER_READ_TIMEOUT_SECONDS = 30.0
+
+# A BidAsk tick-by-tick subscription only pushes when the quote changes, so a thin pre-market can stay silent for
+# seconds (2026-11-03 04:07 ET: NVDA gave nothing in 2 s on 4 of 4 tries). The wait ends at the first tick.
+EXECUTION_QUOTE_WAIT_SECONDS = 10.0
+
+
+def _bounded(ib, what: str, call):
+    """Run one blocking ledger read with a deadline; no answer in time is `IBKRUnavailable`.
+
+    The message deliberately avoids "broker unavailable": the Clerk reads that phrase as "TWS cannot be
+    reached" and registers permanent reconciliation gaps for it. One unanswered request is not that."""
+    ib.RequestTimeout = LEDGER_READ_TIMEOUT_SECONDS
+    try:
+        return call()
+    except TimeoutError as exc:
+        raise IBKRUnavailable(
+            f"{what} request got no answer from TWS within {LEDGER_READ_TIMEOUT_SECONDS:g}s (timed out)") from exc
+
+
+# client ids held by connections open in THIS process right now. The pid offset keeps
+# processes apart; this keeps concurrent connections inside one process apart (the
+# Dispatcher runs Technical, Chief and Clerk in one process, possibly at once).
+_LEASED_IDS: set[int] = set()
+_LEASE_LOCK = threading.Lock()
+_LEASE_STEP = 100        # outside the base+1..base+80 range other processes derive from their pid
+
+
+def _lease_client_id(preferred: int) -> int:
+    """Take `preferred` if no open connection in this process holds it, else the next free step."""
+    with _LEASE_LOCK:
+        candidate = preferred
+        while candidate in _LEASED_IDS:
+            candidate += _LEASE_STEP
+        _LEASED_IDS.add(candidate)
+        return candidate
+
+
+def _release_client_id(client_id: int) -> None:
+    with _LEASE_LOCK:
+        _LEASED_IDS.discard(client_id)
 
 
 def _now() -> datetime:
@@ -52,9 +117,12 @@ class IBKRBroker:
         # second connection kick the first (IBKR error 326 "in use" + 1100
         # "connectivity lost") and drop orders mid-execution. An explicit client_id
         # (tests / pinned callers) still wins; otherwise offset the config base by
-        # the pid so concurrent connections never collide. Same id within a process
-        # (get_fills must see place_orders' fills).
+        # the pid so concurrent connections never collide. Within a process the same
+        # preferred id is reused by consecutive connections (get_fills must see
+        # place_orders' fills); a connection opened while another one still holds it
+        # leases the next free id instead (see `session`).
         base = br.client_id or s.ibkr_client_id or 1
+        self._pinned_client_id = client_id is not None
         self.client_id = client_id if client_id is not None else base + (os.getpid() % 80) + 1
         self.sector_by_symbol = sector_by_symbol or {}
         self._ib = None
@@ -70,11 +138,15 @@ class IBKRBroker:
             raise IBKRUnavailable("ib_async not installed (pip install ib_async)") from exc
 
         ib = IB()
+        leased = None if self._pinned_client_id else _lease_client_id(self.client_id)
+        client_id = self.client_id if leased is None else leased
         try:
-            ib.connect(self.host, self.port, clientId=self.client_id, timeout=timeout)
+            ib.connect(self.host, self.port, clientId=client_id, timeout=timeout)
         except Exception as exc:  # noqa: BLE001
+            if leased is not None:
+                _release_client_id(leased)
             raise IBKRUnavailable(
-                f"cannot reach IBKR at {self.host}:{self.port} (is TWS running with API enabled?): {exc}"
+                f"{UNREACHABLE_MARK} at {self.host}:{self.port} (is TWS running with API enabled?): {exc}"
             ) from exc
         self._ib = ib
         try:
@@ -82,6 +154,8 @@ class IBKRBroker:
         finally:
             ib.disconnect()
             self._ib = None
+            if leased is not None:
+                _release_client_id(leased)
 
     # --- reads ----------------------------------------------------------- #
     def get_stock_execution_metadata(self, symbol: str, *, currency: str) -> dict:
@@ -102,20 +176,28 @@ class IBKRBroker:
                     "size_increment": float(detail.sizeIncrement),
                     "min_tick": float(detail.minTick)}
 
-    def get_execution_quote(self, symbol: str, *, currency: str, metadata: dict) -> dict:
-        """BidAsk ticks carry SERVER time; ticker.time is only local receipt time."""
+    def get_execution_quote(self, symbol: str, *, currency: str, metadata: dict, venue: str = "regular") -> dict:
+        """BidAsk ticks carry SERVER time; ticker.time is only local receipt time.
+
+        `venue="overnight"` reads the OVERNIGHT contract and refuses unless the contract's own trading hours say the
+        session is open now: IBKR, not a rule in this code, knows about holidays and early closes."""
         from ib_async import Stock
 
+        exchange = {"regular": "SMART", "overnight": "OVERNIGHT"}[venue]
         with self.session() as ib:
-            contracts = ib.qualifyContracts(Stock(symbol, "SMART", currency))
+            contracts = ib.qualifyContracts(Stock(symbol, exchange, currency))
             if len(contracts) != 1 or contracts[0].symbol != symbol \
                     or contracts[0].currency != currency:
                 raise IBKRUnavailable("execution_instrument_mismatch")
             contract = contracts[0]
+            if venue == "overnight":
+                details = ib.reqContractDetails(contract)
+                if len(details) != 1 or not trading_hours_open(details[0].tradingHours, details[0].timeZoneId, _now()):
+                    raise IBKRUnavailable("overnight_session_closed")
             ticker = ib.reqTickByTickData(contract, "BidAsk", 0, False)
             tick = None
             try:
-                for _ in range(20):
+                for _ in range(round(EXECUTION_QUOTE_WAIT_SECONDS / 0.1)):
                     ib.sleep(0.1)
                     if ticker.tickByTicks:
                         tick = ticker.tickByTicks[-1]
@@ -125,7 +207,7 @@ class IBKRBroker:
                 return {**metadata, "source": "ibkr:tick_by_tick_bid_ask",
                         "source_as_of": tick.time, "queried_at": _now(),
                         "price_kind": "bid_ask", "bid": tick.bidPrice, "ask": tick.askPrice,
-                        "session": "regular", "market_data_mode": (
+                        "session": "overnight" if venue == "overnight" else "regular", "market_data_mode": (
                             "live" if ticker.marketDataType == 1 else "delayed_or_unknown"),
                         "adjusted": False, "source_precision": "tick"}
             finally:
@@ -226,15 +308,28 @@ class IBKRBroker:
             return
         try:
             tickers = []
+            requested = []
             for pos, c in opt_contracts:
                 try:
+                    # A contract read from the account's holdings carries no `exchange`, and IBKR refuses a
+                    # market-data request without one ("Please enter exchange", error 321) — which used to
+                    # leave every option on the Black-Scholes fallback. SMART routes the request.
+                    c = _with_exchange(c)
                     t = ib.reqMktData(c, "106", False, False)
                     tickers.append((pos, t))
+                    requested.append(c)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("reqMktData greeks failed for %s: %s", pos.symbol, exc)
             if not tickers:
                 return
-            ib.sleep(4.0)   # let streaming modelGreeks ticks land
+            # Wait for the streaming modelGreeks ticks, up to a deadline, and stop as soon as every option has
+            # them. A fixed short wait sometimes left one option without greeks, which silently fell back to
+            # Black-Scholes (delta -1.0 for a deep in-the-money put) and moved the risk numbers between runs.
+            for _ in range(round(GREEKS_WAIT_SECONDS / 0.25)):
+                ib.sleep(0.25)
+                if all(getattr(getattr(t, "modelGreeks", None), "delta", None) is not None
+                       for _, t in tickers):
+                    break
             for pos, t in tickers:
                 mg = getattr(t, "modelGreeks", None)
                 if mg is None:
@@ -249,13 +344,19 @@ class IBKRBroker:
                 pos.iv = _fnum(getattr(mg, "impliedVol", None))
                 pos.underlying_price = _fnum(getattr(mg, "undPrice", None))
                 pos.greeks_source = "ibkr"
-            for _, c in opt_contracts:
+            for c in requested:
                 try:
                     ib.cancelMktData(c)
                 except Exception:  # noqa: BLE001
                     pass
         except Exception as exc:  # noqa: BLE001
             log.warning("option greeks fetch skipped: %s", exc)
+
+    def exchange_rates(self) -> tuple[str, dict[str, float]]:
+        """(base currency, ExchangeRate by currency): base-currency units per one unit, read from the account."""
+        with self.session() as ib:
+            base, rates, _ = _account_value_context(list(ib.accountSummary()))
+        return base, rates
 
     def get_pnl(self, account: str = "") -> dict:
         """Account-level P&L: {daily_pnl, unrealized_pnl, realized_pnl}. 0-filled on miss."""
@@ -278,14 +379,28 @@ class IBKRBroker:
 
     def get_fills(self) -> list[dict]:
         """Executed fills with per-trade realized P&L (IBKR's authoritative source)."""
+        from ..journal.episodes import contract_fields
+        from ..trader import fx
+
         out: list[dict] = []
         with self.session() as ib:
-            ib.reqExecutions()
+            _bounded(ib, "executions", ib.reqExecutions)
             ib.sleep(1.5)
+            # The account's current ExchangeRate, read in the same session, is the capture-time rate for a fill whose
+            # statement rate is not known yet (an estimate; the Flex back-fill later replaces it with the trade's own).
+            try:
+                base, rates, _ = _account_value_context(list(ib.accountSummary()))
+            except Exception as exc:  # noqa: BLE001 - fills must still be recorded without a rate
+                log.warning("fill currency rates unavailable: %s", exc)
+                base, rates = "USD", {}
             for f in ib.fills():
                 ex, cr = f.execution, f.commissionReport
                 rp = getattr(cr, "realizedPNL", None)
+                fields = contract_fields(f.contract)
+                rate = fx.usd_rate(fields.get("currency") or "", base, rates)
                 out.append({
+                    **fields,
+                    **({"fx_to_usd": rate, "fx_source": "usd" if rate == 1.0 else "ibkr_live"} if rate else {}),
                     "exec_id": ex.execId, "symbol": f.contract.symbol,
                     "side": ex.side, "shares": float(ex.shares), "price": float(ex.price),
                     "time": ex.time.isoformat() if ex.time else "",
@@ -310,7 +425,7 @@ class IBKRBroker:
         """
         out: list[dict] = []
         with self.session() as ib:
-            ib.reqCompletedOrders(apiOnly=False)
+            _bounded(ib, "completed orders", lambda: ib.reqCompletedOrders(apiOnly=False))
             ib.sleep(1.5)
             for t in list(ib.trades()) + list(getattr(ib, "completedTrades", lambda: [])()):
                 st, o = t.orderStatus, t.order
@@ -498,7 +613,10 @@ class IBKRBroker:
                 entry.error = f"action {decision.action!r} places no order"
                 self._last_trades.append(None)
                 return entry
-            contract = Stock(decision.symbol, "SMART", "USD")
+            venue = (decision.execution_basis or {}).get("venue", "regular")
+            if venue == "overnight" and not (decision.order_type == "limit" and decision.limit_price):
+                raise ValueError("overnight_order_requires_limit")
+            contract = Stock(decision.symbol, "OVERNIGHT" if venue == "overnight" else "SMART", "USD")
             if not ib.qualifyContracts(contract):
                 # Never send an order on an unverified contract. Error 200 on a
                 # normal ticker usually means TWS lost its IB-server link
@@ -563,6 +681,24 @@ class IBKRBroker:
                          caller="IBKRBroker._submit", detail="cycle_id is required")
         return hashlib.sha256(json.dumps(
             [cycle_id, revision_no, seq]).encode()).hexdigest()
+
+
+def trading_hours_open(hours: str, timezone_id: str, point) -> bool:
+    """Is `point` inside one of IBKR's `tradingHours` segments ("20261105:2000-20261106:0350;20261107:CLOSED;...")?"""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo({"US/Eastern": "America/New_York"}.get(timezone_id, timezone_id or "America/New_York"))
+    local = point.astimezone(zone).replace(tzinfo=None)
+    for segment in (hours or "").split(";"):
+        if "CLOSED" in segment or "-" not in segment:
+            continue
+        try:
+            start, end = (datetime.strptime(part, "%Y%m%d:%H%M") for part in segment.split("-"))
+        except ValueError:
+            continue
+        if start <= local < end:
+            return True
+    return False
 
 
 def order_ref(cycle_id: str, revision_no: int, seq: int, symbol: str) -> str:

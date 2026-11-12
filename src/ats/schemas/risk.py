@@ -20,7 +20,7 @@ class RiskGuardrails(BaseModel):
     max_sector_pct: float = Field(0.40, gt=0, le=1)
     max_gross_leverage: float = Field(1.0, gt=0)
     max_single_order_usd: float = Field(25000, gt=0)
-    cash_floor_pct: float = Field(0.05, ge=0, le=1)
+    cash_floor_pct: float = Field(0.05, ge=-1, le=1)   # negative = may borrow (leverage > 1x)
     no_add_list: list[str] = Field(default_factory=list, description="symbols not allowed to add")
     forced_trim: list[str] = Field(default_factory=list, description="symbols that must be reduced")
     notes: str = ""
@@ -51,8 +51,11 @@ class LayerExposure(BaseModel):
     key: str
     label: str = ""
     weight: float = 0.0
-    cap: float | None = None
+    cap: float | None = None          # the EFFECTIVE ceiling (static × allocation utilization)
     breached: bool = False
+    static_cap: float | None = None   # risk.yaml ceiling, never exceeded
+    allocation: str = ""              # 超配/标配/低配/清仓 behind `cap`; "" = static applies
+    cap_source: str = "static"        # allocation | static_no_allocation | static_stale
     # True for a layer_group row — a ceiling over several layers at once, added so a
     # SPLIT cannot loosen a guard by turning one cap into two independent ones.
     is_group: bool = False

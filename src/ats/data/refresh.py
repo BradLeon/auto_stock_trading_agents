@@ -135,6 +135,34 @@ class RefreshPlan:
     max_run_seconds: int
 
 
+def _resolve_entities(job_id: str, entities: Any) -> list[str]:
+    """A job's company list: a literal list, or `{from_pead: [...], exclude: [...]}` (see config.pead_selection).
+
+    An excluded name that has left the lists is ignored there (one stale line must not stop every refresh job)
+    and reported by `stale_exclusions` / its test.
+    """
+    from ..config import pead_selection
+
+    return pead_selection(entities, where=f"{job_id}: entities")
+
+
+def stale_exclusions(path: str | Path = DEFAULT_CONFIG) -> dict[str, list[str]]:
+    """Per job, the `entities.exclude` names no longer in the PEAD lists it selects from."""
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    stale = {}
+    for section in ("structured", "unstructured", "derived"):
+        for job_id, body in ((raw.get(section) or {}).get("jobs") or {}).items():
+            entities = (body or {}).get("entities")
+            if isinstance(entities, dict):
+                from ..config import pead_selection
+
+                selected = set(pead_selection({"from_pead": entities.get("from_pead")}, where=job_id))
+                names = sorted({str(s).upper() for s in entities.get("exclude") or []} - selected)
+                if names:
+                    stale[job_id] = names
+    return stale
+
+
 def _expand_jobs(section: dict[str, Any]):
     """Yield (job_id, body, entity). A job with `entities:` becomes one job per entity.
 
@@ -146,6 +174,8 @@ def _expand_jobs(section: dict[str, Any]):
     for job_id, body in (section.get("jobs") or {}).items():
         body = dict(body or {})
         entities = body.pop("entities", None)
+        if entities:
+            entities = _resolve_entities(job_id, entities)
         entity_sources = body.pop("entity_sources", None) or {}
         if not entities:
             yield job_id, body, ""
@@ -746,7 +776,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "succeeded" and refs["published"]:
                 status, reason = "succeeded", ""
             elif action in {"document-ingest", "fixed-ingest"} and packet_status == "succeeded" and refs["runs"] and not refs["published"] and \
-                    job.sources == ("defeatbeta_sec_filing_index",):
+                    job.sources in {("defeatbeta_sec_filing_index",), ("sec_edgar_submissions_index",)}:
                 status, reason = "succeeded", "index_metadata_only"
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "succeeded":
                 status, reason = "quarantined", "article_publication_reference_missing"

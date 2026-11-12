@@ -3,8 +3,8 @@
 Phase B (design D6/D7/D15): risk reviews a WHOLE revision and returns a
 structured verdict — it never rewrites a proposal. Any cap the proposal
 exceeds becomes a violation plus an `allowed_boundary` the Chief can use to
-draft the next revision. `pre_trade()` remains only as a deprecated adapter
-for call sites not yet migrated to the authorization-gate path.
+draft the next revision. The old clipping-shaped adapter `pre_trade()` is retired
+(switch-trade r5 task 7.5); `review_revision()` is the only entry.
 
 The evaluation unit is the entire revision: orders are projected sequentially
 onto a working copy, so cross-order rules (industry-layer totals, correlation
@@ -48,11 +48,10 @@ def ruleset_version() -> str:
     """
     import hashlib
 
-    from ..config import get_config, load_risk_policy
+    from . import inputs
 
-    rc = get_config().app.risk
-    policy = load_risk_policy()
-    body = rc.model_dump_json() + "\n" + policy.model_dump_json()
+    ruleset = inputs.rules()
+    body = ruleset.limits.model_dump_json() + "\n" + ruleset.policy.model_dump_json()
     return "risk-" + hashlib.sha1(body.encode()).hexdigest()[:12]
 
 
@@ -116,9 +115,9 @@ def _event_notional_boundary(decision: TradeDecision, portfolio: PortfolioSnapsh
     """Max notional the event-loss budget accepts for an increasing order."""
     if decision.notional_usd is None:
         return None
-    from ..config import load_instrument_risk_registry
+    from . import inputs
 
-    meta = load_instrument_risk_registry().resolve(decision.symbol)
+    meta = inputs.rules().instruments.resolve(decision.symbol)
     em = (event_data.get(decision.symbol, {}).get("expected_move_pct")
           or event_data.get(meta.risk_symbol, {}).get("expected_move_pct"))
     # An action outside the vocabulary must fail the check, not fall through as
@@ -140,6 +139,7 @@ def review_revision(
     review: RiskReview | None = None, apply_caps: bool = True,
     llm_comment: str | None = None,
     cycle_id: str = "",
+    uncovered_fundamental: frozenset[str] | set[str] = frozenset(),
 ) -> DecisionRiskReview:
     """Review one revision without modifying it. Deterministic fields decide.
 
@@ -148,7 +148,7 @@ def review_revision(
     before/after the merged consequence. Narrative text (`llm_comment`) is
     recorded verbatim and can never flip the verdict (§5.2 第 4 条).
     """
-    from ..config import get_config, load_risk_policy
+    from . import inputs
 
     notes: list[str] = []
     violations: list[RiskViolation] = []
@@ -179,8 +179,8 @@ def review_revision(
             basis=ReviewBasis(portfolio_snapshot_id="", market_as_of="",
                               ruleset_version=ruleset_version()))
 
-    rc = get_config().app.risk
-    policy = load_risk_policy()
+    ruleset = inputs.rules()
+    rc, policy = ruleset.limits, ruleset.policy
     event_data = event_data or {}
     working_pf, working_review, effective_state = _baseline(
         portfolio, sector=sector, event_data=event_data, review=review)
@@ -205,8 +205,11 @@ def review_revision(
             try:
                 with price_request("risk", orders, cycle_id=cycle_id or portfolio_snapshot_id(portfolio),
                                    purpose="preapproval_normalization", currency=portfolio.base_currency):
-                    q = read_price("risk", decision, overnight=bool(
-                        decision.execution_basis.get("defer_to_regular_session")))
+                    # The quote stored on the revision, reviewed again (e.g. at approval): its binding is checked
+                    # (hash below), not how long ago it was taken; the execution check reads a fresh one.
+                    q = read_price("risk", decision, as_reference=True, overnight=bool(
+                        decision.execution_basis.get("defer_to_regular_session")),
+                        venue=decision.execution_basis.get("venue", "regular"))
                 if quote_ref(q) != decision.execution_basis.get("quote_ref"):
                     raise ValueError("review_quote_hash_mismatch")
                 quote_stamps.append(q.source_as_of)
@@ -224,6 +227,15 @@ def review_revision(
                 rule_id="action_vocabulary", entity=sym, actual=str(decision.action),
                 detail=str(exc)))
             _reject(sym, action, [str(exc)])
+            continue
+
+        # A name the cycle states as having no current Fundamental research may be held or reduced, never opened or
+        # added to: the research that would justify new exposure is not there (it is not read as "no opinion").
+        if sym.upper() in uncovered_fundamental and is_increasing_action(decision.action):
+            violations.append(RiskViolation(
+                rule_id="fundamental_uncovered", entity=sym, severity="hard",
+                detail="本轮该标的没有新近基本面研究，只允许持有或减仓，不得新开或加仓"))
+            _reject(sym, action, ["fundamental_uncovered: 无新近基本面研究，只允许持有或减仓"])
             continue
 
         # Cap boundaries: report, never rewrite. The binding rule is whichever
@@ -368,44 +380,6 @@ def review_revision(
             market_as_of=(min(quote_stamps).isoformat() if quote_stamps else
                           working_review.as_of.isoformat()),
             ruleset_version=ruleset_version()))
-
-
-# --------------------------------------------------------------------------- #
-# Deprecated transitional adapter (design D6)
-# --------------------------------------------------------------------------- #
-def pre_trade(decisions: list[TradeDecision], portfolio: PortfolioSnapshot | None, *,
-              sector: str = "ai_hardware", event_data: dict[str, dict] | None = None,
-              review: RiskReview | None = None, apply_base: bool = True
-              ) -> tuple[list[TradeDecision], list[str], RiskReview | None]:
-    """DEPRECATED: old clipping-shaped contract over the new read-only review.
-
-    Kept ONLY so call sites not yet migrated (graph/chief, graph/pead,
-    runtime/cli) keep running during the transition — it is registered for
-    retirement in `config/workflow/legacy_retirement.yaml` and its exit
-    condition is "all call sites consume `review_revision` results". The
-    returned decisions are the ORIGINAL, unmodified objects: risk no longer
-    clips anything. Orders that fail are absent from the approved list, with
-    the boundary they exceeded recorded in the notes.
-    """
-    import logging
-
-    logging.getLogger("ats.risk.checks").warning(
-        "pre_trade() is deprecated; migrate call sites to review_revision()")
-    # Legacy contract point: without a portfolio the old path skipped checks.
-    # The adapter preserves that for un-migrated call sites; the NEW entry
-    # (`review_revision`) fails closed instead. The skip dies with the adapter.
-    if portfolio is None:
-        return decisions, ["(no live portfolio — risk checks skipped)"], None
-    result = review_revision(
-        decisions, portfolio, sector=sector, event_data=event_data,
-        review=review, apply_caps=apply_base)
-    approved = [d for d, ov in zip(decisions, result.order_verdicts)
-                if ov.verdict == "approved"]
-    initial_review: RiskReview | None = None
-    if portfolio is not None:
-        _, initial_review, _ = _baseline(portfolio, sector=sector,
-                                         event_data=event_data, review=review)
-    return approved, result.notes, initial_review
 
 
 def _supplied_state(review: RiskReview | None) -> str:

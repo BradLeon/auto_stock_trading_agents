@@ -242,6 +242,17 @@ def _factset_section(review: MacroReview) -> list[str]:
     return lines
 
 
+def _completeness_notice(review: MacroReview) -> list[str]:
+    """Say up front when the model's answer is not whole, so an empty section is not read as "nothing to say"."""
+    missing = "、".join(review.llm_missing_fields) or "无"
+    if review.llm_truncated:
+        return [(f"> ⚠️ **本期不完整**：模型输出达到 max_tokens 上限被截断，以下字段为空：{missing}。"
+                 "是否重跑由人决定。"), ""]
+    if review.llm_missing_fields:
+        return [f"> ⚠️ 模型本期未填写：{missing}。", ""]
+    return []
+
+
 def render(review: MacroReview, cfg: MacroConfig) -> str:
     lines = [
         f"# 🤖 宏观分析 — {cfg.label}（{review.as_of:%Y-%m-%d}）",
@@ -250,6 +261,7 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
         "> 📐 标记的章节由确定性代码算出；其余为模型解读。",
         "",
     ]
+    lines += _completeness_notice(review)
     lines += _delta_section(review)
     lines += _deterministic_section(review)
     lines += _factset_section(review)
@@ -264,11 +276,12 @@ def render(review: MacroReview, cfg: MacroConfig) -> str:
         "",
         "## 板块倾斜（核心）",
         "",
-        "| 板块/行业 | 观点 | 理由 |",
-        "|---|---|---|",
+        "| 板块/行业 | 观点 | 代表 ETF | 理由 |",
+        "|---|---|---|---|",
     ]
     for t in review.sector_tilts:
-        lines.append(f"| {t.sector} | **{t.stance}** | {t.rationale} |")
+        etf = f"{t.etf} {t.etf_name}".strip() if t.etf else "—"
+        lines.append(f"| {t.sector} | **{t.stance}** | {etf} | {t.rationale} |")
 
     lines += ["", "## 资产含义", review.asset_implications or "—", "", "## 主题评估", ""]
     if review.themes:

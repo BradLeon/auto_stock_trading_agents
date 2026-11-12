@@ -342,7 +342,14 @@ class DataCatalog:
                           bool(policy.get("fallback") == "none") and
                           bool(policy.get("retention")) and bool(policy.get("usage")),
                           "fixed_source_policy_missing")
-                    if kind in {"fixed_index", "fixed_transcript"}:
+                    if policy.get("revision_model") == "official_live_listing":
+                        # The issuer's own filing list on EDGAR has no pinned revision: it IS the original. It may
+                        # only point at sec.gov and only ever yields discovery metadata, never a body.
+                        check(f"unstructured:{source_id}:official_listing",
+                              kind == "fixed_index" and policy.get("allowed_filing_host") == "www.sec.gov" and
+                              policy.get("source_role") == "discovery_metadata_only",
+                              "official_listing_contract_invalid")
+                    elif kind in {"fixed_index", "fixed_transcript"}:
                         check(f"unstructured:{source_id}:immutable_revision",
                               bool(policy.get("immutable_revision_required")) and
                               bool(policy.get("repo")) and bool(policy.get("file")) and

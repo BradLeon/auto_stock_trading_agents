@@ -161,7 +161,6 @@ SectorReview → ① sqlite sector_reviews 表（payload 内含 layer_verdicts�
 | `src/ats/agents/sector/report.py` | Obsidian markdown 渲染/写入 |
 | `src/ats/agents/sector/viz.py` | 可交互 HTML 看板：`build_bundle()` 数据装配 + `render_html()`/`write_html()` |
 | `src/ats/agents/sector/viz_assets.py` | 看板的 CSS/JS 常量 |
-| `src/ats/agents/sector/context.py` | 注回 PEAD 的 prep_block/monitor_hint |
 | `src/ats/agents/sector/cross_section.py` | 截面选股：层内排序 + 权重分配（确定性，无 LLM） |
 | `src/ats/agents/sector/structure.py` | 结构层：KB 定性评审 → tech_tenor / moat_pricing |
 | `src/ats/skills/sector-analyst/SKILL.md` | 合成提示词（方法论+校准纪律） |
@@ -228,9 +227,8 @@ cohort 内**把几个因子标准化成 z 分（Barra-lite），复合成排名�
 **cap 是天花板，不是分配**：合计 135% 正常——八层不会同时满仓，还有总杠杆、现金下限、
 单票上限、相关簇上限管着。六层时合计也是 115%。
 
-> ⚠️ **单票层的实际上限是 `cap × 40%`**（`single_name_cap_frac`）：单票拿不到超过层上限
-> 40% 的仓位，而它是唯一的票，溢出无处可去，**剩下 60% 不分配**。所以 L7 给到 20% 的含义
-> 是「允许 TSM 占到 8% NAV」，不是「它比互联层重要」。别把 `weight_cap` 当成单票层会用满的数。
+> ⚠️ 2026-11-06 起 **不再有「单票 ≤ 层 cap × 40%」**：单票上限只由风控 `max_position_pct`（35%）管，
+> 单票层的唯一一只票可以占满本层预算，所以 L7 给到 20% 的含义就是「允许 TSM 占到 20% NAV」。
 
 ### 跨层上限（`layer_groups`）—— 机制保留，`ai_hardware` 已取消
 

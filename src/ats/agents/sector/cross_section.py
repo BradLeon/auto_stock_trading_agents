@@ -224,12 +224,13 @@ def budgets_for(cfg, allocations: dict) -> dict:
 
 
 def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,
-                single_name_cap_frac: float = 0.40, weights: dict | None = None) -> list[FactorRow]:
+                weights: dict | None = None) -> list[FactorRow]:
     """Composite rank + risk-budgeted weights summing to `layer_cap` (fraction of
     NAV). `weights` selects the factor set (QUANT_WEIGHTS default, BLENDED_WEIGHTS
     when the structure overlay ran). Names lacking core data are flagged
-    (data_ok=False), ranked last, and excluded from sizing. single_name_cap_frac
-    caps any name at that fraction OF the layer cap."""
+    (data_ok=False), ranked last, and excluded from sizing. No per-name fraction of the
+    layer cap: the single-name ceiling is risk.yaml `max_position_pct` (2026-11-06 retired the
+    old "name <= layer cap x 40%" rule), so a lone name may take the whole layer budget."""
     if not rows:
         return rows
     weights = weights or QUANT_WEIGHTS
@@ -267,18 +268,6 @@ def rank_cohort(rows: list[FactorRow], *, layer_cap: float = 0.10,
     for r in rows:
         r.weight = layer_cap * raw.get(r.symbol, 0.0) / total
 
-    # single-name cap (one redistribution pass among the sized names)
-    cap = layer_cap * single_name_cap_frac
-    over = {r.symbol: r.weight - cap for r in sized if r.weight > cap}
-    if over:
-        spill = sum(over.values())
-        room = {r.symbol: cap - r.weight for r in sized if r.weight < cap}
-        room_tot = sum(room.values()) or 1.0
-        for r in sized:
-            if r.symbol in over:
-                r.weight = cap
-            elif r.symbol in room:
-                r.weight += spill * room[r.symbol] / room_tot
     return rows
 
 
@@ -449,7 +438,7 @@ def run_layer(sector_name: str, layer_key: str, *, persist: bool = True,
             review = store.latest_sector_review(sector_name)
             if review is None:
                 # The basket has nowhere to live: `SectorReview` is its only home, and
-                # `_basket_lines` reads it from there. Silently dropping it made the
+                # the sector report reads it from there. Silently dropping it made the
                 # whole cross-section look like it had never run.
                 log.warning("basket for %s/%s discarded — no sector review to attach to; "
                             "run `ats sector review %s` first",
@@ -510,7 +499,7 @@ def render_report(rows: list[FactorRow], layer_key: str, layer_label: str,
         "## 方法",
         "- 因子（组内 z-score 标准化）与权重：" + "、".join(
             f"{FACTOR_LABELS[k]} {w:.0%}" for k, w in weights.items()) + "。",
-        "- 配权 = softmax(composite)×(1/beta)×小盘流动性 haircut，单票 ≤ 层cap×40%；数据不足者排除、不占额度。",
+        "- 配权 = softmax(composite)×(1/beta)×小盘流动性 haircut，单票不再按层cap截断（只受风控单票上限管）；数据不足者排除、不占额度。",
         "- `cohort_extra` 同业（如 MRVL）参与排名但不占本层额度（其风控归属在别层）。",
     ]
     if structural:

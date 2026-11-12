@@ -1,0 +1,36 @@
+# Apple (AAPL) — PEAD config. 用户关注、但与 AI 硬件链相关性低的 target（2026-11-04 新入）。
+# 不注入 AI 半导体行业背景：不进链证据（schedules.yaml chain_evidence_daily 排除），基准用科技 ETF，
+# 信号链只放直接业务关系。财年 9 月底结：10 月底/11 月初报 FQ4，1 月底报 FQ1（假日季）。
+# 叙事依据（2026-11 网络检索，二手来源为主）：FQ4 FY2026 指引营收同比 +9–11%、毛利率 47–48%，iPhone 预期中双位数增长；
+# 存储涨价是最大成本逆风（管理层称"百年一遇"，已为此上调部分 Mac/iPad 售价）；供给紧张影响 iPhone/Mac/iPad；
+# 2026-11-02 是 John Ternus 任 CEO 后首次财报。
+
+symbol: AAPL
+company_name: "Apple"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+sector_etf: XLK
+benchmark: QQQ
+run_up_warn_pct: 4.0          # 超大盘、波动低
+long_threshold: 1.2           # megacap 高关注度，门槛抬高
+
+# 权重之和 = 1.00。存储涨价让毛利率指引成为本轮最关键的读数。
+scorecard_dims:
+  - {key: gross_margin,    weight: 0.25, label: 毛利率及次季指引（存储成本传导）}
+  - {key: forward_guide,   weight: 0.20, label: 次季营收指引（假日季 iPhone、供给约束）}
+  - {key: iphone,          weight: 0.20, label: iPhone 营收与新机周期（含大中华区）}
+  - {key: services,        weight: 0.15, label: 服务营收增速与毛利率}
+  - {key: revenue,         weight: 0.10, label: 营收超预期}
+  - {key: capital_return,  weight: 0.05, label: 回购/分红}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：新 CEO、AI 功能与定价措辞}
+
+signal_chain:
+  - {symbol: TSM,   role: upstream}     # A/M 系列芯片代工
+  - {symbol: MU,    role: upstream}     # DRAM/NAND 采购：存储涨价直接压毛利
+  - {symbol: SNDK,  role: upstream}     # NAND 采购
+  - {symbol: GOOG,  role: peer}         # 搜索分成与 Gemini 合作；Android 竞争
+
+narrative_seed: >
+  超大盘消费科技公司，估值锚在 iPhone 换机周期与高毛利服务的稳定增长；
+  本轮主线是存储价格暴涨对毛利率的挤压，以及供给约束对 iPhone/Mac/iPad 出货的影响——毛利率指引比营收 beat 更重要；
+  新 CEO 首次财报，资本回报与 AI 功能（Apple Intelligence）推进的表态会被放大解读；
+  大中华区需求与关税/地缘是额外变量。

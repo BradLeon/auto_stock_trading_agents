@@ -3,6 +3,8 @@
 Resolution order (`fetch`):
   1/2. explicit `source` arg — local file path, or http(s) URL to fetch
   3.   dropped file at var/transcripts/<SYM>_<fiscal>.txt
+  3b.  the platform's admitted transcript of exactly this period (keyed tier or better)
+  3c.  defeatbeta live query (ticker + fiscal period keyed)
   4.   FMP /stable/earning-call-transcript  (paid tier; verified 402 on this key)
   5.   Tavily search of fool.com / investing.com, QUARTER-TARGETED
   6.   a transcript article already in our news feed
@@ -18,16 +20,24 @@ Two hard-won rules govern the auto paths:
     against this quarter's expectations yields a confident fictional miss. So we
     return empty and let the caller fall back or refuse.
 
+A web page is admitted only when its URL or title names the issuer (positive
+identification); a passing mention of the company inside another firm's call is not
+identity (2026-11-05: Seagate and Estee Lauder calls admitted as MSFT, Marvell and
+Ambarella as NVDA, each because the body named the company once).
+
 Manual drops stay authoritative: a clean full transcript in var/transcripts/ beats
 any scrape, and `extract_body` strips the page furniture those saves carry.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 from ..config import REPO_ROOT
+
+log = logging.getLogger("ats.data.transcript")
 
 
 def _slug(fiscal_label: str) -> str:
@@ -150,9 +160,21 @@ def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *,
     # requested issuer.  Treat manual files exactly like automatic candidates for
     # entity and reported-period validation; otherwise a misnamed drop can bypass
     # the very guard that quarantines a web result for the same mistake.
-    claimed_entity = symbol if (
-        structured is not None or admission.mentions_entity(body, symbol, company_name)
-    ) else ""
+    web = source.startswith(("tavily:", "news:"))
+    web_locator = ""
+    if web:
+        web_locator = source[source.index("http"):] if "http" in source else source
+    if structured is not None:
+        identified = True
+    elif web:
+        # Positive identification: the page's own URL must name the issuer AND the
+        # call's opening must too. A body that merely mentions the company is another
+        # firm's call (Seagate/Estee Lauder admitted as MSFT, Marvell/Ambarella as NVDA).
+        identified = (admission.locator_names_entity(web_locator, symbol, company_name)
+                      and admission.transcript_opening_names_entity(body, symbol, company_name))
+    else:
+        identified = admission.mentions_entity(body, symbol, company_name)
+    claimed_entity = symbol if identified else ""
     if structured is not None:
         claimed_period = structured.label
     else:
@@ -192,6 +214,28 @@ def _accepted(symbol: str, fiscal_label: str, text: str, source: str, *,
     return outcome.document.text, source
 
 
+def _admitted_transcript(symbol: str, fiscal_label: str) -> tuple[str, str] | None:
+    """Best platform-admitted transcript of exactly this period, if keyed-or-better."""
+    from . import fiscal
+
+    year, quarter = fiscal.parse_label(fiscal_label)
+    if not (year and quarter):
+        return None
+    try:
+        from .collection.evidence import RANK_KEYED
+        from .products.unstructured import (
+            platform_earnings_document_package, transcript_source_rank)
+
+        package = platform_earnings_document_package(entity=symbol, period=fiscal_label)
+    except Exception as exc:  # noqa: BLE001 - platform read failure falls through to providers
+        log.info("transcript: platform read failed for %s %s (%s)", symbol, fiscal_label, exc)
+        return None
+    item = package.transcript
+    if item is None or not item.text.strip() or transcript_source_rank(item.source) < RANK_KEYED:
+        return None
+    return item.text, item.source
+
+
 def fetch(symbol: str, fiscal_label: str = "", source: str | None = None,
           company_name: str = "", *, store=None) -> tuple[str, str]:
     # 1/2) explicit override
@@ -228,6 +272,14 @@ def fetch(symbol: str, fiscal_label: str = "", source: str | None = None,
     for cached in cached_docs:
         if (cached.source or "").lower().startswith("defeatbeta"):
             return cached.text, cached.source
+
+    # The platform already holds what the managed ingestion jobs admitted (the daily
+    # defeatbeta job, hand-dropped files). Read that before asking any provider: one
+    # collection, every consumer. Only a keyed-or-better tier may short-circuit here —
+    # an admitted web page must not pre-empt the providers below.
+    admitted = _admitted_transcript(symbol, fiscal_label)
+    if admitted is not None:
+        return admitted
 
     # Structured primary source: only an exact, fully resolved fiscal period may enter.
     year, quarter = fiscal.parse_label(fiscal_label)
@@ -294,7 +346,8 @@ def _tavily_search(key: str, query: str) -> list[dict]:
         return []
 
 
-def _pick_candidate(results: list[dict], target: tuple[int | None, int | None]) -> dict | None:
+def _pick_candidate(results: list[dict], target: tuple[int | None, int | None], *,
+                    symbol: str = "", company_name: str = "") -> dict | None:
     """Choose the result that REPORTS `target` (year, quarter).
 
     Selection is by reporting period, with length only as a tie-break. Ranking by
@@ -305,9 +358,15 @@ def _pick_candidate(results: list[dict], target: tuple[int | None, int | None]) 
     expectations produces a confident, entirely fictional miss.
     """
     from . import fiscal
+    from .admission import locator_names_entity
 
+    # Same quarter is not same company: before an issuer's own call is published, a
+    # quarter-targeted query returns other companies' calls for that quarter. When the
+    # caller names the issuer, the result's URL or title must name it too.
     usable = [r for r in results
               if _looks_transcript(r)
+              and (not symbol or locator_names_entity(
+                  f"{r.get('url', '')} {r.get('title', '')}", symbol, company_name))
               and len(r.get("raw_content") or r.get("content") or "") >= _MIN_TRANSCRIPT_CHARS]
     ty, tq = target
     if ty and tq:
@@ -348,7 +407,8 @@ def _from_search(symbol: str, fiscal_label: str = "",
         queries = [f"{symbol} latest earnings call transcript"]
 
     for query in queries:
-        pick = _pick_candidate(_tavily_search(key, query), target)
+        pick = _pick_candidate(_tavily_search(key, query), target, symbol=symbol,
+                               company_name=company_name)
         if pick:
             content = pick.get("raw_content") or pick.get("content") or ""
             return content, f"tavily:{pick.get('url')}"

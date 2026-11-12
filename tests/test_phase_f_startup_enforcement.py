@@ -88,14 +88,6 @@ def test_direct_shadow_plan_dispatch_to_broker_refuses_and_completes(tmp_path):
     assert guard.refusal_rows()
 
 
-def test_cli_shadow_entry_arms_before_any_work(monkeypatch, tmp_path):
-    from ats.runtime import cli
-    monkeypatch.setattr("ats.workflow.shadow_ledger.shadow_attestation",
-                        lambda **kwargs: {"refusal": attempt()})
-    assert cli.main(["shadow", "attest", "--run-id", "probe",
-                     "--order-db", str(tmp_path / "orders.sqlite")]) == 0
-
-
 def test_dispatcher_daemon_environment_arms_before_work(monkeypatch):
     from ats.runtime import dispatcher_daemon
     monkeypatch.setenv("ATS_RUN_MODE", "shadow")
@@ -104,16 +96,15 @@ def test_dispatcher_daemon_environment_arms_before_work(monkeypatch):
     assert guard.refusal_rows()
 
 
-@pytest.mark.parametrize("entry", ["cli", "daemon", "owner", "dispatcher", "isolated"])
+@pytest.mark.parametrize("entry", ["daemon", "owner", "dispatcher", "isolated"])
 def test_missing_prohibition_refuses_each_actual_startup(tmp_path, monkeypatch, entry):
-    from ats.runtime import cli, dispatcher_daemon
+    from ats.runtime import dispatcher_daemon
     from ats.workflow.isolation import isolated_run
     # Simulate a deployment whose installation is ineffective; the real entry
     # must independently assert the capability and stop before task execution.
     monkeypatch.setattr(guard, "install_prohibition", lambda *args, **kwargs: None)
-    if entry == "cli":
-        call = lambda: cli.main(["shadow", "attest", "--run-id", "probe"])
-    elif entry == "daemon":
+    # The CLI entry was `ats shadow attest`, retired with the shadow tools (r5 8.4).
+    if entry == "daemon":
         monkeypatch.setenv("ATS_RUN_MODE", "shadow")
         call = lambda: dispatcher_daemon.start(run_once=True)
     elif entry == "owner":

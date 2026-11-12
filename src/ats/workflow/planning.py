@@ -58,17 +58,22 @@ TASK_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "macro-review": (), "technical-review": (),
 }
 FRESHNESS_SECONDS: dict[str, int] = {
-    # Information and Routine reuse while their data vintage is unchanged, up to 72 hours (user ruling
-    # 2026-10-16, ARCHITECTURE §8.2-5): an unchanged document set or financial snapshot is never re-analysed.
+    # Information and Routine reuse while their data vintage is unchanged (user ruling 2026-10-16,
+    # ARCHITECTURE §8.2-5): an unchanged document set or financial snapshot is never re-analysed. Routine is
+    # capped at 72 hours. Information at 120 hours (user ruling 2026-10-30): a brief must stay usable long
+    # enough for the event review built on it to be read through its window (switch-trade D3-3).
     # Layer and Sector are weekly (Saturday) reviews: reuse needs an unchanged data vintage (Layer: the evidence
     # observation set and knowledge-note versions; Sector: cohort financials, consensus, FactSet, last NYSE
     # session and the eight Layer projection ids). 7 days (one weekly cycle) only caps reuse where the vintage
     # cannot see a change, such as the model or the prompt (10.5, 2026-10-17).
-    "layer-review": 7 * 86_400, "information-brief": 72 * 3_600,
+    "layer-review": 7 * 86_400, "information-brief": 120 * 3_600,
     "sector-review": 7 * 86_400, "fundamental-routine": 72 * 3_600,
     "fundamental-event": 4 * 86_400, "macro-review": 7 * 86_400,
     "technical-review": 24 * 3_600,   # with its market-session vintage: reused within one session (2026-10-16)
 }
+# A model-service outage (connection reset, rate limit) rarely clears in one second. Information fans out one
+# task per target, so its retry waits a couple of minutes (2026-11-02: 10-27 and 10-30 failed twice within 1 s).
+RETRY_BACKOFF_SECONDS: dict[str, float] = {"information-brief": 120.0}
 TIMEOUT_SECONDS: dict[str, int] = {
     # sector-review: the first real run took 21.4 minutes (12 structure-analyst calls alone 13 minutes on DeepSeek,
     # 52 adjudications, one rotation). At the old 1200 s the Dispatcher would cancel the attempt and retry the whole
@@ -155,8 +160,55 @@ def _hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+# `pead.yaml` also lists which companies are covered. Adding or removing a name changes what is planned (which tasks
+# exist), not how any existing company is analysed, so the roster is left out of the file's lineage hash: a roster edit
+# must not make every research output look like it was built from different rules.
+ROSTER_KEYS = ("targets", "observe")
+
+
+# `risk.yaml` mixes two kinds of content. Layer and sector review read only the layer ceilings and the allocation ->
+# utilization table; the account limits, instrument registry, option-survival and directive settings drive the risk
+# gate, never a layer or sector analysis. Hashing the whole file made every limit edit look like new input to all eight
+# layer reviews and the sector review, so the next Chief cycle refused until nine LLM runs were repeated
+# (2026-11-06: raising the single-name limit did exactly that). The lineage hash covers just the sections they read.
+RISK_LINEAGE_KEYS = ("sector_layer_caps", "layer_groups", "layer_utilization")
+
+# Before this tiering the recorded lineage was the digest of the whole file. A section set that was verified identical
+# to the one behind a recorded whole-file digest keeps answering with that digest, so projections built then stay valid
+# without being rebuilt. Key = hash of the sections now; value = the whole-file digest recorded earlier. Verified
+# 2026-11-06 against the committed file at a1c1d80 (sections byte-for-byte equal as data). Add nothing here without
+# that check; it is a statement that the analysis inputs did not change, not a way to silence a mismatch.
+RISK_LEGACY_DIGESTS = {
+    "abf2fc6d67ba1c8c3c678cbb707132030fc002a7767edbc83478fe2a7ccecca8":
+        "d44e615e3ef994a1ab7c0dbc38aea27579f479eb11d2c1a52f66208a00ecbb4d",
+}
+
+
 def _file_hash(path: Path) -> str:
+    if path.name == "risk.yaml":
+        try:
+            doc = _load_yaml(path)
+        except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
+            doc = None
+        if isinstance(doc, dict):
+            sections = _hash({k: doc[k] for k in RISK_LINEAGE_KEYS if k in doc})
+            return RISK_LEGACY_DIGESTS.get(sections, sections)
+    if path.name == "pead.yaml" and path.parent.name != "pead":
+        try:
+            doc = _load_yaml(path)
+        except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
+            doc = None
+        if isinstance(doc, dict):
+            return _hash({k: v for k, v in doc.items() if k not in ROSTER_KEYS})
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def current_config_refs(task_id: str, entity: str, config_dir: str | Path | None = None) -> set[str]:
+    """The `config:` lineage references a projection of `task_id` for one entity would record if it were built now."""
+    root = _config_dir(config_dir)
+    ordered = task_registry().resolve_order((task_id,))
+    return {f"config:config/{path}@{_file_hash(root / path)}"
+            for path in _config_paths(ordered, "", [entity]) if (root / path).exists()}
 
 
 def task_registry() -> TaskRegistry:
@@ -170,7 +222,7 @@ def task_registry() -> TaskRegistry:
             output_schema=schema.role_schema_name(),
             freshness_seconds=FRESHNESS_SECONDS[task_id],
             timeout_seconds=TIMEOUT_SECONDS[task_id], resource_group=policy["resource_group"],
-            retry=RetryPolicy(max_attempts=2, backoff_seconds=1.0,
+            retry=RetryPolicy(max_attempts=2, backoff_seconds=RETRY_BACKOFF_SECONDS.get(task_id, 1.0),
                               retry_on=("timeout", "transient")),
             required_for_decision=True))
     registry = TaskRegistry(specs)
@@ -213,6 +265,37 @@ def _targets(config_dir: Path) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
+FUNDAMENTAL_TASKS = ("fundamental-routine", "fundamental-event")
+
+# A routine cycle may leave this many targets without a usable Fundamental (stated, and barred from new exposure by the
+# risk review) rather than refuse to run. More than this is a research outage, not a gap, and still blocks the cycle.
+MAX_UNCOVERED_FUNDAMENTAL = 4
+
+
+def _fundamental_modes(task_inputs: dict[str, Any] | None) -> dict[str, str] | None:
+    """Per-entity Fundamental mode frozen into a decision plan, or None (one mode for all)."""
+    raw = (task_inputs or {}).get("fundamental_modes")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw or set(raw.values()) - set(FUNDAMENTAL_TASKS):
+        raise ContractError("fundamental_modes must map entities to a Fundamental task")
+    return {str(entity).upper(): task for entity, task in raw.items()}
+
+
+def _check_fundamental_coverage(modes: dict[str, str], task_inputs: dict[str, Any],
+                                targets: list[str]) -> None:
+    """Every target is covered by exactly one mode, or stated uncovered (an event cycle; a routine cycle up to a bound)."""
+    uncovered = {str(e).upper() for e in task_inputs.get("fundamental_uncovered") or []}
+    events = {str(e).upper() for e in task_inputs.get("event_entities") or []}
+    if set(modes) & uncovered or set(modes) | uncovered != set(targets):
+        raise ContractError("every target needs exactly one Fundamental mode or an uncovered mark")
+    if uncovered and not events and len(uncovered) > MAX_UNCOVERED_FUNDAMENTAL:
+        raise ContractError(f"a routine cycle may leave at most {MAX_UNCOVERED_FUNDAMENTAL} targets' Fundamental "
+                            "uncovered")
+    if any(modes.get(entity) != "fundamental-event" for entity in events):
+        raise ContractError("an event cycle's trigger entities must use their event review")
+
+
 def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) -> list[ProjectionScope]:
     if task_id == "layer-review":
         if requested_scope.kind == "layer":
@@ -238,7 +321,48 @@ def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) ->
         return [requested_scope]
     if task_id == "macro-review":
         return [ProjectionScope(kind="portfolio")]
+    if task_id in {"clerk-daily", "chief-daily"}:
+        return [requested_scope]            # trade-path workflows run once for the whole book
     raise ContractError(f"no scope resolver is registered for {task_id!r}")
+
+
+def _config_paths(task_ids: Iterable[str], scope_id: str,
+                  brief_entities: Iterable[str]) -> set[str]:
+    """Config files (relative to config/) that these tasks read."""
+    task_ids = set(task_ids)
+    paths: set[str] = set()
+    if task_ids & {"layer-review", "sector-review"}:
+        paths |= {f"sectors/{scope_id}.yaml", "risk.yaml"}
+    if task_ids & {"information-brief", "fundamental-routine", "fundamental-event",
+                   "technical-review"}:
+        paths.add("pead.yaml")
+    if "technical-review" in task_ids:
+        paths.add("technical.yaml")
+    if "macro-review" in task_ids:
+        paths.add("macro.yaml")
+    if "information-brief" in task_ids:
+        paths |= {f"pead/{entity.upper()}.yaml" for entity in brief_entities}
+    return paths
+
+
+def task_config_hashes(plan: WorkflowPlan, task_id: str,
+                       scope: ProjectionScope | None = None) -> dict[str, str]:
+    """The plan's frozen config hashes that one task and its declared upstream read.
+
+    A projection records the configs of the task that produced it, not of every task
+    that happened to share its plan: a Technical result is not stale because macro.yaml
+    changed. Lineage and reuse compare this per-task set, so a projection from a
+    single-workflow run stays reusable inside a multi-workflow (decision) plan. An
+    entity-scoped task reads only its own entity's config: a GOOG brief from a GOOG
+    event run is the same input as a GOOG brief inside a whole-sector plan.
+    """
+    if not plan.source_config_hashes:
+        return {}
+    ordered = task_registry().resolve_order((task_id,))
+    entities = ([scope.id] if scope is not None and scope.kind == "entity"
+                else [t.scope.id for t in plan.tasks if t.task_id == "information-brief"])
+    wanted = {f"config/{path}" for path in _config_paths(ordered, plan.request_scope.id, entities)}
+    return {path: digest for path, digest in plan.source_config_hashes.items() if path in wanted}
 
 
 def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
@@ -264,6 +388,11 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
             raise ContractError(f"dependency {task_id!r} does not accept {trigger.kind!r} triggers")
 
     root = _config_dir(config_dir)
+    modes = _fundamental_modes(task_inputs)
+    if modes is not None:
+        # A mode no target uses has no instance in this plan.
+        ordered_task_ids = [task_id for task_id in ordered_task_ids
+                            if task_id not in FUNDAMENTAL_TASKS or task_id in modes.values()]
     profile: dict[str, Any] = {}
     profile_version = ""
     profile_hash = ""
@@ -293,22 +422,9 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         raise ContractError(
             f"scope {scope.key!r} does not match profile {profile_id!r} scope")
 
-    source_paths: set[str] = set()
-    if any(task in ordered_task_ids for task in ("layer-review", "sector-review")):
-        source_paths |= {f"sectors/{scope.id}.yaml", "risk.yaml"}
-    if any(task in ordered_task_ids for task in (
-            "information-brief", "fundamental-routine", "fundamental-event",
-            "technical-review")):
-        source_paths.add("pead.yaml")
-    if "technical-review" in ordered_task_ids:
-        source_paths.add("technical.yaml")
-    if "macro-review" in ordered_task_ids:
-        source_paths.add("macro.yaml")
-    if "information-brief" in ordered_task_ids:
-        for target in _scopes("information-brief", scope, root):
-            rel = f"pead/{target.id.upper()}.yaml"
-            if (root / rel).exists():
-                source_paths.add(rel)
+    brief_entities = ([target.id for target in _scopes("information-brief", scope, root)]
+                      if "information-brief" in ordered_task_ids else [])
+    source_paths = _config_paths(ordered_task_ids, scope.id, brief_entities)
     for rel_path in sorted(source_paths):
         if rel_path in source_hashes:
             continue
@@ -324,6 +440,8 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         spec = registry.spec(task_id)
         task_instances: list[TaskInstance] = []
         for item_scope in _scopes(task_id, scope, root):
+            if modes is not None and task_id in FUNDAMENTAL_TASKS and modes.get(item_scope.id) != task_id:
+                continue
             key = f"{namespace}:{task_id}:{item_scope.key}:{config_version_hash[:12]}"
             dependencies: list[str] = []
             for parent in spec.depends_on:
@@ -356,10 +474,13 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
             raise ContractError(
                 "decision-cycle request is incomplete; missing categories: "
                 + ", ".join(missing_categories))
-        fundamental_modes = planned_roles & {
-            "fundamental_expectation_update", "fundamental_event_review"}
-        if len(fundamental_modes) != 1:
-            raise ContractError("a decision profile must select exactly one Fundamental mode")
+        if modes is None:
+            fundamental_modes = planned_roles & {
+                "fundamental_expectation_update", "fundamental_event_review"}
+            if len(fundamental_modes) != 1:
+                raise ContractError("a decision profile must select exactly one Fundamental mode")
+        else:
+            _check_fundamental_coverage(modes, task_inputs or {}, _targets(root))
 
     trigger_json = trigger.model_dump(mode="json")
     # Delivery time is audit metadata, not part of a stable schedule/event plan.
@@ -382,5 +503,5 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         enter_decision_cycle=enter_decision_cycle, config_root=str(root.resolve()))
 
 
-__all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
-           "build_plan", "task_registry", "validate_task_registry"]
+__all__ = ["ALLOWED_CROSS_ANALYST_EDGES", "FUNDAMENTAL_TASKS", "TASK_ROLE", "TaskInstance", "WorkflowPlan",
+           "build_plan", "task_config_hashes", "current_config_refs", "task_registry", "validate_task_registry"]

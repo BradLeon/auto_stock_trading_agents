@@ -13,8 +13,8 @@ log = logging.getLogger("ats.risk.report")
 def render(review: RiskReview, rc=None) -> str:
     r = review
     if rc is None:
-        from ..config import get_config
-        rc = get_config().app.risk
+        from . import inputs
+        rc = inputs.rules().limits
     dp_usd = (r.daily_pnl_pct / 100 * r.net_liquidation) if r.daily_pnl_pct is not None else None
     dp_txt = (f"{r.daily_pnl_pct}%（${dp_usd:,.0f}，仅盘中/不含盘前后）" if dp_usd is not None
               else f"{r.daily_pnl_pct}%")

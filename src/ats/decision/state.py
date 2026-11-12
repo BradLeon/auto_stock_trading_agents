@@ -19,6 +19,7 @@ class CycleStatus(str, Enum):
     RISK_REJECTED = "risk_rejected"          # 已驳回：当前修订被驳回，可修订后重审
     PENDING_APPROVAL = "pending_approval"    # 待审批：风控通过，等待主理人批准
     EXECUTED = "executed"                    # 已执行：授权下的订单已提交
+    APPROVED_NOT_EXECUTED = "approved_not_executed"  # 已批准未执行：演练或实盘锁定，批准有效但未下单
     MANUAL_REVIEW = "manual_review"          # 人工复核：自动循环退出，等人处理
     NO_ACTION = "no_action"                  # 不行动：带理由的正式终态
     APPROVAL_REJECTED = "approval_rejected"  # 审批拒绝：主理人拒绝当前修订
@@ -30,6 +31,7 @@ class CycleStatus(str, Enum):
 #: continues through `chief_revise`; `NO_ACTION` is a real outcome, not a gap.
 TERMINAL_STATUSES: frozenset[CycleStatus] = frozenset({
     CycleStatus.EXECUTED,
+    CycleStatus.APPROVED_NOT_EXECUTED,
     CycleStatus.MANUAL_REVIEW,
     CycleStatus.NO_ACTION,
     CycleStatus.APPROVAL_REJECTED,

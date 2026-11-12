@@ -6,7 +6,7 @@ import pytest
 from ats.agents.information import assemble, extract, selection, target_research
 from ats.schemas.research import Article
 from ats.workflow.runtime_reads import consumer_entities
-from ats.workflow.cutover_routing import RouteUnavailable
+from ats.workflow.read_scope import ReadUnavailable
 
 NOW = datetime(2026, 10, 12, tzinfo=UTC)
 CONFIG = {'publisher_entities': ['SEMIANALYSIS', 'TRENDFORCE'], 'candidate_limit': 120,
@@ -21,7 +21,7 @@ def article(key, source='semianalysis', title='Capacity', body='Microsoft increa
 
 def bound(monkeypatch, publishers=True):
     entities = ['MSFT', 'NVDA'] + (CONFIG['publisher_entities'] if publishers else [])
-    context = SimpleNamespace(route='target', identity=SimpleNamespace(consumer_id='information',
+    context = SimpleNamespace(identity=SimpleNamespace(consumer_id='information',
                                    scope={'kind': 'entity', 'id': 'MSFT', 'entities': entities}))
     monkeypatch.setattr(selection, 'current_read_context', lambda: context)
     monkeypatch.setattr(assemble, 'signal_chain_universe', lambda targets: ('MSFT target; NVDA supplier',
@@ -232,7 +232,7 @@ def test_syndicated_equal_facts_do_not_inflate_confidence_or_fact_count(monkeypa
 
 def test_peer_cannot_be_used_as_another_output_target_under_current_scope(monkeypatch):
     bound(monkeypatch)
-    with pytest.raises(RouteUnavailable, match='output target differs'):
+    with pytest.raises(ReadUnavailable, match='output target differs'):
         selection.candidates(object(), 'NVDA', since=NOW-timedelta(days=7), config=CONFIG)
 
 
@@ -263,8 +263,8 @@ def test_native_target_channel_reads_publisher_material_only_when_target_is_inde
         title='Industry architecture', published_at=NOW.isoformat(), min_chars=1, now=NOW, store=store)
     identity = business_identity('information', kind='entity', scope_id='MSFT',
         entities=['MSFT', 'NVDA', *CONFIG['publisher_entities']], as_of=NOW)
-    context = ReadContext(identity, mode='isolated', route='target', cutoff=NOW)
-    monkeypatch.setattr(runtime_reads, 'gate_read', lambda identity: SimpleNamespace(route='target'))
+    context = ReadContext(identity, mode='isolated', cutoff=NOW)
+    monkeypatch.setattr(runtime_reads, 'gate_read', lambda identity: None)
     monkeypatch.setattr(selection, 'current_read_context', lambda: context)
     monkeypatch.setattr(assemble, 'evaluation_now', lambda tz: NOW)
     monkeypatch.setattr(assemble, 'signal_chain_universe', lambda targets: ('MSFT + NVDA', {'MSFT':['MSFT'], 'NVDA':['MSFT']}))
@@ -315,22 +315,6 @@ def test_equivalent_content_reuses_cached_original_despite_title_and_source_chan
     chosen = selection.choose(rows, max_articles=None, exploration_articles=0,
                               cached_versions={'z-cached@v'})
     assert {r.article.id for r in chosen} == {'z-cached', 'update'}
-
-
-@pytest.mark.parametrize('entity', ['MRVL', 'MSFT', 'NVDA', 'TSM'])
-def test_independent_research_capture_trigger_ids_preserve_same_flow_identity(entity):
-    import importlib.util
-    from ats.config import REPO_ROOT
-    spec = importlib.util.spec_from_file_location('research_capture_trigger',
-                                                 REPO_ROOT / 'scripts/capture_phase_f_research.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    research_trigger_id = module.research_trigger_id
-    information = research_trigger_id(entity, with_routine=False)
-    routine = research_trigger_id(entity, with_routine=True)
-    assert information != routine
-    assert information == research_trigger_id(entity, with_routine=False)
-    assert routine == research_trigger_id(entity, with_routine=True)
 
 
 def test_identical_syndication_consumes_one_read_and_numeric_update_remains_available():

@@ -400,6 +400,52 @@ def load_snapshot(products, *, as_of: datetime | None = None,
             }))
 
 
+def load_published_sector_groups(products, *, as_of: datetime | None = None) -> dict:
+    """Sector-group releases that were published on their own, for the newest report that has any.
+
+    The full snapshot (`load_snapshot`) shows sectors only when the whole eleven-sector cross-section and the
+    index core are published. Until then the groups that did pass their own review (today: Information
+    Technology) are still real, source-backed readings; this returns them with the list of groups that did not
+    publish, so the consumer can state the coverage instead of showing nothing."""
+    reference = as_of or datetime.now(timezone.utc)
+    rows = [row for row in products.structured.release_manifests(
+        dataset_id=DATASET_ID, as_of=reference, passed_only=False, limit=2000)
+        if str(row.get("partition_name", "")).startswith("sector_group:")]
+    published = [row for row in rows if row["passed"] and row["status"] == "platform"]
+    if not published:
+        return {}
+    newest = max(published, key=lambda row: (row["report_date"], row["known_at"]))
+    # The newest attempt per group identity decides. A package published earlier is withdrawn by a later attempt
+    # that did not pass (2026-11-03: a re-read caught a dropped decimal point in a cell that had already published).
+    latest: dict[tuple, dict] = {}
+    for row in rows:                       # rows are newest first
+        if row["version_id"] == newest["version_id"]:
+            group = row.get("quality", {}).get("group", {})
+            latest.setdefault((group.get("scope_id", ""), group.get("chart_id", ""), group.get("period", ""),
+                               group.get("period_basis", "")), row)
+    sectors: dict[str, dict[str, dict[str, EarningsInsightObservation]]] = {}
+    ids: list[str] = []
+    withheld: list[str] = []
+    for row in latest.values():
+        group = row.get("quality", {}).get("group", {})
+        label = f"{group.get('chart_id', '?')}/{group.get('period', '?')}"
+        scope = group.get("scope_id", "")
+        if not (row["passed"] and row["status"] == "platform"):
+            withheld.append(f"{scope}:{label}" if scope else label)
+            continue
+        for observation_id in row.get("observation_ids") or []:
+            item = _observation(products, observation_id)
+            if item is None or not item.entity_id.startswith("GICS_"):
+                continue
+            ids.append(observation_id)
+            sectors.setdefault(item.entity_id, {}).setdefault(
+                item.period, {})[item.metric_id] = item
+    return {"report_date": newest["report_date"], "version_id": newest["version_id"],
+            "document_id": newest["document_id"], "sectors": sectors,
+            "observation_ids": ids, "withheld_groups": sorted(withheld),
+            "published_groups": len(latest) - len(withheld)}
+
+
 def _all_index_observations(
         snapshot: EarningsInsightSnapshot) -> list[EarningsInsightObservation]:
     """Keep every released period; a consumer must not silently lose FY/CY data."""

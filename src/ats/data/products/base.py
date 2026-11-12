@@ -41,6 +41,12 @@ class DataProducts:
 
         return load_snapshot(self, as_of=as_of)
 
+    def earnings_insight_sector_groups(self, *, as_of: datetime | None = None) -> dict:
+        """Individually published sector groups of the newest report, when the full snapshot has none."""
+        from .earnings_insight import load_published_sector_groups
+
+        return load_published_sector_groups(self, as_of=as_of)
+
     def neutral_evidence(self, *, entity: str, as_of: datetime, limit: int = 500) -> dict:
         """Point-in-time neutral extracted facts; never profile/Agent opinions.
 

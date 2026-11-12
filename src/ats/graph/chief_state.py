@@ -31,6 +31,7 @@ class ChiefDecisionState(BaseModel):
     decide: bool = True                 # False: skip the Chief, take seed_decisions as-is
     execute: bool = True                # False (--no-execute): stop after persist_decision
     fundamental_mode: Literal["routine", "event"] = "routine"
+    event_entities: list[str] = Field(default_factory=list)   # event cycle: the entities whose event started it
     decision_profile: str = "ai_hardware"
     decision_requirements: dict = Field(default_factory=dict)
     seed_decisions: list[TradeDecision] = Field(default_factory=list)
@@ -45,6 +46,13 @@ class ChiefDecisionState(BaseModel):
     # chief_decide
     summary: str = ""
     decisions: list[TradeDecision] = Field(default_factory=list)
+    # When each role finished this round: the proposal (chief_decide / chief_revise /
+    # boss_revise) and the risk review. Audit rows carry these, not `as_of`, so a
+    # cycle's rows show proposal -> review -> next proposal in the order they happened.
+    chief_reasoning: dict = Field(default_factory=dict)     # full reasoning (ChiefReasoning); card shows summary
+    option_actions: list[dict] = Field(default_factory=list)  # advice on held options, executed by hand
+    proposed_at: datetime | None = None
+    reviewed_at: datetime | None = None
 
     # risk_gate
     portfolio: PortfolioSnapshot | None = None
@@ -52,6 +60,7 @@ class ChiefDecisionState(BaseModel):
     risk_notes: list[str] = Field(default_factory=list)
     approval_summary: str = ""          # banner + risk block + order lines (the card body)
     normalization_errors: list[str] = Field(default_factory=list)
+    normalization_fixable: bool = False  # every refusal is the proposal's to fix -> back to the Chief
     execution_price_audit: list[dict] = Field(default_factory=list)
 
     # decision-audit loop (Phase B, ARCHITECTURE §5.2–5.3). `decisions` stays this round's FULL
@@ -64,11 +73,14 @@ class ChiefDecisionState(BaseModel):
     parent_revision_no: int | None = None                   # revised from (chief_revise)
     risk_round: int = 0                                     # 1-based once risk_gate ran
     max_risk_rounds: int = 3                                # bounded auto-revision (ARCHITECTURE §5.2)
+    boss_revisions: int = 0                                 # Boss "revise" verdicts used on this cycle
+    max_boss_revisions: int = 2                             # after that the Boss can only approve or reject
     risk_review: DecisionRiskReview | None = None           # latest deterministic review
     approved_decisions: list[TradeDecision] = Field(default_factory=list)
     portfolio_snapshot_id: str = ""                         # review binding (§10.2)
     authorization: dict[str, Any] | None = None             # execution gate (Group 7)
-    gate_outcome: str = ""                                  # placed | stale | refused
+    gate_outcome: str = ""                                  # placed | stale | refused | approved_not_executed
+    execution_checks: dict[str, Any] = Field(default_factory=dict)   # pre-execution checks (live lock / dry run)
     gate_rejections: list[str] = Field(default_factory=list)
     cycle_status: str = ""                                  # mirrors decision_cycles.status
 

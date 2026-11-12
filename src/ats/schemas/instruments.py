@@ -14,6 +14,10 @@ class InstrumentRiskMeta(BaseModel):
     label: str = ""
     risk_symbol: str = ""
     layer_symbol: str = ""
+    # Explicit chain-layer key for RISK attribution. Wins over `layer_symbol` lookup when a
+    # holding is not (or not only) a roster ticker of a layer — ETFs, names the roster
+    # lists twice, or names held for a layer they are not analysed in.
+    layer_key: str = ""
     exposure_multiplier: float = Field(1.0, gt=0)
     product_type: str = "stock"
 
@@ -24,6 +28,7 @@ class ResolvedInstrumentRisk(BaseModel):
     label: str
     risk_symbol: str
     layer_symbol: str
+    layer_key: str = ""
     exposure_multiplier: float = 1.0
     product_type: str = "stock"
 
@@ -49,6 +54,7 @@ class InstrumentRiskRegistry(BaseModel):
             label=meta.label or risk_symbol,
             risk_symbol=risk_symbol,
             layer_symbol=meta.layer_symbol or risk_symbol,
+            layer_key=meta.layer_key,
             exposure_multiplier=meta.exposure_multiplier,
             product_type=meta.product_type,
         )

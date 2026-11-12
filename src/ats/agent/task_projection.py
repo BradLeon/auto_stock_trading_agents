@@ -214,6 +214,9 @@ class InformationBriefPayload(_Payload):
     cluster_key: str = ""
     source_count: int | None = Field(default=None, ge=0)
     independent_sources: int | None = Field(default=None, ge=0)
+    # Articles whose extraction failed for this target and are therefore not covered by the brief (2026-11-02):
+    # {"document_ref", "article_id", "status": "retrying" | "quarantined", "attempts", "reason"}.
+    extraction_gaps: list[dict[str, Any]] = Field(default_factory=list)
 
     def payload_json(self) -> str:
         # Additive evidence must not change hashes of historical v1 payloads
@@ -221,6 +224,8 @@ class InformationBriefPayload(_Payload):
         body = self.model_dump(mode="json")
         if not body["source_evidence"]:
             body.pop("source_evidence")
+        if not body["extraction_gaps"]:
+            body.pop("extraction_gaps")
         return json.dumps(body, ensure_ascii=False, sort_keys=True)
 
     @field_validator("sources", "fact_changes", "impact_candidates", "entities",
@@ -251,6 +256,17 @@ class NameAllocation(_Item):
     self_reported_only: bool | None = None
 
 
+class CrossSectionDivergence(_Item):
+    """A name whose blended (structure-aware) rank differs from its pure-quant rank, with the structure analyst's reason."""
+
+    layer: str = Field(min_length=1)
+    symbol: str = Field(min_length=1)
+    quant_rank: int = Field(ge=1)
+    rank: int = Field(ge=1)
+    moat_pricing: float | None = None
+    rationale: str = ""
+
+
 class SectorAllocationPayload(_Payload):
     """Where capital should sit within a sector, relative to the book."""
 
@@ -267,9 +283,12 @@ class SectorAllocationPayload(_Payload):
     rotation_available: bool | None = None
     rotation_advice: str = ""
     missing_layers: list[str] = Field(default_factory=list)
+    # 2026-10-28: composite-vs-quant rank divergences, so the Chief keeps seeing where structure moved a name.
+    cross_section_divergence: list[CrossSectionDivergence] = Field(default_factory=list)
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
-        "layers", "names", "fact_refs", "rotation_available", "rotation_advice", "missing_layers")
+        "layers", "names", "fact_refs", "rotation_available", "rotation_advice", "missing_layers",
+        "cross_section_divergence")
 
     @field_validator("drivers", mode="before")
     @classmethod
@@ -503,6 +522,9 @@ class MacroTilt(_Item):
     sector: str = Field(min_length=1)
     stance: str = ""
     rationale: str = ""
+    sector_key: str = ""
+    etf: str = ""
+    etf_name: str = ""
 
 
 class MacroReviewPayload(_Payload):
@@ -557,10 +579,16 @@ class TechnicalReviewPayload(_Payload):
     invalidation: list[str] = Field(default_factory=list)
     panic_fired: bool | None = None
     bear_fired: bool | None = None
+    # The volatility readings the run used (2026-11-03): without them a report built from the projection cannot say
+    # whether "no panic" was evaluated or VIX3M was simply missing. `volatility_status` is "" when both were read,
+    # else "vix_unavailable" / "vix3m_unavailable" / "vix_and_vix3m_unavailable".
+    vix: float | None = None
+    vix3m: float | None = None
+    volatility_status: str = ""
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
         "data_status", "trend_state", "score", "score_detail", "suggested_exposure", "previous_exposure",
-        "invalidation", "panic_fired", "bear_fired")
+        "invalidation", "panic_fired", "bear_fired", "vix", "vix3m", "volatility_status")
 
     @field_validator("levels", mode="before")
     @classmethod

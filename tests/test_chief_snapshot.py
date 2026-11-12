@@ -40,7 +40,7 @@ def _env(role, payload, scope):
 
 
 def _seed(store, *, layers=("L1_app", "L3_optics"), targets=("COHR",),
-          sectors=("ai_hardware",)):
+          sectors=("ai_hardware",), fundamental="event", fund_run=("", "")):
     rows = {}
     for key in layers:
         rows[f"layer:{key}"] = _env(
@@ -57,12 +57,22 @@ def _seed(store, *, layers=("L1_app", "L3_optics"), targets=("COHR",),
              "entities": [sym], "confidence": 0.7, "freshness": "today",
              "unverified": ["节奏待核验"]},
             ProjectionScope(kind="entity", id=sym))
-        rows[f"fund:{sym}"] = _env(
-            "fundamental_event_review",
-            {"entity": sym, "event": "earnings", "period": "Q3 FY2026",
-             "direction": 1, "magnitude": 0.05,
-             "falsifiable_conditions": ["下季指引低于区间即证伪"], "confidence": 0.75},
-            ProjectionScope(kind="entity", id=sym))
+        if fundamental == "routine":
+            rows[f"fund:{sym}"] = build_envelope(
+                role="fundamental_expectation_update",
+                payload={"entity": sym, "metric": "gross_margin", "period": "Q3 FY2026",
+                         "previous_value": 0.25, "new_value": 0.26, "driver": "例行读数"},
+                scope=ProjectionScope(kind="entity", id=sym),
+                as_of=NOW.isoformat(timespec="seconds"), valid_until=_expiry(),
+                data_vintage_refs=["dataset@test"],
+                workflow_run_id=fund_run[0], agent_run_id=fund_run[1])
+        else:
+            rows[f"fund:{sym}"] = _env(
+                "fundamental_event_review",
+                {"entity": sym, "event": "earnings", "period": "Q3 FY2026",
+                 "direction": 1, "magnitude": 0.05,
+                 "falsifiable_conditions": ["下季指引低于区间即证伪"], "confidence": 0.75},
+                ProjectionScope(kind="entity", id=sym))
     for name in sectors:
         rows[f"sector:{name}"] = _env(
             "sector_allocation",
@@ -79,21 +89,22 @@ def _seed(store, *, layers=("L1_app", "L3_optics"), targets=("COHR",),
             {"entity": sym, "signal": "neutral", "summary": "区间震荡",
              "levels": {"support": 300.0}},
             ProjectionScope(kind="entity", id=sym))
+    from phase_d_frozen_harness import producer_inputs
+
     from ats.workflow import decision_requirements as dr
-    from ats.workflow.dispatcher import Dispatcher
     from ats.workflow.planning import TASK_ROLE
-    plan = dr.restore(dr.standalone(_state()))
+    plan = dr.restore(dr.standalone(_state(fundamental_mode=fundamental)))
     by_binding = {(e.agent_role, e.scope.key): e for e in rows.values()}
     selected = {}
     for task in plan.tasks:
         env = by_binding.get((TASK_ROLE[task.task_id], task.scope.key))
         if env is None:
             continue
-        inputs, _, _ = Dispatcher._task_inputs(None, plan, task,
-            {k: selected[k] for k in task.dependencies})
+        inputs = producer_inputs(plan, task, {k: selected[k] for k in task.dependencies})
         env = build_envelope(role=env.agent_role, payload=env.payload, scope=env.scope,
             as_of=env.as_of, valid_until=env.valid_until, input_refs=inputs,
-            data_vintage_refs=env.data_vintage_refs)
+            data_vintage_refs=env.data_vintage_refs,
+            workflow_run_id=env.workflow_run_id, agent_run_id=env.agent_run_id)
         by_binding[(env.agent_role, env.scope.key)] = env
         selected[task.instance_key] = env
     for key, env in list(rows.items()):
@@ -230,43 +241,35 @@ def test_decide_path_refuses_persist_without_snapshot(chief_env):
     assert DecisionAuditRepository(chief_env).get_cycle("chief-g7") is None
 
 
-# --- 7.4 dual-read: projection path agrees with legacy path ------------------------- #
+# --- 7.4 the context is rendered from the projections only ------------------------- #
 
-def test_dual_read_paths_agree_and_diffs_are_zero(chief_env):
+def test_context_is_rendered_from_the_projection_block_alone(chief_env):
+    """With the legacy direct reads gone there is one read path: every frozen item is in the context
+    and the old comparison (`dual_read_diffs`) no longer exists."""
     from ats.agents.chief import assemble
 
     _seed(chief_env)
     state = _state()
     out = assemble_context(state)
     assert not out.get("gap_report")
-    # 7.4: both read paths ran and their per-category presence disagreement is
-    # recorded (this hermetic fixture has empty legacy blocks, so what the
-    # assertion pins is that the comparison covers exactly the five categories
-    # that HAVE a legacy counterpart and never invents extra ones).
-    assert set(out["context_stats"]["dual_read_diffs"]) == set(
-        assemble.CATEGORY_TO_LEGACY_BLOCK)
-    # the projection block is part of the decision context and cites projections
-    assert "研究快照（六类投影）" in out["context_text"]
-    assert "direction=" in out["context_text"]
-    # with the legacy side populated, an agreement fixture diffs to zero
-    ctx = SimpleNamespace(blocks={name: "text" for name
-                                  in assemble.CATEGORY_TO_LEGACY_BLOCK.values()})
-    detail = [{"task_id": task_id, "scope": "x", "status": "fresh"}
-              for task_id in assemble.TASK_TO_CATEGORY]
-    assert set(assemble.dual_read_diffs(ctx, detail).values()) == {0}
+    assert "dual_read_diffs" not in out["context_stats"]
+    assert not hasattr(assemble, "dual_read_diffs")
+    text = out["context_text"]
+    assert "研究快照（六类投影）" in text and "direction=" in text
+    for item in out["research_snapshot"]["items"]:
+        if item["agent_role"] in assemble.NOT_RENDERED:   # frozen for lineage only (D3-2)
+            assert item["projection_id"] not in text
+            continue
+        assert item["projection_id"] in text and item["content_hash"] in text
 
 
-def test_dual_read_counts_disagreement(chief_env):
+def test_a_category_with_no_fresh_projection_is_listed_as_missing_not_omitted():
     from ats.agents.chief import assemble
 
-    _seed(chief_env)
-    state = _state()
-    assemble_context(state)
-    ctx_blocks = {"宏观评审（倾斜修正）": "regime: risk_on …"}  # legacy present, projection missing
-    detail = [{"task_id": "macro_review", "scope": "portfolio", "status": "missing"}]
-    diffs = assemble.dual_read_diffs(
-        SimpleNamespace(blocks=ctx_blocks), detail)
-    assert diffs["macro_review"] == 1
+    detail = [{"task_id": "macro_review", "role": "macro_review", "scope": "portfolio:portfolio",
+               "status": "missing", "reason": "missing", "as_of": "", "projection_id": "",
+               "content_hash": "", "payload": None}]
+    assert "宏观评审: **缺失**" in assemble.projection_context_block(detail)
 
 
 # --- 7.6 revision rounds reuse the same snapshot ------------------------------------ #
@@ -398,3 +401,114 @@ def test_direction_is_presented_as_research_input_only(chief_env):
         for verb in ("buy", "sell", "trim"):
             assert f"'direction': '{verb}'" not in src, path
             assert f'"{verb}": 1' not in src, path
+
+
+# --- per-task config lineage (switch-trade-path-and-retire-r5, 3.2 finding) ---------- #
+# Production research runs one workflow per task family, so a projection records only the
+# configuration its own task reads. The decision gate must accept that shape and still
+# refuse a projection whose OWN configuration changed since it was produced.
+
+def test_projections_from_single_workflow_runs_pass_the_decision_gate(chief_env):
+    rows = _seed(chief_env)
+    tech = rows["tech:COHR"]
+    configs = {ref.split("@")[0] for ref in tech.input_refs if ref.startswith("config:")}
+    assert configs == {"config:config/pead.yaml", "config:config/technical.yaml"}
+    out = assemble_context(_state())
+    assert out["context_text"] and not out.get("gap_report")
+
+
+def test_a_change_to_a_tasks_own_config_still_refuses_its_projection(chief_env, tmp_path):
+    from ats.workflow.read_scope import ReadUnavailable
+
+    _seed(chief_env)
+    path = tmp_path / "config" / "technical.yaml"
+    path.write_text(path.read_text() + "\n# changed after the projection was produced\n")
+    with pytest.raises(ReadUnavailable, match="lineage differs: .*technical-review"):
+        assemble_context(_state())
+
+
+def test_a_change_to_another_tasks_config_does_not_refuse_technical(chief_env, tmp_path):
+    from ats.workflow.read_scope import ReadUnavailable
+
+    _seed(chief_env)
+    path = tmp_path / "config" / "macro.yaml"
+    path.write_text(path.read_text() + "\n# changed after the projections were produced\n")
+    with pytest.raises(ReadUnavailable) as refused:
+        assemble_context(_state())
+    # Only Macro, whose own config changed, is refused.
+    assert "macro-review" in str(refused.value) and "technical-review" not in str(refused.value)
+
+
+def _routine_attempt(store, *, key, projection_id):
+    store.conn.execute(
+        "CREATE TABLE IF NOT EXISTS agent_runs (agent_run_id TEXT PRIMARY KEY, run_id TEXT, "
+        "task_instance_key TEXT, task_id TEXT, scope_json TEXT, status TEXT, projection_refs_json TEXT)")
+    store.conn.execute(
+        "INSERT INTO agent_runs VALUES ('agent-run-1','wf-routine',?, 'fundamental-routine',?,"
+        "'succeeded',?)", (key, json.dumps(ProjectionScope(kind="entity", id="COHR").model_dump(mode="json")),
+                           json.dumps([projection_id])))
+    store.conn.commit()
+
+
+def _routine_key(scope_key):
+    from ats.workflow import decision_requirements as dr
+
+    plan = dr.restore(dr.standalone(_state(fundamental_mode="routine")))
+    task = next(t for t in plan.tasks if t.task_id == "fundamental-routine" and t.scope.key == scope_key)
+    # The producing Routine workflow froze a different config set, so its key ends differently.
+    return task.instance_key.rpartition(":")[0] + ":cad636aba1cc"
+
+
+def test_a_routine_attempt_from_its_own_workflow_is_accepted(chief_env):
+    rows = _seed(chief_env, fundamental="routine", fund_run=("wf-routine", "agent-run-1"))
+    _routine_attempt(chief_env, key=_routine_key("entity:COHR"),
+                     projection_id=rows["fund:COHR"].projection_id)
+    out = assemble_context(_state(fundamental_mode="routine"))
+    assert out["context_text"] and not out.get("gap_report")
+
+
+def test_a_routine_attempt_for_another_scope_is_still_refused(chief_env):
+    from ats.workflow.read_scope import ReadUnavailable
+
+    rows = _seed(chief_env, fundamental="routine", fund_run=("wf-routine", "agent-run-1"))
+    key = _routine_key("entity:COHR").replace("entity:COHR", "entity:NVDA")
+    _routine_attempt(chief_env, key=key, projection_id=rows["fund:COHR"].projection_id)
+    with pytest.raises(ReadUnavailable, match="attempt not terminal or mismatched"):
+        assemble_context(_state(fundamental_mode="routine"))
+
+
+# --- D3-2: the account is the live book; no book, no decision ------------------------ #
+
+def test_an_unreadable_account_blocks_the_cycle_before_any_write(chief_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from ats.decision.repository import DecisionAuditRepository
+
+    _seed(chief_env)
+    reviews = []
+    monkeypatch.setattr("ats.broker.account.account_broker",
+                        lambda: SimpleNamespace(get_portfolio=lambda: None))
+    monkeypatch.setattr("ats.agents.risk_officer.review.record_posture", reviews.append)
+    out = assemble_context(_state(use_broker=True))
+    assert "账户实时状态不可用" in out["gap_report"] and out["context_text"] == ""
+    assert route_after_assemble(_state(gap_report=out["gap_report"])) == "end"
+    assert reviews == [] and DecisionAuditRepository(chief_env).get_cycle("chief-g7") is None
+
+
+def test_the_chief_sees_the_book_the_risk_posture_was_computed_on(chief_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from ats.schemas.portfolio import PortfolioSnapshot, Position
+
+    _seed(chief_env)
+    book = PortfolioSnapshot(as_of=NOW, net_liquidation=252_613.0, positions=[
+        Position(symbol="TSM", qty=100, avg_cost=300.0, market_price=343.0,
+                 market_value=34_300.0, weight=0.136)])
+    reviewed = []
+    monkeypatch.setattr("ats.broker.account.account_broker",
+                        lambda: SimpleNamespace(get_portfolio=lambda: book))
+    monkeypatch.setattr("ats.agents.risk_officer.review.record_posture", reviewed.append)
+    out = assemble_context(_state(use_broker=True))
+    assert not out.get("gap_report")
+    assert [r.net_liquidation for r in reviewed] == [252_613.0]
+    assert "净值 $252,613" in out["context_text"] and "TSM: 100 @ 成本 300.00" in out["context_text"]

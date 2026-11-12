@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 
 from ...schemas.research import Article
 from ...data.document_quality import association_evidence, visible_analysis_view
-from ...workflow.cutover_routing import RouteUnavailable
+from ...workflow.read_scope import ReadUnavailable
 from ...workflow.runtime_reads import current_read_context
 from . import assemble
 
@@ -39,15 +39,15 @@ def target_update_fingerprint(article: Article, symbol: str) -> tuple | None:
 def candidates(store, symbol: str, *, since: datetime, config: dict) -> tuple[list[Candidate], dict]:
     context = current_read_context()
     if context is None or context.identity.consumer_id != "information":
-        raise RouteUnavailable("Information candidates require its bound read scope")
+        raise ReadUnavailable("Information candidates require its bound read scope")
     symbol = symbol.upper()
     if context.identity.scope.get("kind") != "entity" or context.identity.scope.get("id") != symbol:
-        raise RouteUnavailable("Information output target differs from bound entity request")
+        raise ReadUnavailable("Information output target differs from bound entity request")
     card = f'- {symbol} (target)'
     universe = {symbol}
     authorized = set(context.identity.scope["entities"])
     if symbol not in authorized or not universe <= authorized:
-        raise RouteUnavailable("Information target escapes bound scope")
+        raise ReadUnavailable("Information target escapes bound scope")
     limit = int(config.get("candidate_limit", 120))
     if not 1 <= limit <= 500:
         raise ValueError("Information candidate limit must be between 1 and 500")

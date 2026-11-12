@@ -460,7 +460,15 @@ def reconcile_earnings_release_materials(*, store: ScheduleCalendarStore | None 
                          for item in event.get("release_confirmations", [])
                          for material in item.get("materials", [])}
             admitted = {str(material["ref"]): material for material in materials}
-            new_material_vintage = set(admitted) - set(confirmed)
+            # A second copy of a call already confirmed (the keyed defeatbeta transcript
+            # arriving after a web copy of the same call, or now preferred over it) is
+            # not new evidence: re-running the event review on it repeats every model
+            # request for the same words. A transcript for an event that had none, or a
+            # new filing/release, still opens a follow-up run.
+            had_transcript = any(m.get("kind") == "transcript" for m in confirmed.values())
+            new_material_vintage = {
+                ref for ref in set(admitted) - set(confirmed)
+                if not (had_transcript and admitted[ref]["kind"] == "transcript")}
             if (event["status"] == "planned" or not confirmed or new_material_vintage):
                 merged = {**confirmed, **admitted}
                 event = repository.confirm_release(

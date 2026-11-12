@@ -4,18 +4,14 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from test_phase_f_read_executor import policy
 from test_phase_f_research_gate import business_inputs as _business_inputs
 from test_phase_f_research_gate import decision_run
 from test_phase_f_research_gate import research_isolation as _isolated
 
 from ats.decision.repository import DecisionAuditRepository
 from ats.execution.authorization import build_authorization, validate_authorization
-from ats.workflow import cutover as plane
 from ats.workflow import runtime_reads as reads
-from ats.workflow import scoped_routes as scopes
-from ats.workflow.cutover_routing import RouteUnavailable
-from ats.workflow.isolation import verified_isolation_root
+from ats.workflow.read_scope import ReadUnavailable
 
 business_inputs=_business_inputs
 isolated=_isolated
@@ -23,19 +19,10 @@ isolated=_isolated
 
 @pytest.fixture
 def ready(business_inputs,isolated,monkeypatch):
-    monkeypatch.setattr('ats.workflow.boundary_evidence.assert_enforced',lambda *a,**k:None)
-    monkeypatch.setattr('ats.data.assurance.qualification',lambda **k:{'status':'eligible'})
     captured={}
     def before(plan):
         task=next(t for t in plan.tasks if t.task_id=='technical-review')
-        who=reads.task_identity(plan,task)
-        policy(who,verified_isolation_root())
-        scopes.transition_route(plane.PROJECTION_READ,who,'target',expected_generation=0,mode='isolated',
-            actor='fixture',reason='qualified dependency before actual role run',
-            qualification=lambda i:{'identity':i.as_row(),'status':'eligible'},
-            report=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-report'},
-            fallback=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-stop'})
-        captured['who']=who
+        captured['who']=reads.task_identity(plan,task)
     def runner(snapshot,manifest):
         captured['basis']=snapshot.to_payload();return {}
     result=decision_run(business_inputs,isolated,runner=runner,before_dispatch=before)
@@ -53,49 +40,6 @@ def ready(business_inputs,isolated,monkeypatch):
     return SimpleNamespace(repo=repo,store=isolated,revision=rev,auth=auth,**captured)
 
 
-@pytest.mark.parametrize('failure',['revoked','manifest_drift','disabled','generation','policy'])
-def test_actual_unbound_callback_and_authorization_recheck_frozen_dependencies(ready,monkeypatch,failure,record_property):
-    s=ready
-    before={t:[dict(r) for r in s.store.conn.execute('SELECT * FROM '+t)] for t in
-            ('decision_revisions','decision_risk_reviews','boss_approvals')}
-    if failure in {'revoked','manifest_drift'}:
-        monkeypatch.setattr('ats.data.assurance.qualification',lambda **kw:{'status':'ineligible'
-            if kw['consumer_id']=='technical' else 'eligible','reasons':[failure]})
-    elif failure in {'disabled','generation'}:
-        scopes.transition_route(plane.PROJECTION_READ,s.who,'disabled' if failure=='disabled' else 'legacy',
-            expected_generation=1,actor='fixture',reason='dependency changed',mode='isolated',
-            fallback=lambda i:{'identity':i.as_row(),'valid':True,'reference':'fixture-selected-route'})
-    else: policy(s.who,verified_isolation_root())
-    with pytest.raises(RouteUnavailable):
-        s.repo.record_approval(approval_id='late',cycle_id='dependent',revision_no=s.revision['revision_no'],
-            decision_hash=s.revision['decision_hash'],decision='approved',reviewer='fixture',idempotency_key='late')
-    reasons=validate_authorization(s.repo,s.auth,snapshot_as_of=datetime.now(UTC),
-        route_state=SimpleNamespace(route_id='sim',generation=1))
-    assert any(r.startswith('research_dependencies_invalid') for r in reasons),reasons
-    # The real Trader entry must refuse before quotes or transport acceptance.
-    from ats.execution.authorization import bind_to_active_route
-    from ats.execution.route_registry import install_route
-    from ats.execution.simulation import simulated_execution
-    from ats.schemas.decision import TradeDecision
-    from ats.trader.execute import place_orders
-    install_route('sim', environment='paper', account='DU1')
-    auth=bind_to_active_route(build_authorization(s.repo,'dependent'))
-    orders=[TradeDecision.model_validate(row) for row in json.loads(s.revision['orders_json'])]
-    with simulated_execution(store=s.store,account='DU1') as transport:
-        entries,fills=place_orders([(order,order.qty) for order in orders],'dependent',
-            revision_no=s.revision['revision_no'],authorization=auth.model_dump(mode='json'))
-        assert not transport.accepted and not fills
-        assert entries and all('research_dependencies_invalid' in row.error for row in entries)
-    assert {t:[dict(r) for r in s.store.conn.execute('SELECT * FROM '+t)] for t in before}==before
-    assert s.repo.read_chain('dependent')['has_execution_approval']
-    # No consumer-wide/global stop: unrelated business scope remains readable.
-    unrelated=scopes.RouteIdentity(s.who.domain_id,s.who.consumer_id,s.who.contract_version,
-        {**s.who.scope,'id':'NVDA','entities':['NVDA']})
-    assert reads.gate_read(unrelated).route=='legacy'
-    record_property('actual_snapshot_dependency_rejection',json.dumps({'root':str(verified_isolation_root()),
-        'failure':failure,'basis':s.basis,'reasons':reasons,'approval_chain':s.repo.read_chain('dependent')}))
-
-
 def test_current_dependency_allows_idempotent_actual_approval_and_current_authorization(ready):
     s=ready
     approval=s.repo.record_approval(approval_id='same',cycle_id='dependent',revision_no=s.revision['revision_no'],
@@ -110,7 +54,6 @@ def multi_routine_basis(business_inputs, isolated):
     """Real role compute/publish and Chief binding; external transports are fixtures."""
     from ats.data import document_assets
     from ats.data.stores.unstructured import get_platform_unstructured_store
-    from ats.workflow import acceptance_matrix as matrix
     repository = get_platform_unstructured_store()
     point = datetime.now(UTC)
     try:
@@ -124,10 +67,7 @@ def multi_routine_basis(business_inputs, isolated):
         repository.close()
     captured = {}
     def before(plan):
-        task = next(t for t in plan.tasks if t.task_id == 'fundamental-routine')
         captured['plan'] = plan
-        captured['matrix'] = matrix.freeze(plan, workflow_id='multi-routine',
-            identity=reads.task_identity(plan, task), batch_class='decision', model_execution=True)
     def runner(snapshot, manifest):
         captured['basis'] = snapshot.to_payload()
         captured['manifest'] = manifest
@@ -139,17 +79,13 @@ def multi_routine_basis(business_inputs, isolated):
     return SimpleNamespace(store=isolated, result=result, outcome=outcome, **captured)
 
 
-def test_actual_multi_routine_preserves_all_updates_in_checker_chief_and_reuse(multi_routine_basis, record_property):
+def test_actual_multi_routine_preserves_all_updates_in_chief_and_reuse(multi_routine_basis, record_property):
     from ats.agents.chief import assemble
-    from ats.workflow import acceptance_assertions as checks, decision_requirements as dr
+    from ats.workflow import decision_requirements as dr
     from ats.workflow.dispatcher import Dispatcher
     from ats.workflow.store import WorkflowStore
     s = multi_routine_basis
-    assertion = next(a for a in s.matrix.body['assertions']
-                     if a['id'] == 'analysis.'+s.outcome.instance_key)
-    actual, refs = checks._analysis(s.matrix.body, assertion,
-                                  {'store':s.store, 'dispatch':s.result.as_dict()})
-    assert len(actual['outputs']) == 3 and set(s.outcome.projection_refs) <= set(refs)
+    # The acceptance checker's re-measurement went with acceptance_* (r5 8.4); the Chief-side checks below remain.
     items = [i for i in s.basis['items'] if i['agent_role'] == 'fundamental_expectation_update']
     assert {i['projection_id'] for i in items} == set(s.outcome.projection_refs)
     dr.validate_chief(s.store, s.basis, at=datetime.fromisoformat(s.plan.as_of))
@@ -251,9 +187,9 @@ def test_standalone_chief_refuses_incomplete_routine_producer_bundle(multi_routi
 
 
 @pytest.mark.parametrize('damage', ['omit', 'duplicate', 'hash', 'lineage', 'vintage', 'scope', 'schema', 'expired', 'producer', 'narrative_number'])
-def test_multi_routine_member_damage_refuses_actual_checker_and_chief(multi_routine_basis, damage):
+def test_multi_routine_member_damage_refuses_chief(multi_routine_basis, damage):
     import copy
-    from ats.workflow import acceptance_assertions as checks, decision_requirements as dr
+    from ats.workflow import decision_requirements as dr
     s = multi_routine_basis
     actual = copy.deepcopy(s.result.as_dict())
     basis = copy.deepcopy(s.basis)
@@ -302,10 +238,7 @@ def test_multi_routine_member_damage_refuses_actual_checker_and_chief(multi_rout
         column, value = columns[damage]
         s.store.conn.execute('UPDATE task_projection_envelopes SET '+column+'=? WHERE projection_id=?',(value,ref))
         s.store.conn.commit()
-    assertion = next(a for a in s.matrix.body['assertions'] if a['id']=='analysis.'+s.outcome.instance_key)
-    with pytest.raises((ValueError, RouteUnavailable)):
-        checks._analysis(s.matrix.body, assertion, {'store':s.store,'dispatch':actual})
-    with pytest.raises((RouteUnavailable, ValueError)):
+    with pytest.raises((ReadUnavailable, ValueError)):
         dr.validate_chief(s.store, basis, at=datetime.fromisoformat(s.plan.as_of))
 
 
@@ -337,9 +270,9 @@ def test_standalone_frozen_routine_rechecks_terminal_producer_before_use(multi_r
         s.store.conn.execute('UPDATE task_projection_envelopes SET agent_run_id=? WHERE projection_id=?',
             ('missing-producer', row['projection_id']))
     s.store.conn.commit()
-    with pytest.raises(RouteUnavailable):
+    with pytest.raises(ReadUnavailable):
         dr.validate_chief(s.store, basis, at=at)
-    with pytest.raises((RouteUnavailable, ValueError)):
+    with pytest.raises((ReadUnavailable, ValueError)):
         repository.record_approval(approval_id='late-refused', cycle_id='late-producer',
             revision_no=revision['revision_no'], decision_hash=revision['decision_hash'], decision='approved',
             reviewer='fixture-human', idempotency_key='late-refused')

@@ -25,7 +25,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .decision import Action, normalize_action
 
@@ -58,6 +58,7 @@ ExitReason = Literal[
     "risk_forced",          # 风控强制减仓，不是主动判断
     "boss_override",        # 人工干预
     "drift",                # ⚠️ 以上都不是 —— 没有按任何说过的理由退出
+    "expired",              # 期权到期：到期日已过、持仓里已没有它，且没有平仓成交（推断）
 ]
 # drift 是 agent 版的"没遵守计划"。人类日志里"是否遵守计划"对机器恒真，
 # 但系统确实会在计划之外平仓（风控级联、Chief 换了套说法），这一类专门抓它。
@@ -175,7 +176,10 @@ class TradeEpisode(BaseModel):
     """
 
     episode_id: str                     # 回合唯一标识
-    symbol: str                         # 标的代码
+    symbol: str                         # 标的代码（期权为其标的）
+    instrument_key: str = ""            # 合约：股票同 symbol，期权为 OCC 代码；空 = 同 symbol
+    sec_type: str = "STK"               # STK | OPT
+    multiplier: float = 1.0             # 每张合约对应股数（期权通常 100）；价格按每股记
     direction: Literal["long", "short"] = "long"   # 多头 / 空头
     origin: EpisodeOrigin = "system"    # 这个回合的单是系统下的、手工下的，还是存量持仓
     status: Literal["open", "closed"] = "open"     # 是否已平仓
@@ -215,8 +219,27 @@ class TradeEpisode(BaseModel):
     horizon_overdue_days: int | None = None      # 超过计划持有期多少天（drift 的实时形态）
     # §11.2（任务 7.1）：LLM 产生的标注必须携带来源与判定时点——与确定性
     # 计算结果在数据上可区分。写入口由 execution.llm_boundary 白名单强制。
-    invalidation_source: str = ""                # "llm" / ""（确定性或未判定）
+    invalidation_source: str | None = None       # "llm" / None（确定性或未判定）；写库一律 NULL
     invalidation_checked_at: datetime | None = None   # 最近一次 LLM 判定时刻
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate_null_and_blank(cls, data):
+        """读库防御：NULL 与空串都可能出现在库里。
+
+        加列之前的行读出来是 NULL，旧代码写过 ""。两者对 invalidation_source 都表示
+        "未判定"，统一成 None；其他有默认值的字段读到 NULL 时取默认值。没有默认值的
+        事实字段（episode_id、opened_at 等）读到 NULL 照旧报错。
+        """
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        if data.get("invalidation_source") == "":
+            data["invalidation_source"] = None
+        for name, field in cls.model_fields.items():
+            if name in data and data[name] is None and not field.is_required():
+                data.pop(name)
+        return data
 
     @property
     def decision_gradeable(self) -> bool:

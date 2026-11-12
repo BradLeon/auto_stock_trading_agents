@@ -60,6 +60,11 @@ def load_policy(source_id: str, *, path: str | Path | None = None) -> dict[str, 
         raise ValueError(f"unstructured source not registered for acceptance: {source_id}")
     if policy.get("domain") != "unstructured":
         raise ValueError(f"source {source_id} is not an unstructured source")
+    rules = policy.get("policy") or {}
+    if isinstance(rules.get("symbols"), dict):              # `{from_pead: [...]}` (config.pead_selection)
+        from ....config import pead_selection
+
+        policy["policy"] = {**rules, "symbols": pead_selection(rules["symbols"], where=f"{source_id}.policy.symbols")}
     return policy
 
 

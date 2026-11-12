@@ -198,7 +198,7 @@ def ingest_configured_batch(*, store=None) -> AcquisitionBatch:
 
 def stored_articles(since: datetime, *, source_match: str = "", store=None,
                     limit: int = 500, allow_incomplete: bool = False,
-                    consumer: str = "pead_research") -> list[Article]:
+                    consumer: str = "layer") -> list[Article]:
     """Read research bodies from the shared document asset store; never uses network."""
     from .stores.unstructured import get_data_ingestion_store
     from .source_cache import _split_frontmatter

@@ -14,6 +14,7 @@ import functools
 import logging
 import os
 import re
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -72,6 +73,9 @@ class Secrets(BaseSettings):
     ibkr_port: int = 7497
     ibkr_client_id: int = 11
     ibkr_account: str = ""
+    # Flex Web Service (the broker's own execution record, a business day behind; trader/flex_statement.py).
+    ibkr_flex_token: str = ""
+    ibkr_flex_query_id: str = ""
 
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
@@ -199,6 +203,9 @@ class JournalConfig(BaseModel):
     enabled: bool = True
     reconcile_at: str = "16:10"                     # America/New_York
     horizons: list[int] = Field(default_factory=lambda: [1, 5, 20, 60])
+    # From this date every system order carries an `ats:` orderRef, so an untagged
+    # fill that matches no local order is a human order, not an unknown. None = off.
+    manual_classification_since: date | None = None
 
 
 class SectorBrief(BaseModel):
@@ -453,6 +460,28 @@ def is_pead_target(symbol: str) -> bool:
     touched them. Coverage is now declared, not inferred from the filesystem.
     """
     return symbol.upper() in {s.upper() for s in load_pead_global().get("targets", [])}
+
+
+PEAD_LISTS = ("targets", "observe")
+
+
+def pead_selection(spec, *, where: str = "") -> list[str]:
+    """A company list written in a data config: a literal list, or a selection from config/pead.yaml.
+
+    2026-11-04: collection configs carried hand copies of the PEAD names and drifted (names added to `targets`
+    got no consensus, financials, chain evidence or IBKR news). `{from_pead: [targets, observe], exclude: [...]}`
+    keeps a source inside the PEAD scope, so one company is collected once and read by every analyst. `exclude`
+    names what a source cannot or should not cover; an excluded name that has left the lists is simply ignored.
+    """
+    if not isinstance(spec, dict):
+        return [str(entity) for entity in spec or []]
+    lists = spec.get("from_pead") or []
+    if not lists or any(name not in PEAD_LISTS for name in lists):
+        raise ValueError(f"{where or 'entities'}: from_pead must name {'/'.join(PEAD_LISTS)}")
+    pead = load_pead_global()
+    exclude = {str(s).upper() for s in spec.get("exclude") or []}
+    selected = dict.fromkeys(str(s).upper() for name in lists for s in pead.get(name) or [])
+    return [entity for entity in selected if entity not in exclude]
 
 
 def pead_observe_list() -> list[str]:

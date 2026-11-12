@@ -20,6 +20,7 @@ from ...schemas.macro_strategy import (
     SectorTilt,
     ThemeAssess,
 )
+from ...llm.telemetry import capture_calls
 from ..base import run_structured
 from . import assemble, indicators, regime
 from .outputs import MacroReviewLLMView
@@ -273,7 +274,8 @@ def projection_extras(review: MacroReview) -> dict:
         "horizon": (review.horizon or "").strip()[:200],
         "risks": [str(x)[:300] for x in (review.top_risks or [])[:6]],
         "falsifier": (review.falsifier or "").strip()[:400],
-        "sector_tilts": [{"sector": x.sector, "stance": x.stance, "rationale": x.rationale[:240]}
+        "sector_tilts": [{"sector": x.sector, "stance": x.stance, "rationale": x.rationale[:240],
+                          "sector_key": x.sector_key, "etf": x.etf, "etf_name": x.etf_name}
                          for x in (review.sector_tilts or [])[:10]],
         "asset_implications": (review.asset_implications or "").strip()[:400],
     }
@@ -315,6 +317,17 @@ def _publish_projection(store, review: MacroReview) -> None:
                  review.name, review.quadrant)
     except Exception as exc:  # noqa: BLE001 - 发布失败留痕，不影响评审落库
         log.warning("macro %s: projection publish failed: %s", review.name, exc)
+
+
+def _sector_universe_block(cfg: MacroConfig) -> str:
+    """The closed list a sector tilt must name, so each row maps to one representative ETF."""
+    if not cfg.sector_universe:
+        return ""
+    lines = ["## 可选板块清单（`sector_tilts` 每一行的 `sector_key` 必须从这里选；没有对应板块就留空）", ""]
+    lines += [f"- `{x.key}`：{x.label}" for x in cfg.sector_universe]
+    lines += ["", "「信息技术（含半导体）」的权重里半导体占比很高；观点是“半导体以外的信息技术”时选 `software`，"
+              "是半导体时选 `semiconductors`。ETF 由系统按 key 配，你不用写。"]
+    return "\n".join(lines)
 
 
 def _prior_block(prior: MacroReview | None) -> str:
@@ -382,20 +395,41 @@ def run(name: str = "macro", *, use_llm: bool = True, live_data: bool = True) ->
     context = mc.as_context()
     block = _det_block(det)
     comparison = _prior_block(prior)
-    if block or comparison:
-        context = "\n\n".join(x for x in (comparison, block, context) if x)
+    universe = _sector_universe_block(cfg)
+    if block or comparison or universe:
+        context = "\n\n".join(x for x in (comparison, block, universe, context) if x)
 
     try:
-        view: MacroReviewLLMView = run_structured("macro_strategist", MacroReviewLLMView,
-                                                  context, skill_slug="macro-strategist")
+        with capture_calls() as calls:
+            view: MacroReviewLLMView = run_structured("macro_strategist", MacroReviewLLMView,
+                                                      context, skill_slug="macro-strategist")
     except Exception as exc:  # noqa: BLE001
         log.warning("macro review LLM failed for %s: %s", name, exc)
         return latest or prior or MacroReview(name=name, as_of=started, regime="(LLM unavailable)")
 
     review = _to_review(name, cfg, view, det, prior=prior, as_of=started)
+    review = _mark_completeness(review, view, truncated=bool(calls) and calls[-1].truncated,
+                                factset_expected=det.get("factset_material") is not None)
     store.save_macro_review(review)
     _publish_projection(store, review)
     return review
+
+
+def _mark_completeness(review: MacroReview, view: MacroReviewLLMView, *, truncated: bool,
+                       factset_expected: bool) -> MacroReview:
+    """Record whether the model's answer is whole, instead of letting defaults pass for content.
+
+    A truncated answer still parses: the relay returns the finished parameters as closed JSON (2026-11-12).
+    No retry here — a rerun is the user's call (cost); the review is kept, labelled, and logged.
+    """
+    missing = [field for field, value in view if value in ("", [], None)
+               and (factset_expected or field != "factset_earnings_assessment")]
+    if truncated:
+        log.warning("macro %s: model output truncated at max_tokens; empty fields: %s",
+                    review.name, ", ".join(missing) or "(none)")
+    elif missing:
+        log.warning("macro %s: model left fields empty: %s", review.name, ", ".join(missing))
+    return review.model_copy(update={"llm_truncated": truncated, "llm_missing_fields": missing})
 
 
 def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
@@ -414,10 +448,19 @@ def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,
             transmission=tv.transmission,
             signal=tv.signal if tv.signal in SIGNALS else "neutral", note=tv.note))
 
-    tilts = [SectorTilt(sector=tv.sector.strip(),
-                        stance=tv.stance if tv.stance in STANCES else "中性",
-                        rationale=tv.rationale)
-             for tv in view.sector_tilts if tv.sector.strip()]
+    universe = {x.key: x for x in cfg.sector_universe}
+    tilts = []
+    for tv in view.sector_tilts:
+        if not tv.sector.strip():
+            continue
+        # The ETF is the config's, resolved from the key the model chose; an unknown key is dropped, not guessed.
+        known = universe.get(tv.sector_key.strip())
+        if tv.sector_key.strip() and known is None:
+            log.warning("macro %s: unknown sector key %r for %r", name, tv.sector_key, tv.sector)
+        tilts.append(SectorTilt(
+            sector=tv.sector.strip(), stance=tv.stance if tv.stance in STANCES else "中性",
+            rationale=tv.rationale, sector_key=known.key if known else "",
+            etf=known.etf if known else "", etf_name=known.etf_name if known else ""))
 
     assessment = view.factset_earnings_assessment
     material = (det or {}).get("factset_material")

@@ -1,0 +1,38 @@
+# Sandisk (SNDK) — PEAD config · L5 存储：纯 NAND（2025 年从西部数据分拆）。
+# 2026-11-04 新入 targets，新建。财年 6 月底结，季报约在 2/5/8/11 月初。
+# 叙事依据（2026-11 网络检索，二手来源为主）：AI 数据中心企业级 SSD 放量 + NAND 涨价，FQ3 FY2026 营收同比约 +250%、
+# 非 GAAP 毛利率约 78%；多份多年供货协议锁定了 FY2027 三分之一以上比特。空方关注：毛利扩张主要来自价格而非出货量。
+
+symbol: SNDK
+company_name: "Sandisk"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+sector_etf: SMH
+benchmark: QQQ
+run_up_warn_pct: 6.0
+long_threshold: 1.3           # 高波动、价格驱动的周期股，门槛抬高
+
+# 权重之和 = 1.00
+scorecard_dims:
+  - {key: forward_guide,   weight: 0.25, label: 次季营收/EPS 指引（中枢 vs 卖方）}
+  - {key: nand_pricing,    weight: 0.20, label: NAND 价格 vs 比特出货（增长靠涨价还是靠量）}
+  - {key: datacenter_ssd,  weight: 0.20, label: 数据中心/企业级 SSD 营收与客户长约}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率}
+  - {key: revenue,         weight: 0.10, label: 营收超预期}
+  - {key: supply,          weight: 0.05, label: 行业产能与中国厂商（长江存储等）供给}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：价格周期与长约措辞}
+
+signal_chain:
+  - {symbol: MU,        role: peer}        # NAND/企业级 SSD 同业
+  - {symbol: SKHY,      role: peer}        # 海力士 Solidigm 企业级 SSD
+  - {symbol: "005930.KS", role: peer}
+  - {symbol: AMZN,      role: downstream}  # 云厂 SSD 采购
+  - {symbol: GOOG,      role: downstream}
+  - {symbol: MSFT,      role: downstream}
+  - {symbol: META,      role: downstream}
+  - {symbol: LRCX,      role: upstream}    # NAND 刻蚀/沉积设备
+
+narrative_seed: >
+  分拆后的纯 NAND 公司；AI 推理与数据湖带来的企业级 SSD 需求把 NAND 从过剩拉到紧缺，
+  营收与毛利率在 2026 年跳升，多年供货协议提高了能见度；
+  市场分歧在于增长有多少来自价格、多少来自比特出货——价格驱动的毛利最易随供给回落；
+  中国 NAND 产能与行业扩产节奏是主要风险，次季指引是股价锚。

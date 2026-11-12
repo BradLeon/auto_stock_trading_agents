@@ -1,10 +1,16 @@
 # 旧实现退役 Runbook（Phase F，2026-10-17）
 
-> 写给要决定「什么时候可以删旧代码」的人。先说结论（**2026-10-17 的快照，最新数字见下面第〇节**）：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+> 写给要决定「什么时候可以删旧代码」的人。先说结论（**2026-10-17 的快照，最新数字见下面「〇·〇」**）：**27 个登记条目里，4 个已退出（2026-10-20 经你批准退役 `scheduler.hardcoded_serial_run`），23 个还不能退。** 新路径已在生产上跑，但旧的读写还在，退役要等清零、对账、回滚窗口三件事都有证据，而且由人批准。本文把「判据工具做完了」和「当前退出结果」分开写，不混在一起。
+
+## 〇·〇、2026-11-11 现状
+
+**登记处 38 条：37 条已退役，1 条 pending。** R5 的 20 条已由 `switch-trade-path-and-retire-r5` 全部退役（R5a 读取侧、R5b 写入与入口侧 11-07/08，R5c 切换期工具 11-10，R5d 读路由与资格机制 11-11），门 `trade_path_cutover` 于 11-07 观察窗口结论签字时开启。剩下的 `legacy_entry.research_owner_legacy_mode` 是有意保留的技术债（对外已是 `ats dispatch pause/resume`，库内取值仍为 `legacy`），等另开 change 取消开关。另有 6 张表登记为长期在用（`task_projections`、`evidence_fact_projections.legacy_observation_id`、`pead_dossier`、`sector_reviews`、`macro_reviews`、`technical_reviews`），不退役。
+
+逐条状态以 `ats retirement decide --drill-reference "verification.md 3.9 回退演练（2026-10-29）"` 为准；下面「〇」起是 10-27 当时的分组记录，保留作历史。
 
 ## 〇、2026-10-27 更新：分组、依赖与门（退役变更 retire-legacy-and-migration-tooling）
 
-G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/changes/retire-legacy-and-migration-tooling/verification.md`，78 项全部通过）。从这一天起，登记处不再只是一张平铺的清单，而是带批次、依赖与门的退役计划。**下面第一至第九节保留 2026-10-17 的原文与快照，数字以本节为准。**
+G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/changes/archive/2026-11-12-retire-legacy-and-migration-tooling/verification.md`，78 项全部通过）。从这一天起，登记处不再只是一张平铺的清单，而是带批次、依赖与门的退役计划。**下面第一至第九节保留 2026-10-17 的原文与快照，数字以本节为准。**
 
 **登记处现在是 41 条**（10-27 起 `task_projections.legacy_columns`、`evidence_fact_projections.legacy_observation_id` 移出待退项：前者是信息分析师的抽取缓存，后者是事实投影的血缘键，都在用）（`ats retirement decide` 会逐条列出）：
 
@@ -34,26 +40,28 @@ G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/c
 
 ### 〇·二、R5 的接续方式（任务 9.2）
 
-R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门 `trade_path_cutover` 在那个 change 的 5.4（观察窗口结论由你签字）时才记为已满足，之后才按下表逐条退役；本 change 不替它开门。
+R5 的 20 条由 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5` 接手。门 `trade_path_cutover` 在那个 change 的 5.4（观察窗口结论由你签字）时才记为已满足，之后才按下表逐条退役；本 change 不替它开门。
 
 | R5 条目 | 接手任务（switch-trade-path-and-retire-r5） |
 |---|---|
-| `chief.legacy_table_direct_reads` | 2.1 改读快照 → 6.1 退役 |
-| `store.direct_trade_reads` | 2.2 改读 Internal State → 6.2 退役 |
-| `sector_reviews`、`legacy_read_models` | 6.3 |
-| `macro_reviews`、`technical_reviews` | 6.5 |
-| `decision_roles.unwired_to_governed_read_api` | 6.4 |
-| `memory.store.legacy_decision_write_path` | 2.3 改读 → 7.1 移除镜像写 |
-| `trades.client_order_id.legacy_derivation` | 7.2 |
-| `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot` | 7.3 |
-| `journal.report.render_ledger` | 7.4 |
-| `risk.checks.pre_trade_adapter` | 7.5 |
-| `migration.batch_read_cutover` | 8.5 |
-| `migration.schedule_cutover` | 8.6 |
-| `migration.intake`、`migration.analysis_verification` | 8.7（`isolated_entry` 只删可删部分，见其 8.3） |
-| `migration.dispatch_dedup` | 8.8（必须在 8.6 之后） |
-| `migration.trade_cutover_tooling` | 8.4（`joint_cutover`、`boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`ats cutover`） |
-| `migration.read_route_and_qualification` | 9.2–9.3（读路由与资格机制收窄：`consumer_api.read_input` 收窄为「查声明 → 查数据产品 → 读」，再删路由表、资格账本、指纹绑定与边界接线证据） |
+| `chief.legacy_table_direct_reads` | 2.1 改读快照 → 6.1 退役（**2026-11-07 已退役**，用户批准） |
+| `store.direct_trade_reads` | 2.2 改读 Internal State → 6.2 退役（**2026-11-07 已退役**，用户批准） |
+| `sector_reviews`、`legacy_read_models` | 6.3（**2026-11-07 用户批准方案 A**：`sector_reviews` 改登记为行业分析师自有工作记录，移出待退，不登记墓碑；`legacy_read_models` 消费方 `zero` 判清零、`decide` 判可退出，**2026-11-07 已退役**，用户批准） |
+| `macro_reviews`、`technical_reviews` | 6.5（同 6.3 方案 A：改登记为宏观、技术面分析师自有工作记录，移出待退） |
+| `decision_roles.unwired_to_governed_read_api` | 6.4（**2026-11-07 已退役**，用户批准方案 1：风控、Clerk 改经 `read_input`；风控业务范围取实时持仓；风控新授权 `HISTORY_DATA`；扫描器补全风控入口并把决策角色直连运行时源记为 `runtime_bypass`） |
+| `memory.store.legacy_decision_write_path` | 2.3 改读 → 7.1 移除镜像写（**2026-11-08 已退役**，用户批准：删 `mirror_revision_to_legacy`、`set_cycle_approval`、`save_chief_run`；旧 `cycles`/`decisions` 表只读保留） |
+| `trades.client_order_id.legacy_derivation` | 7.2（**2026-11-08 已退役**，用户批准：旧派生式库内 0 行、代码无引用；52 行 7 月空订单号历史行不迁移、不加标记，按全新账本看待） |
+| `scheduler.adhoc_journal_jobs`、`performance.legacy_snapshot` | 7.3（**2026-11-08 已退役**，用户批准整个删除：`ats journal reconcile/mark/episodes/score` 与 `ats trader snapshot` 不保留单步调试，账本只经 `ats clerk run`） |
+| `journal.report.render_ledger` | 7.4（**2026-11-08 已退役**，用户批准，代码不变：台账只读 `journal_entries`，不读 trades/fills 原始表） |
+| `risk.checks.pre_trade_adapter` | 7.5（**2026-11-08 已退役**，用户批准方案 A：`ats risk check` 改调 `review_revision`，拿不到账户时驳回而非放行；`paired_business` 旧风控一侧返回 retired；`pre_trade` 删除） |
+| `migration.batch_read_cutover` | 8.5（**2026-11-10 已退役**，用户批准：删 `batch_manifest`、`read_cutover`、`read_deployment`，`ats batch`、`ats read` 改提示桩） |
+| `migration.schedule_cutover` | 8.6（**2026-11-10 已退役**，用户批准：删 `schedule_cutover`、`cutover_acceptance`，其检查经 8.3 判定已有长期等价覆盖；`ats dispatch` 的所有权与回滚去重子命令改提示桩，`ledger` 留到 8.8） |
+| `migration.intake`、`migration.analysis_verification` | 8.7（**2026-11-10 已退役**，用户批准：删 `intake`、`intake_verification`、`scoped_intake`、`analysis_verification`、`consumer_disposition`、`isolated_entry`（11-08 定整删），`ats intake` 改提示桩；退役工具的扫描器已于 8.1 迁到 `consumer_scan`） |
+| `migration.dispatch_dedup` | 8.8（**2026-11-10 已退役**，用户批准：覆盖核验改名 `ats dispatch coverage-expected/coverage-compare`，搬移前后输出一致；删 `dispatch_claims` 与 `ats dispatch` 的 `runtime-*`、`ledger` 等迁移期子命令） |
+| `migration.trade_cutover_tooling` | 8.4（**2026-11-10 已退役**，用户批准：删 `boundary_drill`、`acceptance_*`、`paired_business`、`shadow_*`、`execution/shadow_execution`，`ats drill`、`ats cutover`、`ats shadow` 改提示桩；写账前的隔离根检查迁到 `execution/trade_publication`；`joint_cutover` 按 11-08 调用图核对移到 9.3） |
+| `migration.read_route_and_qualification` | 9.2–9.3（**2026-11-11 已退役**，用户批准 D1–D5：读取收窄为「查声明 → 查 scope → 读」，长期部件搬到 `workflow/read_scope.py`；删路由表、资格账本、读窗口、读恢复、联合切换、写入边界守卫与指纹清单；启动检查改读交易路由登记表；`ats consumer-cutover`、`ats data assurance` 改提示桩） |
+
+**第 6、7 组复验 V4–V6（2026-11-10，tasks 6.6、7.6）：** 两组合入后的首次定时运行都正常。chief-daily 11-09 22:45（`chief-20261109-144500`）到 `pending_approval`，风控评审 approved，风控读取全部经 `read_input`，新周期不写旧 `cycles`/`decisions` 表；clerk-daily 11-10 07:00 completed，六步均有结果。全量测试对照见 `docs/TEST_BASELINE.md` 第 6、7 组两行。
 
 每条退役沿用本 change 的做法：V1–V3 → 删除 → V4–V6，并把登记改成 retired、附清零证明；`ats retirement decide` 显示「外部门未满足」的 20 条，在那个 change 的 5.4 之后变为可判定。
 
@@ -152,11 +160,11 @@ R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门
 | 待退出的旧东西 | 条目举例 | 责任 | 触发条件与下一步 |
 |---|---|---|---|
 | 登记里只有模块路径、无法静态判定的消费方（45 行） | `runtime.cli`、`graph.pead`、`memory.store.*` | 退役登记的维护者 | 补角色映射（`MODULE_TO_ROLE`）或把消费方改为角色/入口点；之后复跑 `zero`，不需要改业务代码 |
-| Chief、Risk Officer、Clerk 仍绕过受治理读取面 | `chief.legacy_table_direct_reads`、`decision_roles.unwired_to_governed_read_api`、`store.direct_trade_reads` | 决策与执行域（Phase F 之后） | 先接入受治理读取面并拿到 zero；**实盘保持锁定**，不在本 change 范围 |
+| Chief、Risk Officer、Clerk 仍绕过受治理读取面 | `chief.legacy_table_direct_reads`、`decision_roles.unwired_to_governed_read_api`、`store.direct_trade_reads` | 决策与执行域 | **2026-11-07 三条均已退役**（switch-trade r5 tasks 6.1、6.2、6.4）；实盘仍锁定 |
 | PEAD 图里路由门控的旧供应商回退 | `graph.pead.internal_risk_and_sizing`（4 处回退在 `graph/pead.py`） | 基本面域 | 观察窗口结束且不再需要「退回旧路径」之后，由你批准删除；删除前它们是回滚目标 |
 | 旧调度器的临时日记作业 | `scheduler.adhoc_journal_jobs` | 调度域 | 随 Clerk 排程（交易路径切换）收口。`scheduler.hardcoded_serial_run` 已于 2026-10-20 退役：旧调度器代码与 `com.ats.schedule` 一并删除 |
 | 旧决策写路径、`client_order_id` 旧派生 | `memory.store.legacy_decision_write_path`、`trades.client_order_id.legacy_derivation` | 原 owner（决策/记账域） | 随 Chief/Clerk 迁移，历史清理由原 owner 负责 |
-| 旧读模型与旧表 | `legacy_read_models`、`task_projections.legacy_columns`、`pead_dossier`、`sector_reviews` | 各读取方 | 对应消费方切到投影后复核 `zero` |
+| 旧读模型与旧表 | `legacy_read_models`、`task_projections.legacy_columns`、`pead_dossier`、`sector_reviews` | 各读取方 | 对应消费方切到投影后复核 `zero`（2026-11-07：`pead_dossier`、`sector_reviews` 及 `macro_reviews`、`technical_reviews` 已改登记为分析师自有记录，只由所有者读，`tests/test_analyst_records.py` 守住） |
 
 ## 八、不再要求「旧全用途业务一致」
 

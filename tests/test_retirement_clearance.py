@@ -15,6 +15,7 @@ And one the other way: a tombstone that says `retired` while still readable must
 
 import pytest
 
+from ats.workflow import consumer_scan as cs
 from ats.workflow import retirement_clearance as rc
 
 
@@ -73,14 +74,14 @@ def test_the_access_reader_path_does_not_need_the_module_mapping():
 
 
 def test_an_unmapped_module_path_is_rejected_rather_than_guessed():
-    from ats.workflow import intake_verification as iv
+    from ats.workflow import consumer_scan as cs
 
     with pytest.raises(KeyError) as excinfo:
         rc.role_for("agents.unknown.thing")
     assert "agents.unknown.thing" in str(excinfo.value)
 
     verdicts = rc.verify_consumer_zero("x", ["agents.unknown.thing"],
-                                      scan=iv.scan_consumer_access)
+                                      scan=cs.scan_consumer_access)
     assert verdicts[0].verdict == rc.PARTIAL
 
 
@@ -108,9 +109,14 @@ def test_every_role_shaped_registered_path_maps_to_a_known_role():
             if consumer in rc.MODULE_TO_ROLE:
                 rc.role_for(consumer)  # raises when mapped but broken
                 checked += 1
-    assert checked >= 6, (
-        "expected the registry's role-shaped consumers to be mapped; a drop here "
-        "means the mapping stopped covering them")
+    # 6 → 4 on 2026-11-07: the three analyst-record tombstones (each naming agents.chief.assemble) left the
+    # registry when the tables were reclassified as analyst-owned (switch-trade r5 tasks 6.3 / 6.5); 4 → 0 the
+    # same day when decision_roles.unwired_to_governed_read_api retired and its four role consumers cleared
+    # (task 6.4). With no role-shaped consumer left in the registry, the mapping itself is checked instead.
+    for consumer in rc.MODULE_TO_ROLE:
+        rc.role_for(consumer)
+    assert {"agents.risk_officer.review", "trader.execute", "execution.clerk",
+            "agents.fundamental"} <= set(rc.MODULE_TO_ROLE)
 
 
 # --- 12.2 reconciliation -----------------------------------------------------
@@ -313,11 +319,28 @@ def test_g0_is_open_only_when_every_item_has_an_open_verdict_and_the_conclusion_
     assert not rc.read_g0_gate(tmp_path / "missing.md").is_open
 
 
-def test_an_external_gate_is_never_opened_from_here():
+def test_trade_path_cutover_opens_only_on_a_signed_observation_conclusion(tmp_path):
     from ats.workflow import retirement_clearance as rc
 
-    opened, why = rc.evaluate_gate("trade_path_cutover", g0=rc.GateStatus("G0", True, "ok"))
-    assert not opened and "external gate" in why
+    def record(text):
+        path = tmp_path / "observation.md"
+        path.write_text(text, encoding="utf-8")
+        return rc.read_trade_path_gate(path)
+
+    assert record("- [x] 确认\n\n**窗口结论签字：** 通过（用户，2026-11-07）\n").is_open
+    assert not record("### 签字\n\n- [ ] 我确认以上结论属实\n").is_open                 # no signature line at all
+    assert not record("**窗口结论签字：**\n").is_open                                         # blank is not a pass
+    assert not record("**窗口结论签字：** 未签\n").is_open
+    assert not record("**窗口结论签字：** 通过 / 不通过\n").is_open
+    assert not record("**窗口结论签字：** 不通过（停止条件 1 触发）\n").is_open
+    assert not rc.read_trade_path_gate(tmp_path / "missing.md").is_open
+
+    closed = rc.GateStatus("trade_path_cutover", False, "not signed")
+    opened = rc.GateStatus("trade_path_cutover", True, "signed")
+    shut, why = rc.evaluate_gate("trade_path_cutover", trade_path=closed)
+    assert not shut and "trade_path_cutover not met" in why
+    assert rc.evaluate_gate("trade_path_cutover", trade_path=opened) == (True, "")
+    assert rc.evaluate_gate("some_other_external_gate", trade_path=opened)[0] is False   # unknown gates stay shut
     assert rc.evaluate_gate("") == (True, "")
 
 
@@ -331,3 +354,64 @@ def test_an_entry_with_an_unmet_dependency_or_a_closed_gate_cannot_be_decided_re
     blocked_gate = rc.decide_entry("a", gate="G0", gate_open=False, gate_reason="gate G0 not met: 2 items", **clear)
     assert not blocked_gate.may_exit and "gate G0 not met" in blocked_gate.reason
     assert rc.decide_entry("a", gate="G0", gate_open=True, **clear).may_exit
+
+
+# --- store.direct_trade_reads: module consumers measured by their own source ----------------
+
+def test_trade_read_consumers_that_are_modules_are_zero_only_through_state_api(tmp_path, monkeypatch):
+    """risk.assess and channel.context are modules, not roles. They are zero when their source reads
+    trades/fills/performance only through `state_api`; the registered consumers of the entry all pass."""
+    verdicts = {v.consumer: v for v in rc.verify_consumer_zero(
+        "store.direct_trade_reads", ["agents.chief.assemble", "risk.assess", "channel.context"],
+        scan=cs.scan_consumer_access)}
+    assert {v.verdict for v in verdicts.values()} == {rc.ZERO}, {k: v.reason for k, v in verdicts.items()}
+
+    raw = tmp_path / "raw.py"
+    raw.write_text("def f(store):\n    return store.recent_trades('X')\n")
+    sql = tmp_path / "sql.py"
+    sql.write_text("from ..execution import state_api\nQ = 'SELECT * FROM performance ORDER BY rowid'\n")
+    quiet = tmp_path / "quiet.py"
+    quiet.write_text("def f():\n    return 1\n")
+    monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.raw", str(raw))
+    monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.sql", str(sql))
+    monkeypatch.setitem(rc.MODULE_TRADE_READ_SOURCES, "x.quiet", str(quiet))
+    found = {m: rc.verify_consumer_zero("store.direct_trade_reads", [m], scan=cs.scan_consumer_access)[0]
+             for m in ("x.raw", "x.sql", "x.quiet")}
+    assert all(v.verdict == rc.NOT_ZERO for v in found.values())
+    assert "direct_store_trade_read" in found["x.raw"].evidence["violations"][0]
+    assert "direct_trade_table_sql" in found["x.sql"].evidence["violations"][0]
+    # A module that reads nothing is not evidence of having moved onto the governed layer.
+    assert found["x.quiet"].evidence["call_path"] == []
+
+
+def test_g0_record_is_found_in_the_dated_archive_folder(tmp_path):
+    from ats.workflow import retirement_clearance as rc
+
+    changes = tmp_path / "changes"
+    archived = changes / "archive" / "2026-11-12-retire-legacy-and-migration-tooling" / "verification.md"
+    archived.parent.mkdir(parents=True)
+    archived.write_text("archived", encoding="utf-8")
+    assert rc._g0_verification_path(changes) == archived
+
+    active = changes / "retire-legacy-and-migration-tooling" / "verification.md"
+    active.parent.mkdir(parents=True)
+    active.write_text("active", encoding="utf-8")
+    assert rc._g0_verification_path(changes) == active
+
+
+def test_g0_default_path_points_at_an_existing_record():
+    from ats.workflow import retirement_clearance as rc
+
+    assert rc.G0_VERIFICATION.exists()
+
+
+def test_trade_path_record_is_found_in_the_dated_archive_folder(tmp_path):
+    from ats.workflow import retirement_clearance as rc
+
+    changes = tmp_path / "changes"
+    archived = changes / "archive" / "2026-11-12-switch-trade-path-and-retire-r5" / "observation.md"
+    archived.parent.mkdir(parents=True)
+    archived.write_text("**窗口结论签字：** 通过\n", encoding="utf-8")
+    path = rc._change_record_path(rc._TRADE_PATH_CHANGE, "observation.md", changes)
+    assert path == archived
+    assert rc.read_trade_path_gate(path).is_open is True

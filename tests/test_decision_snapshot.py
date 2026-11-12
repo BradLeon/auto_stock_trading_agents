@@ -182,37 +182,58 @@ def test_no_action_is_a_formal_terminal_outcome_with_reason(tmp_path):
         repo.transition("c1", to_status=CycleStatus.PENDING_RISK, actor="chief")
 
 
-# --- 3.5 legacy double-write ------------------------------------------------------ #
+# --- decision readers (2.3); the legacy mirror write is retired (switch-trade r5 7.1) ---------- #
 
-def test_mirror_keeps_legacy_read_entry_points_working(tmp_path):
+def test_decision_readers_read_the_audit_not_the_legacy_tables(tmp_path):
+    """Task 2.3: `last_chief_run` / `recent_decisions` read decision_cycles + decision_revisions;
+    the legacy `decisions` table is not written (task 7.1 retired the mirror)."""
     repo = _repo(tmp_path)
     store = repo.store
-    repo.create_cycle(cycle_id="chief-20260923-000000", trigger_source="manual")
-    rev = repo.append_revision(
-        cycle_id="chief-20260923-000000",
-        orders=[{"symbol": "AMD", "action": "buy", "notional_usd": 5000.0,
-                 "rationale": "L3 expanding"}],
-        rationale="r")
-    repo.mirror_revision_to_legacy("chief-20260923-000000",
-                                   rev["revision_no"], as_of=NOW)
-    # old read entry points return the mirrored content unchanged
+    repo.create_cycle(cycle_id="chief-20260923-000001", trigger_source="manual")
+    first = repo.append_revision(
+        cycle_id="chief-20260923-000001",
+        orders=[{"symbol": "AMD", "action": "buy", "notional_usd": 5000.0, "rationale": "first"}],
+        rationale="summary one")
+    second = repo.append_revision(
+        cycle_id="chief-20260923-000001",
+        orders=[{"symbol": "AMD", "action": "buy", "notional_usd": 3000.0, "rationale": "scaled"}],
+        rationale="summary two", parent_revision_no=first["revision_no"])
+    legacy = lambda: store.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+    assert legacy() == 0
     run = store.last_chief_run()
-    assert run is not None and run["cycle_id"] == "chief-20260923-000000"
-    assert [d["symbol"] for d in run["decisions"]] == ["AMD"]
-    decisions = store.recent_decisions(symbol="AMD")
-    assert decisions[0]["notional_usd"] == 5000.0
-    # replay-safe: mirroring twice does not duplicate rows
-    repo.mirror_revision_to_legacy("chief-20260923-000000",
-                                   rev["revision_no"], as_of=NOW)
-    assert len(store.recent_decisions(symbol="AMD")) == 1
+    assert run["cycle_id"] == "chief-20260923-000001" and run["manager_summary"] == "summary two"
+    assert [d["notional_usd"] for d in run["decisions"]] == [3000.0]      # the current revision only
+    assert [d["notional_usd"] for d in store.recent_decisions(symbol="AMD")] == [3000.0]
+    assert store.recent_decisions(symbol="NVDA") == []
+    assert legacy() == 0
 
 
-def test_mirror_skips_legacy_unknown_revisions(tmp_path):
-    repo = _repo(tmp_path)
-    store = repo.store
-    store.conn.execute(
-        "INSERT INTO decision_revisions (cycle_id, revision_no, decision_hash, "
-        "revision_source, legacy_ref, created_at) "
-        "VALUES ('c-old', 1, NULL, 'legacy_unknown', '[]', 't')")
-    repo.mirror_revision_to_legacy("c-old", 1, as_of=NOW)
-    assert store.recent_decisions() == []
+def test_only_versions_newer_than_the_frozen_snapshot_invalidate_it():
+    """2026-10-30 T0.2: the snapshot deliberately cites the brief a fundamental conclusion
+    used (D3-3), which may be older than the latest one. A version that already existed
+    when the snapshot was frozen is not a mid-cycle change; one published after it is."""
+    from ats.decision.snapshot import frozen_snapshot_stale_reasons
+
+    env = _envelope()
+    payload = build_research_snapshot(
+        registry=_registry(), projections={"layer": env, "macro": env},
+        scope=ProjectionScope(kind="portfolio")).to_payload()
+    payload["built_at"] = "2026-10-30T03:40:00+00:00"
+    row = {"projection_id": env.projection_id, "status": "published",
+           "content_hash": env.content_hash, "valid_until": _expiry(1),
+           "agent_role": "layer_analysis", "data_vintage_refs": ["dataset@2026-09-21"]}
+
+    class Store:
+        def __init__(self, created):
+            self.created = created
+
+        def get_task_projection(self, pid):
+            return row
+
+        def task_projection_envelopes(self, **kw):
+            return [{"projection_id": "f" * 32, "created_at": self.created,
+                     "data_vintage_refs": ["dataset@2026-09-21"]}]
+
+    assert frozen_snapshot_stale_reasons(Store("2026-10-30T03:20:00+00:00"), payload) == []
+    later = frozen_snapshot_stale_reasons(Store("2026-10-30T03:45:00+00:00"), payload)
+    assert later and "投影被新版本替换" in later[0]

@@ -186,6 +186,7 @@ def test_daily_configuration_does_not_implicitly_enable_additional_calls(monkeyp
     monkeypatch.setattr(target_research,'_publish_empty',lambda *a,**kw:'empty')
     store=SimpleNamespace(information_extraction_cache=lambda **kw:None,
         begin_information_processing=lambda *a,**kw:'version',finish_information_processing=lambda *a,**kw:None,
+        information_content_failures=lambda *a:0,
         save_task_projection=lambda **kw:'cache')
     target_research.run(store,'MSFT',config={'article_chars':40000,'max_articles_per_run':None},
         since=datetime(2026,10,5,tzinfo=UTC),use_llm=True)

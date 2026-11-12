@@ -24,13 +24,18 @@ from ...persistent_queue import require_queue_worker
 from ...runtime.repository import platform_data_db_path
 from ...sources.defeatbeta import query_documents as _query_hf
 from ...sources.defeatbeta import snapshot as _hf_snapshot
+from ...sources.sec_submissions import discover as _edgar_discover
+from ...sources.sec_submissions import due_entities as _due_entities
 from ...stores.unstructured import get_platform_unstructured_store
 from .sec import SECSourceUnavailable, SECTransport, fetch_filing
 from .sec import validate_filing as _filing_row
 from .transcripts import parse_transcript as _transcript_row
 
-DOCUMENT_SOURCE_IDS = frozenset({"defeatbeta_sec_filing_index", "sec_edgar_filing_body",
-                       "defeatbeta_earnings_transcript", "ai_hardware_knowledge_corpus"})
+DOCUMENT_SOURCE_IDS = frozenset({"defeatbeta_sec_filing_index", "sec_edgar_submissions_index",
+                       "sec_edgar_filing_body", "defeatbeta_earnings_transcript",
+                       "ai_hardware_knowledge_corpus"})
+# Filing discovery: the daily DefeatBeta copy of EDGAR, and EDGAR itself for the entities whose earnings are due now.
+FILING_INDEX_SOURCE_IDS = frozenset({"defeatbeta_sec_filing_index", "sec_edgar_submissions_index"})
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS data_fixed_source_snapshots (
     snapshot_id TEXT PRIMARY KEY, source_id TEXT NOT NULL, revision TEXT NOT NULL,
@@ -101,6 +106,17 @@ def _universe(entity: str, *, excluded_entities: tuple[str, ...] = ()) -> list[s
     return sorted(symbol for symbol in symbols if symbol not in excluded)
 
 
+def _known_ciks(store: Any) -> dict[str, str]:
+    """CIK per symbol as the filing indexes already recorded it (saves SEC a ticker-file request)."""
+    try:
+        rows = store.conn.execute(
+            "SELECT entity, json_extract(raw_json,'$.cik') FROM data_fixed_source_rows WHERE source_id IN (?,?) "
+            "AND status='accepted' AND entity!='' GROUP BY entity", tuple(sorted(FILING_INDEX_SOURCE_IDS)))
+        return {str(symbol).upper(): str(int(cik)) for symbol, cik in rows if str(cik or "").isdigit()}
+    except Exception:  # noqa: BLE001 - a fresh store has no rows yet; the ticker file covers it
+        return {}
+
+
 def _record_row(store: Any, *, source_id: str, snapshot_id: str, entity: str,
                 natural_key: str, row: dict[str, Any], status: str,
                 document_id: str = "", publication_hash: str = "",
@@ -112,7 +128,7 @@ def _record_row(store: Any, *, source_id: str, snapshot_id: str, entity: str,
     content_hash = _digest(payload + b"|" + status.encode() + b"|" +
                            publication_hash.encode() +
                            (b"|" + reason.encode() if reason else b""))
-    if source_id == "defeatbeta_sec_filing_index":
+    if source_id in FILING_INDEX_SOURCE_IDS:
         existing = store.conn.execute(
             "SELECT row_id FROM data_fixed_source_rows WHERE source_id=? AND "
             "snapshot_id=? AND natural_key=? AND raw_json=? AND status=? LIMIT 1",
@@ -215,7 +231,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
         try:
             policy = source["policy"]
             kind = source["source_kind"]
-            if kind in {"fixed_index", "fixed_transcript"}:
+            if kind in {"fixed_index", "fixed_transcript"} and source["adapter"] != "sec_edgar_submissions":
                 symbols = _universe(entity, excluded_entities=tuple(
                     str(value) for value in policy.get("excluded_entities") or ()))
                 row_limit = int(source["request_budget"]["max_rows_per_run"])
@@ -229,12 +245,25 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                 coverage_missing_entities = sorted(
                     set(symbols) - {str(row.get("symbol") or "").upper()
                                     for row in source_rows})
+            elif kind == "fixed_index" and source["adapter"] == "sec_edgar_submissions":
+                # Only the entities whose earnings are due now: a filing they have not made yet is not a gap, so
+                # coverage is missing only for an entity that could not be looked up.
+                symbols = [entity.upper()] if entity else _due_entities(
+                    now, days_before=int(policy["event_days_before"]),
+                    days_after=int(policy["event_days_after"]))
+                symbols = [symbol for symbol in symbols if symbol not in {
+                    str(value).upper() for value in policy.get("excluded_entities") or ()}]
+                snapshot = {"revision": "sec_submissions", "spec_sha256": "", "file_sha256": "",
+                            "file_updated_at": "", "source_url": "https://data.sec.gov/submissions/"}
+                source_rows, coverage_missing_entities = _edgar_discover(
+                    symbols, now=now, known_ciks=_known_ciks(store), budget=source["request_budget"],
+                    cache=REPO_ROOT / "var/cache/sec_company_tickers.json")
             elif kind == "official_body":
                 transport = SECTransport(source["request_budget"])
                 snapshot = {"revision": "sec_official", "spec_sha256": "",
                             "file_sha256": "", "file_updated_at": "",
                             "source_url": "https://www.sec.gov/Archives/edgar/data/"}
-                index_id = str(policy["discovery_source"])
+                index_ids = [str(value) for value in policy["discovery_sources"]]
                 # Each daily run has a bounded SEC request budget, so the candidate list is what the budget is spent
                 # on. A filing is a candidate only while it is not in the library and has not been given up on:
                 #   * already admitted -> not fetched again until `recheck_admitted_after_days` (default 7) have passed, and then
@@ -245,9 +274,10 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                 # fewest attempts, least recently tried, newest filing. Attempts are counted from the attempts ledger
                 # (data_fixed_source_attempts); rows recorded before it existed count once each.
                 budget = source["request_budget"]
-                query = ("WITH latest AS (SELECT raw_json,natural_key,observed_at,"
+                query = ("WITH latest AS (SELECT raw_json,natural_key,observed_at,source_id index_source,"
                          "ROW_NUMBER() OVER (PARTITION BY natural_key ORDER BY observed_at DESC) rn "
-                         "FROM data_fixed_source_rows WHERE source_id=? AND status='accepted'" +
+                         "FROM data_fixed_source_rows WHERE source_id IN (" +
+                         ",".join("?" for _ in index_ids) + ") AND status='accepted'" +
                          (" AND entity=?" if entity else "") +
                          "), published AS (SELECT natural_key,MAX(observed_at) last_row,"
                          "MAX(CASE WHEN status='accepted' THEN 1 ELSE 0 END) accepted,"
@@ -265,7 +295,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                          "okd AS (SELECT natural_key,MAX(attempted_at) last_ok "
                          "FROM data_fixed_source_attempts WHERE source_id=? AND outcome='accepted' "
                          "GROUP BY natural_key), "
-                         "ranked AS (SELECT latest.raw_json raw_json,latest.raw_json filing,"
+                         "ranked AS (SELECT latest.raw_json raw_json,latest.raw_json filing,latest.index_source index_source,"
                          "COALESCE(published.accepted,0) accepted,"
                          "COALESCE(okd.last_ok,published.last_row,'') last_ok,"
                          "MAX(COALESCE(tried.n,0),COALESCE(published.legacy_tries,0)) tries,"
@@ -273,19 +303,24 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                          "COALESCE(tried.last_try,published.last_row,'') last_try "
                          "FROM latest LEFT JOIN published USING(natural_key) LEFT JOIN tried USING(natural_key) "
                          "LEFT JOIN okd USING(natural_key) WHERE latest.rn=1) "
-                         "SELECT raw_json FROM ranked WHERE (accepted=0 AND missing<? AND tries<?) "
+                         "SELECT raw_json,index_source FROM ranked WHERE (accepted=0 AND missing<? AND tries<?) "
                          "OR (accepted=1 AND last_ok<?) ORDER BY accepted, "
                          "CASE WHEN json_extract(filing,'$.filing_date') >= date('now','-30 days') "
                          "THEN 0 ELSE 1 END, tries, last_try, "
                          "json_extract(filing,'$.filing_date') DESC LIMIT ?")
-                params: list[Any] = [index_id]
+                params: list[Any] = [*index_ids]
                 if entity:
                     params.append(entity.upper())
                 recheck = now - timedelta(days=int(budget.get("recheck_admitted_after_days", 7)))
                 params += [source_id, source_id, source_id, int(budget.get("max_missing_attempts", 3)),
                            int(budget.get("max_attempts_per_filing", 5)), _stamp(recheck),
                            int(budget["max_documents_per_run"])]
-                source_rows = [json.loads(row[0]) for row in store.conn.execute(query, params)]
+                index_of: dict[str, str] = {}
+                source_rows = []
+                for raw, index_source in store.conn.execute(query, params):
+                    filing_row = json.loads(raw)
+                    index_of[str(filing_row.get("accession_number") or "")] = str(index_source)
+                    source_rows.append(filing_row)
             else:
                 manifest = yaml.safe_load((REPO_ROOT / policy["manifest"]).read_text(
                     encoding="utf-8")) or {}
@@ -382,7 +417,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                             title=f"{symbol} {row['form_type']} {natural_key}",
                             published_at=str(row.get("filing_date") or ""),
                             carrier_format="html", min_chars=1000,
-                            metadata={"index_source_id": policy["discovery_source"],
+                            metadata={"index_source_id": index_of.get(natural_key, ""),
                                       "accession": natural_key,
                                       "index_filing_url": row["filing_url"],
                                       "extraction_stage": result.stage,

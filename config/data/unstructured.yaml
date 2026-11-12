@@ -32,7 +32,7 @@ datasets:
               ibkr_news, yfinance_live_news, macro_theme_news]
   sec_filing_index:
     record_types: [sec_filing_metadata]
-    sources: [defeatbeta_sec_filing_index]
+    sources: [defeatbeta_sec_filing_index, sec_edgar_submissions_index]
   sec_filing_documents:
     document_types: [regulatory_filing, company_release]
     sources: [sec_edgar_filing_body]
@@ -181,10 +181,13 @@ sources:
     adapter: ibkr_news
     status: registered
     cadence: daily
+    # 2026-11-04 (user): 36 bodies per run (was 10). The symbol list grew from 9 names to the PEAD targets + observe
+    # (27); one body per name is guaranteed first, the rest go to the newest headlines. At 10, 498 of 508 candidates
+    # were deferred on 11-03 and new targets got no company news at all.
     request_budget:
       lookback_days: 7
       slice_days: 3
-      max_body_requests: 10
+      max_body_requests: 36
       max_exploration_candidates: 2
     policy:
       access: tws_read_only
@@ -194,7 +197,9 @@ sources:
       freshness_policy: latest_verified_upstream_revision
       minimum_body_chars: 600
       lookback_days: 7
-      symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
+      # 2026-11-04 (user): the PEAD lists, not a hand copy of 9 names (the 7 new targets had no news). The Yahoo
+      # fallback takes this same scope, so it widens with it.
+      symbols: {from_pead: [targets, observe]}
       providers: dynamic_tws_session
       # IBKR 是股票新闻的主来源。Yahoo 只在 TWS/供应商不可达或某个
       # historical-news 切片失败时按相同标的范围兜底；“没有新闻”是正常结果，
@@ -227,7 +232,7 @@ sources:
         lookback_days: 7
         provider_lookup_attempts: 3
         provider_lookup_retry_seconds: 1
-        symbols: [NVDA, AMD, AVGO, MRVL, TSM, MU, ORCL, MSFT, LRCX]
+        symbols: {from_pead: [targets, observe]}
   yfinance_live_news:
     domain: unstructured
     source_kind: article
@@ -291,6 +296,32 @@ sources:
       usage: internal_research_subject_to_upstream_terms
       retention: immutable_metadata_snapshot
       freshness_policy: latest_verified_upstream_revision
+  sec_edgar_submissions_index:
+    # 2026-10-29: the DefeatBeta index shows a filing the next day ~08:35 UTC (sometimes a day later); an earnings 8-K
+    # is on EDGAR minutes after filing. This reads EDGAR's own submissions list, only for the entities whose earnings
+    # event is within the window below, so the morning run sees last night's US prints. One request per entity, all
+    # through the machine-wide SEC pace (ats.data.sec_rate: 4 requests/s, cooldown after a 403/429 throttle).
+    domain: unstructured
+    source_kind: fixed_index
+    datasets: [sec_filing_index]
+    provider: SEC EDGAR
+    adapter: sec_edgar_submissions
+    status: registered
+    cadence: twice_daily
+    request_budget: {max_requests_per_run: 15, timeout_seconds: 30, lookback_days: 7}
+    policy:
+      market: US
+      excluded_entities: [005930.KS]
+      event_days_before: 1
+      event_days_after: 3
+      revision_model: official_live_listing
+      permission: public_official_disclosure
+      source_role: discovery_metadata_only
+      forms: [10-K, 10-Q, 8-K, 20-F, 6-K]
+      allowed_filing_host: www.sec.gov
+      fallback: none
+      usage: public_official_disclosure
+      retention: immutable_metadata_snapshot
   sec_edgar_filing_body:
     domain: unstructured
     source_kind: official_body
@@ -304,7 +335,7 @@ sources:
       input_optional: true
       cutover_blocking: false
       optional_policy_version: sec-body-optional-v1
-      discovery_source: defeatbeta_sec_filing_index
+      discovery_sources: [defeatbeta_sec_filing_index, sec_edgar_submissions_index]
       permission: public_official_disclosure
       require_accession: true
       require_official_url: true

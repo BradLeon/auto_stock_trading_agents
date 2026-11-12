@@ -93,3 +93,23 @@ def test_config_changes_do_not_mutate_an_already_built_plan(tmp_path):
     assert first.plan_hash != second.plan_hash
     assert len([t for t in first.tasks if t.task_id == "layer-review"]) == 1
     assert len([t for t in second.tasks if t.task_id == "layer-review"]) == 2
+
+
+def test_the_pead_roster_is_not_part_of_the_config_lineage_hash(tmp_path):
+    import yaml
+
+    from ats.workflow.planning import _file_hash
+
+    path = tmp_path / "pead.yaml"
+    path.write_text(yaml.safe_dump({"targets": ["A"], "observe": ["B"], "monitor": {"enabled": True}}))
+    before = _file_hash(path)
+    path.write_text(yaml.safe_dump({"targets": ["A", "C"], "observe": [], "monitor": {"enabled": True}}))
+    assert _file_hash(path) == before                                     # roster edits do not move it
+    path.write_text(yaml.safe_dump({"targets": ["A"], "observe": ["B"], "monitor": {"enabled": False}}))
+    assert _file_hash(path) != before                                     # any other setting does
+    card = tmp_path / "pead" / "A.yaml"
+    card.parent.mkdir()
+    card.write_text("targets: [A]\n")
+    assert _file_hash(card) != _file_hash(path) and len(_file_hash(card)) == 64   # a per-ticker card keeps the raw hash
+    card.write_text("targets: [A, B]\n")
+    assert _file_hash(card) == __import__("hashlib").sha256(card.read_bytes()).hexdigest()

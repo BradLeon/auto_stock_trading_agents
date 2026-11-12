@@ -1,15 +1,18 @@
 """One frozen, versioned requirement set for analysis and actual Chief entry."""
+import logging
 from datetime import UTC, datetime
 
 from ..agent.task_projection import ProjectionScope, reuse_decision
-from .cutover_routing import RouteUnavailable
-from .planning import TASK_ROLE, _hash, build_plan
+from .read_scope import ReadUnavailable
+from .planning import MAX_UNCOVERED_FUNDAMENTAL, TASK_ROLE, _hash, build_plan
 from .run_contracts import TriggerContext
+
+log = logging.getLogger(__name__)
 
 
 def freeze(plan, *, outcomes=None, manifest=None, workflow_store_path=""):
     if not plan.enter_decision_cycle:
-        raise RouteUnavailable("decision request was not declared")
+        raise ReadUnavailable("decision request was not declared")
     value = {"version": "decision-requirements-v1", "plan": plan.as_dict(),
             "plan_hash": plan.plan_hash, "outcomes": outcomes,
             "manifest": manifest, "workflow_store_path": str(workflow_store_path),
@@ -28,72 +31,47 @@ def dependency_identities(plan):
 
 
 def freeze_read_dependencies(plan):
-    from . import cutover as plane
+    """The business scopes this decision reads, frozen with the requirements (no route or qualification state)."""
     from .isolation import verified_isolation_root
-    from .read_recovery import current_policy
     from .runtime_reads import gate_read
-    from .scoped_routes import resolve_route
 
     rows = []
     isolated = verified_isolation_root() is not None
     for who in dependency_identities(plan).values():
-        decision = gate_read(who)
-        authority = resolve_route(plane.PROJECTION_READ, who)
-        policy = current_policy(who)
-        if not isolated and (decision.route != "target" or decision.qualification.get("status") != "eligible"):
-            raise RouteUnavailable("new decision dependency requires qualified target business scope")
-        rows.append({"identity": who.as_row(), "route": authority["route"],
-                     "generation": authority["generation"], "candidate_isolated": isolated,
-                     "recovery_generation": policy["event_id"] if policy else 0})
+        gate_read(who)
+        rows.append({"identity": who.as_row(), "candidate_isolated": isolated})
     return rows
 
 
 def validate_read_dependencies(plan, requirements):
-    from . import cutover as plane
     from .isolation import verified_isolation_root
-    from .read_recovery import current_policy
+    from .read_scope import ReadScope
     from .runtime_reads import gate_read
-    from .scoped_routes import resolve_route
 
     expected = dependency_identities(plan)
     rows = requirements.get("read_dependencies") or []
     if len(rows) != len(expected) or {row.get("identity", {}).get("consumer_id") for row in rows} != {
             who.consumer_id for who in expected.values()}:
-        raise RouteUnavailable("frozen read dependency closure missing")
+        raise ReadUnavailable("frozen read dependency closure missing")
     seen = set()
     for row in rows:
-        from .scoped_routes import RouteIdentity
-        who = RouteIdentity(**row["identity"])
+        who = ReadScope(**row["identity"])
         if who.key not in expected or who.key in seen:
-            raise RouteUnavailable("frozen read dependency scope differs")
+            raise ReadUnavailable("frozen read dependency scope differs")
         seen.add(who.key)
         if row["candidate_isolated"] and verified_isolation_root() is None:
-            raise RouteUnavailable("isolated research basis cannot authorize production")
-        authority = resolve_route(plane.PROJECTION_READ, who)
-        if any(row[key] != authority[key] for key in ("route", "generation")):
-            raise RouteUnavailable("research read dependency route/generation changed")
-        policy = current_policy(who)
-        if row["recovery_generation"] != (policy["event_id"] if policy else 0):
-            raise RouteUnavailable("research read recovery policy changed")
-        if who.scope.get("time_policy") == "per_invocation":
-            from .invocation_bindings import recheck
-            binding = next((value for value in (plan.task_inputs.get("read_invocations") or {}).values()
-                            if value.get("deployment_identity") == who.as_row()), None)
-            recheck(who, binding)
-        decision = gate_read(who)  # rechecks scope stop, revocation, TTL and enforcement
-        if not row["candidate_isolated"] and (decision.route != "target" or
-                decision.qualification.get("status") != "eligible"):
-            raise RouteUnavailable("research dependency qualification invalid")
+            raise ReadUnavailable("isolated research basis cannot authorize production")
+        gate_read(who)
     if seen != set(expected):
-        raise RouteUnavailable("required read dependency omitted")
+        raise ReadUnavailable("required read dependency omitted")
 
 
 def restore(requirements):
     if not requirements or requirements.get("version") != "decision-requirements-v1":
-        raise RouteUnavailable("fixed decision requirements missing")
+        raise ReadUnavailable("fixed decision requirements missing")
     if requirements.get("requirements_hash") != _hash({k: v for k, v in requirements.items()
                                                       if k != "requirements_hash"}):
-        raise RouteUnavailable("fixed decision requirements integrity mismatch")
+        raise ReadUnavailable("fixed decision requirements integrity mismatch")
     raw = requirements.get("plan") or {}
     try:
         plan = build_plan(
@@ -102,19 +80,122 @@ def restore(requirements):
             run_id=raw["run_id"], profile_id=raw["profile_id"], enter_decision_cycle=True,
             task_inputs=raw["task_inputs"], config_dir=raw["config_root"])
     except Exception as exc:
-        raise RouteUnavailable("fixed decision requirements cannot be reconstructed") from exc
+        raise ReadUnavailable("fixed decision requirements cannot be reconstructed") from exc
     if plan.as_dict() != raw or plan.plan_hash != requirements.get("plan_hash"):
-        raise RouteUnavailable("fixed decision requirement/configuration drift")
+        raise ReadUnavailable("fixed decision requirement/configuration drift")
     return plan
 
 
-def standalone(state):
-    mode = "fundamental-event" if state.fundamental_mode == "event" else "fundamental-routine"
-    plan = build_plan(requested_tasks=("sector-review", mode, "macro-review", "technical-review"),
+class EventCycleWithoutEvents(ReadUnavailable):
+    """An event cycle was requested but no target has a usable event review."""
+
+
+def _built_under_current_config(brief, entity: str) -> bool:
+    """True when the brief was planned from the configuration files as they are now."""
+    from .planning import current_config_refs
+
+    return current_config_refs("information-brief", entity) <= set(brief.input_refs)
+
+
+def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
+    """Per target, the Fundamental mode the cycle reads (D3-3).
+
+    A usable event review (within its 4-day window, and while the brief it was built
+    from is still inside its own window) takes precedence: the Routine
+    update runs several times a day on whatever fact changes arrived, so "newer" would
+    hide every post-earnings review behind the next minor note. Without one, the usable
+    Routine update is read.
+
+    Returns `(modes, uncovered, triggers)`. A routine cycle maps every target; up to
+    `MAX_UNCOVERED_FUNDAMENTAL` targets with neither mode usable are stated uncovered (the risk
+    review bars new exposure to them), and more than that are kept on Routine and block as missing. An event
+    cycle is started by its trigger entities — named by the caller, else every target
+    that has a usable event review — which always use their event review; any other
+    target with nothing usable is left uncovered and stated, not blocking.
+    """
+    from ..agents.chief.assemble import fundamental_parent_brief, scan_projection_scopes
+    from .planning import FRESHNESS_SECONDS, FUNDAMENTAL_TASKS
+
+    scopes = [ProjectionScope(kind="entity", id=target) for target in targets]
+    probe = {TASK_ROLE[task]: {"role": TASK_ROLE[task], "scopes": scopes} for task in FUNDAMENTAL_TASKS}
+    task_of = {TASK_ROLE[task]: task for task in FUNDAMENTAL_TASKS}
+    usable: dict[str, set[str]] = {}
+    for row in scan_projection_scopes(store, at=at, query_plan=probe):
+        task = task_of[row["role"]]
+        if row["status"] != "fresh" or not row["as_of"]:
+            continue
+        if (at - datetime.fromisoformat(row["as_of"])).total_seconds() > FRESHNESS_SECONDS[task]:
+            continue
+        entity = row["scope"].partition(":")[2]
+        brief, named = fundamental_parent_brief(store, row, ProjectionScope(kind="entity", id=entity), at=at)
+        if named and brief is None:
+            continue    # the brief it was built from has expired: the pair no longer validates
+        if task == "fundamental-event" and brief is not None and not _built_under_current_config(brief, entity):
+            # An event review outlives the daily runs, so a config edit can leave it standing on a brief built
+            # under rules that have since changed. Reading it would abort the whole cycle at the lineage check;
+            # the name is read through its Routine update instead, which is rebuilt every day.
+            log.warning("event review for %s built under superseded config: read through Routine instead", entity)
+            continue
+        usable.setdefault(entity, set()).add(task)
+    chosen = {entity: "fundamental-event" if "fundamental-event" in tasks else "fundamental-routine"
+              for entity, tasks in usable.items()}
+    triggers = sorted({str(e).upper() for e in event_entities}) if event_cycle else []
+    if event_cycle and not triggers:
+        triggers = sorted(e for e, task in chosen.items() if task == "fundamental-event")
+    modes, uncovered = {}, []
+    for target in targets:
+        if target in triggers:
+            modes[target] = "fundamental-event"
+        elif target in chosen:
+            modes[target] = chosen[target]
+        elif event_cycle:
+            uncovered.append(target)
+        else:
+            modes[target] = "fundamental-routine"
+    if not event_cycle:
+        # A few names without a usable Routine update (a failed or late run) are stated and barred from new exposure
+        # (`risk.checks`), not a reason to refuse the whole book. Past the bound it is an outage and blocks as missing.
+        missing = [t for t in targets if t not in chosen]
+        if 0 < len(missing) <= MAX_UNCOVERED_FUNDAMENTAL and len(missing) < len(targets):
+            for target in missing:
+                modes.pop(target, None)
+            uncovered = missing
+    return modes, uncovered, triggers
+
+
+def uncovered_fundamental(requirements) -> frozenset[str]:
+    """The targets a frozen cycle states as having no usable Fundamental research (no new exposure allowed)."""
+    inputs = ((requirements or {}).get("plan") or {}).get("task_inputs") or {}
+    return frozenset(str(e).upper() for e in inputs.get("fundamental_uncovered") or [])
+
+
+def standalone(state, store=None):
+    """The frozen decision requirements for one Chief cycle started outside the Dispatcher.
+
+    With a store, Fundamental is chosen per target (D3-3); without one (fixture
+    producers) the cycle's single mode covers every target, as before.
+    """
+    requested = ["sector-review", "macro-review", "technical-review"]
+    task_inputs = None
+    event_cycle = state.fundamental_mode == "event"
+    if store is None:
+        requested.insert(1, "fundamental-event" if event_cycle else "fundamental-routine")
+    else:
+        from .planning import FUNDAMENTAL_TASKS, _config_dir, _targets
+
+        modes, uncovered, triggers = fundamental_coverage(
+            store, targets=_targets(_config_dir(None)), at=state.as_of, event_cycle=event_cycle,
+            event_entities=getattr(state, "event_entities", ()) or ())
+        if event_cycle and not triggers:
+            raise EventCycleWithoutEvents("event cycle has no entity with a usable event review")
+        requested[1:1] = [task for task in FUNDAMENTAL_TASKS if task in modes.values()]
+        task_inputs = {"fundamental_modes": modes, "fundamental_uncovered": uncovered,
+                       "event_entities": triggers}
+    plan = build_plan(requested_tasks=tuple(requested),
         scope=ProjectionScope(kind="sector", id=state.decision_profile),
         trigger=TriggerContext(kind="manual", trigger_id=state.cycle_id),
         as_of=state.as_of.isoformat(), run_id=state.cycle_id,
-        profile_id=state.decision_profile, enter_decision_cycle=True)
+        profile_id=state.decision_profile, enter_decision_cycle=True, task_inputs=task_inputs)
     return freeze(plan)
 
 
@@ -154,9 +235,9 @@ def validate_routine_value_contract(payload):
     """A current qualitative update cannot pretend to contain measured KPI values."""
     if payload.get("metric") == "narrative":
         if payload.get("previous_value") is not None or payload.get("new_value") is not None:
-            raise RouteUnavailable("qualitative Routine update has no measurable values")
+            raise ReadUnavailable("qualitative Routine update has no measurable values")
     elif payload.get("new_value") is None:
-        raise RouteUnavailable("numeric Routine update requires a measurable value")
+        raise ReadUnavailable("numeric Routine update requires a measurable value")
 
 
 def routine_producer_refs(store, row, scope):
@@ -184,7 +265,7 @@ def routine_producer_refs(store, row, scope):
 def validate(store, snapshot_payload, *, at=None):
     """Re-resolve every fixed binding before a model, revision or cycle write."""
     from ..agents.chief.assemble import _envelope_from_row
-    from .consumer_reads import read_projection
+    from .read_scope import read_projection
 
     requirements = snapshot_payload.get("requirements") or {}
     plan = restore(requirements)
@@ -193,7 +274,7 @@ def validate(store, snapshot_payload, *, at=None):
     outcome_rows = requirements.get("outcomes") or []
     outcomes = {row["instance_key"]: row for row in outcome_rows}
     if len(outcome_rows) != len(plan.tasks) or set(outcomes) != {task.instance_key for task in plan.tasks}:
-        raise RouteUnavailable("selected task dependency closure incomplete")
+        raise ReadUnavailable("selected task dependency closure incomplete")
     references = requirements.get("manifest") or []
     manifest = {}
     for reference in references:
@@ -201,21 +282,22 @@ def validate(store, snapshot_payload, *, at=None):
         manifest.setdefault(key, []).append(reference)
     bindings = {(TASK_ROLE[t.task_id], t.scope.kind, t.scope.id) for t in plan.tasks}
     if set(manifest) != bindings:
-        raise RouteUnavailable("fixed manifest dependency closure differs")
+        raise ReadUnavailable("fixed manifest dependency closure differs")
     ids = [m.get("projection_id") for m in references]
     item_ids = [item.get("projection_id") for item in items]
     if (not all(ids) or len(set(ids)) != len(ids) or len(set(item_ids)) != len(item_ids)
             or len(items) != len(references) or set(item_ids) != set(ids)):
-        raise RouteUnavailable("fixed category/scope basis incomplete")
+        raise ReadUnavailable("fixed category/scope basis incomplete")
     stamp = at or datetime.now(UTC)
     from .runtime_reads import current_read_context
     context = current_read_context()
     read_cutoff = context.cutoff if context else stamp
     selected = {}
+    layer_times: list[tuple[str, datetime]] = []
     for task in plan.tasks:
         outcome = outcomes[task.instance_key]
         if outcome.get("task_id") != task.task_id or outcome.get("scope") != task.scope.model_dump(mode="json"):
-            raise RouteUnavailable("selected task outcome scope differs")
+            raise ReadUnavailable("selected task outcome scope differs")
         role = TASK_ROLE[task.task_id]
         hits = [item for item in items if item.get("agent_role") == role and
                 item.get("scope_kind") == task.scope.kind and item.get("scope_id") == task.scope.id]
@@ -223,11 +305,11 @@ def validate(store, snapshot_payload, *, at=None):
         if (not hits or len(hits) != len(refs) or not all(i.get("reusable") for i in hits)
                 or outcome.get("status") != "succeeded"
                 or (task.task_id != "fundamental-routine" and len(hits) != 1)):
-            raise RouteUnavailable("selected task missing/failed/stale: " + task.instance_key)
+            raise ReadUnavailable("selected task missing/failed/stale: " + task.instance_key)
         expected_refs = outcome.get("projection_refs") or []
         if (len(set(expected_refs)) != len(expected_refs)
                 or set(expected_refs) != {item["projection_id"] for item in hits}):
-            raise RouteUnavailable("selected task projection differs from frozen run")
+            raise ReadUnavailable("selected task projection differs from frozen run")
         envelopes = []
         by_id = {item["projection_id"]: item for item in hits}
         reference_by_id = {reference["projection_id"]: reference for reference in refs}
@@ -235,11 +317,11 @@ def validate(store, snapshot_payload, *, at=None):
             item = by_id[projection_id]
             reference = reference_by_id.get(projection_id) or {}
             if any(reference.get(k) != item.get(k) for k in ("projection_id", "content_hash")):
-                raise RouteUnavailable("snapshot differs from fixed manifest")
+                raise ReadUnavailable("snapshot differs from fixed manifest")
             row = read_projection(store, consumer="chief", role=role, scope=task.scope, at=read_cutoff,
                                   projection_id=projection_id, content_hash=item["content_hash"])
             if not row:
-                raise RouteUnavailable("required decision projection unavailable: " + task.instance_key)
+                raise ReadUnavailable("required decision projection unavailable: " + task.instance_key)
             envelope = _envelope_from_row(row, task.scope)
             if task.task_id == "fundamental-routine":
                 validate_routine_value_contract(envelope.payload)
@@ -248,29 +330,42 @@ def validate(store, snapshot_payload, *, at=None):
             from .planning import FRESHNESS_SECONDS
 
             source_time = datetime.fromisoformat(envelope.as_of)
-            if (source_time.tzinfo is None or source_time > min(stamp, read_cutoff) or
+            if task.task_id == "layer-review":
+                # The eight Layers are one review: a Layer whose evidence did not change is reused and keeps
+                # its old `as_of`, so freshness is judged on the newest Layer of the set (checked after the loop).
+                if source_time.tzinfo is None or source_time > min(stamp, read_cutoff):
+                    ok, reason = False, "freshness_unconfirmed"
+                else:
+                    layer_times.append((task.instance_key, source_time))
+            elif (source_time.tzinfo is None or source_time > min(stamp, read_cutoff) or
                     (stamp-source_time).total_seconds() > FRESHNESS_SECONDS[task.task_id]):
                 ok, reason = False, "freshness_unconfirmed"
             if not ok:
-                raise RouteUnavailable("required decision input invalid: " + task.instance_key + ":" + reason)
+                raise ReadUnavailable("required decision input invalid: " + task.instance_key + ":" + reason)
             envelopes.append(envelope)
         selected[task.instance_key] = envelopes
+    if layer_times:
+        from .planning import FRESHNESS_SECONDS
+
+        newest_key, newest = max(layer_times, key=lambda item: item[1])
+        if (stamp - newest).total_seconds() > FRESHNESS_SECONDS["layer-review"]:
+            raise ReadUnavailable("required decision input invalid: " + newest_key + ":freshness_unconfirmed")
     for task in plan.tasks:
         from .dispatcher import Dispatcher
 
         parents = {parent: selected[parent] for parent in task.dependencies}
         if any(len(values) != 1 for values in parents.values()):
-            raise RouteUnavailable("multi-output analysis dependency has no declared input contract")
+            raise ReadUnavailable("multi-output analysis dependency has no declared input contract")
         wanted_inputs, wanted_vintages, _ = Dispatcher._task_inputs(
             None, plan, task, {parent: values[0] for parent, values in parents.items()})
         for envelope in selected[task.instance_key]:
             if not set(wanted_inputs) <= set(envelope.input_refs) or not set(wanted_vintages) <= set(envelope.data_vintage_refs):
-                raise RouteUnavailable("fixed input/vintage lineage differs: " + task.instance_key)
+                raise ReadUnavailable("fixed input/vintage lineage differs: " + task.instance_key)
             for parent, values in parents.items():
                 if values[0].projection_id not in envelope.input_refs and not any(
                         values[0].projection_id in ref and values[0].content_hash in ref
                         for ref in envelope.input_refs):
-                    raise RouteUnavailable("selected task dependency lineage missing: " + task.instance_key)
+                    raise ReadUnavailable("selected task dependency lineage missing: " + task.instance_key)
     workflow_path = requirements.get("workflow_store_path")
     standalone_routine = any(task.task_id == "fundamental-routine" and
         any(envelope.agent_run_id for envelope in selected[task.instance_key]) for task in plan.tasks)
@@ -286,7 +381,7 @@ def validate(store, snapshot_payload, *, at=None):
                 saved = connection.execute("SELECT plan_hash,status FROM workflow_runs WHERE run_id=?",
                                            (plan.run_id,)).fetchone()
                 if not saved or saved[0] != plan.plan_hash or saved[1] not in {"running", "complete"}:
-                    raise RouteUnavailable("workflow run incomplete or mismatched")
+                    raise ReadUnavailable("workflow run incomplete or mismatched")
             for task in plan.tasks:
                 if not workflow_path and task.task_id != "fundamental-routine":
                     continue
@@ -295,16 +390,20 @@ def validate(store, snapshot_payload, *, at=None):
                 for envelope in envelopes:
                     attempt = connection.execute("SELECT status,run_id,task_id,task_instance_key,projection_refs_json FROM agent_runs WHERE agent_run_id=?",
                                                  (envelope.agent_run_id,)).fetchone()
-                    if (not attempt or tuple(attempt[:4]) != ("succeeded", envelope.workflow_run_id, task.task_id, task.instance_key)
+                    # The key's last segment is the producing plan's config version; a single-workflow
+                    # producer and this decision plan differ there by construction. Config lineage is
+                    # already checked per task above, so compare namespace, task and scope only.
+                    if (not attempt or tuple(attempt[:3]) != ("succeeded", envelope.workflow_run_id, task.task_id)
+                            or attempt[3].rpartition(":")[0] != task.instance_key.rpartition(":")[0]
                             or json.loads(attempt[4]) != expected_refs):
-                        raise RouteUnavailable("selected task attempt not terminal or mismatched")
+                        raise ReadUnavailable("selected task attempt not terminal or mismatched")
                 if workflow_path:
                     current = connection.execute(
                         "SELECT status,projection_refs_json FROM agent_runs WHERE run_id=? "
                         "AND task_instance_key=? ORDER BY attempt_no DESC LIMIT 1",
                         (plan.run_id, task.instance_key)).fetchone()
                     if not current or current[0] != "succeeded" or json.loads(current[1]) != expected_refs:
-                        raise RouteUnavailable("current selected task attempt incomplete or mismatched")
+                        raise ReadUnavailable("current selected task attempt incomplete or mismatched")
         finally:
             if workflow_path:
                 connection.close()
@@ -318,6 +417,5 @@ def validate_chief(store, payload, *, at=None):
     identity = business_identity("chief", kind="portfolio", scope_id="portfolio",
         entities=configured_entities("portfolio", "portfolio", config_dir=plan.config_root), as_of=plan.as_of,
         explicit=(plan.task_inputs.get("read_scopes") or {}).get("chief:portfolio"))
-    with bind_read(identity, as_of=plan.as_of,
-                   invocation=(plan.task_inputs.get("read_invocations") or {}).get("chief:portfolio")):
+    with bind_read(identity, as_of=plan.as_of):
         return validate(store, payload, at=at)

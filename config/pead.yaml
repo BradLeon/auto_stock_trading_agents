@@ -1,6 +1,6 @@
 # Global PEAD settings (per-ticker config lives in config/pead/<SYM>.yaml).
 
-targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT]  # monitor + scheduler operate on
+targets: [GOOG, MSFT, AMZN, NVDA, AVGO, MRVL, SKHY, MU, SNDK, TSM, ASML, LRCX, LITE, COHR, AXTI, FORM, TSLA, AAPL]  # monitor + scheduler operate on
 # 上一轮：[ASML, TSM, NVDA]（AI 硬件上游三家）。本轮扩到全链 10 家：
 #   需求端云厂 GOOG/MSFT/AMZN → GPU 龙头 NVDA → 晶圆/HBM TSM/SKHY → 设备 ASML/KLAC/LRCX
 #   → 光互联 COHR。COHR/LRCX 当前以期权持有，但 PEAD 仍监控其正股财报事件。
@@ -31,7 +31,7 @@ targets: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT]  # mo
 # 而它当时够不着任何命题，因为 CRWV 既不在名单里也不是证人。
 # ⚠️ 它们的机队几乎全绑英伟达供应链：对 NVDA 是有力的客户侧佐证，对 ASIC 路线参考有限
 #（见 config/entities.yaml 里 NBIS 条目的说明）。
-observe: [MSFT, AMZN, META, ORCL, MU, "005930.KS", SPCX, INTC, AMAT, AMD, CRWV, NBIS]
+observe: [META, ORCL, "005930.KS", SPCX, INTC, AMD, AMAT, CRWV, NBIS]
 
 monitor:
   enabled: true

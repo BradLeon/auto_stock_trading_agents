@@ -344,6 +344,14 @@ def frozen_snapshot_complete(payload: Mapping[str, Any] | None) -> bool:
     return bool(items) and all(item.reusable for item in items)
 
 
+def _parse_stamp(value: Any) -> datetime | None:
+    try:
+        stamp = datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+    return stamp.replace(tzinfo=timezone.utc) if stamp and stamp.tzinfo is None else stamp
+
+
 def frozen_snapshot_stale_reasons(store: Any, payload: Mapping[str, Any] | None,
                                   *, at: datetime | None = None) -> list[str]:
     """Mid-cycle invalidation checks for a frozen snapshot (task 7.7).
@@ -362,6 +370,7 @@ def frozen_snapshot_stale_reasons(store: Any, payload: Mapping[str, Any] | None,
     stamp = at or datetime.now(timezone.utc)
     reasons: list[str] = []
     items = frozen_snapshot_items(payload)
+    frozen_at = _parse_stamp((payload or {}).get("built_at"))
     frozen_refs = {item.projection_id for item in items if item.projection_id}
     for item in items:
         if not item.reusable or not item.projection_id:
@@ -390,6 +399,12 @@ def frozen_snapshot_stale_reasons(store: Any, payload: Mapping[str, Any] | None,
             scope_id=item.scope_id, limit=1)
         if newer and newer[0].get("projection_id") != item.projection_id:
             latest = newer[0]
+            # A version that already existed when the snapshot was frozen did not change
+            # mid-cycle: the snapshot chose this one on purpose (each target's brief is the
+            # one its fundamental conclusion used, design D3-3). Only later versions count.
+            latest_at = _parse_stamp(latest.get("created_at"))
+            if frozen_at and latest_at and latest_at <= frozen_at:
+                continue
             # Per-fact Routine updates share one terminal producer. Every
             # member is already cited and individually checked in this basis;
             # a sibling is not a later analysis replacing that basis.

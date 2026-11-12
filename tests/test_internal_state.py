@@ -111,8 +111,9 @@ def test_chief_assembler_reads_via_state_api(store):
     from ats.agents.chief import assemble
 
     src = open(assemble.__file__).read()
-    assert "state_api.recent_trades" in src
-    assert "read_internal" in src and "state.fills" in src
+    # Trade history, fills and performance arrive through the declared HISTORY_DATA input (Internal State).
+    assert 'read_input("chief", "HISTORY_DATA"' in src and 'payload.get("fills")' in src
+    assert "recent_trades(" not in src and "recent_fills(" not in src
 
 
 def test_context_reader_reads_via_state_api(store):
@@ -139,11 +140,15 @@ def test_context_report_shows_degraded_ledger(store):
 # --------------------------------------------------------------------------- #
 
 def test_risk_assess_performance_history_via_state_api(store):
-    from ats.risk import assess
+    """Since switch-trade r5 task 6.4 Risk reads the history as HISTORY_DATA through the governed read API,
+    whose performance-history scope is served by the Internal State API."""
+    from ats.data import consumer_api
+    from ats.risk import assess, inputs
 
-    src = open(assess.__file__).read()
-    assert "state_api.performance_history" in src
-    assert "state_api.completeness" in src
+    assert "inputs.performance_history" in open(assess.__file__).read()
+    assert '"HISTORY_DATA"' in open(inputs.__file__).read()
+    api = open(consumer_api.__file__).read()
+    assert "state_api.performance_history" in api and "state_api.completeness" in api
 
 
 def test_performance_history_matches_direct_read(store):
@@ -156,10 +161,30 @@ def test_performance_history_matches_direct_read(store):
 # 6.7 — the retired direct reads are registered in the tombstone registry
 # --------------------------------------------------------------------------- #
 
-def test_direct_trade_reads_registered_as_pending():
+def test_direct_trade_reads_are_retired_and_a_read_of_them_names_the_retirement():
+    """Retired 2026-11-07 (switch-trade-path-and-retire-r5 tasks 6.2): every consumer reads through state_api."""
     from ats.workflow import legacy_retirement as mod
 
     reg = mod.load_registry()
     ts = reg.tombstone("store.direct_trade_reads")
-    assert ts is not None and ts.status == "pending"
-    assert "risk.assess" in ts.consumers
+    assert ts is not None and ts.status == "retired" and not ts.consumers
+    assert reg.read_gate("store.direct_trade_reads") == ("retired", mod.REASON_RETIRED)
+
+
+def test_realized_pnl_is_never_summed_across_currencies(store):
+    from ats.journal import episodes as ej
+
+    def fill(exec_id, symbol, side, price, t, currency):
+        return {"exec_id": exec_id, "symbol": symbol, "side": side, "shares": 100.0,
+                "price": price, "time": t, "commission": 0.0, "order_id": "", "perm_id": "",
+                "order_ref": "", "sec_type": "STK", "currency": currency}
+
+    store.upsert_fills([fill("u1", "AXTI", "BOT", 10.0, "2026-10-01T14:00:00+00:00", "USD"),
+                        fill("u2", "AXTI", "SLD", 12.0, "2026-10-02T14:00:00+00:00", "USD"),
+                        fill("h1", "7709", "BOT", 30.0, "2026-10-01T02:00:00+00:00", "HKD"),
+                        fill("h2", "7709", "SLD", 40.0, "2026-10-02T02:00:00+00:00", "HKD")])
+    ej.rebuild_all(store=store)
+    perf = state_api.get_internal_state(store).performance
+    assert perf["realized_total"] == 200.0
+    assert perf["realized_other_currencies"] == {"HKD": 1000.0}
+    assert (perf["closed_episodes"], perf["closed_wins"]) == (2, 2)

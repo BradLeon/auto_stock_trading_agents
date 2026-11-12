@@ -111,10 +111,14 @@ def test_tagged_fill_links_without_any_date_heuristic():
 
 def test_untagged_manual_fill_is_still_rejected():
     """A fill with no ats: tag and no matching order is UNATTRIBUTED (Phase C
-    task 2.4: unknown is not manual) and leaves an audit exception."""
+    task 2.4: unknown is not manual) and leaves an audit exception — in the era
+    before every system order was tagged. Dated before
+    `journal.manual_classification_since` (2026-07-27); after it, the same fill is
+    manual (Boss ruling 2026-10-29, see test_reconcile)."""
     store = get_store()
     rec.reconcile(FakeBroker([_fill(exec_id="m", symbol="SPCX", order_id="34",
-                                    order_ref="", perm_id="")]), store=store)
+                                    order_ref="", perm_id="",
+                                    time="2026-07-20T14:00:00+00:00")]), store=store)
     assert store.conn.execute("SELECT origin FROM fills").fetchone()[0] == "unattributed"
     assert store.conn.execute(
         "SELECT COUNT(*) n FROM ledger_exceptions "

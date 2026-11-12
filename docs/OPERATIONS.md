@@ -10,7 +10,7 @@
 |---|---|---|---|
 | `com.ats.data-refresh` | 数据刷新控制器：结构化/非结构化采集、文档准入、财报日历刷新、FactSet 月末摄入 | `python -m ats.data.refresh tick` | 每小时一次 |
 | `com.ats.dispatcher` | 研究调度（Dispatcher）：按时间表与日历事件运行 7 个研究工作流；**不进 Chief、不下单** | `ats schedule` | 常驻 |
-| `com.ats.serve` | 飞书审批回调（签名链接） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
+| `com.ats.serve` | 飞书回调端点（审批已改为命令行 `ats approval`，现行审批不经过它） | `ats serve --host 127.0.0.1 --port 8000` | 常驻 |
 
 
 plist 在 `~/Library/LaunchAgents/`；`data-refresh`、`dispatcher` 的模板在 `deploy/launchd/`。
@@ -31,7 +31,7 @@ launchctl bootout gui/$(id -u)/com.ats.dispatcher                    # 停掉全
 ## 2. 每天看什么
 
 ```bash
-ats data health --consumer information   # 立即检查一个分析师读的数据产品（读路由已固定为 target）
+ats data health --consumer information   # 立即检查一个分析师读的数据产品
 ats data health-log                      # 数据产品健康状态的变化记录（只在由好转坏、由坏转好时记一行）
 ats dispatch owner-log               # 7 个研究工作流的调度负责人及切换历史
 ats workflow runs --limit 20         # 最近的研究运行：complete / incomplete / failed
@@ -51,12 +51,12 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 | 工作流 | 时间 | 范围 |
 |---|---|---|
 | `information-brief` | 周一至周五 08:00 纽约 | `portfolio:pead-targets` |
-| `fundamental-routine` | 周一至周五 09:00 纽约（依赖当天的信息简报） | `portfolio:pead-targets` |
-| `technical-review` | 周一至周五 10:00 纽约 | `portfolio:portfolio` |
+| `fundamental-routine` | 周一至周五 08:30 纽约（依赖当天的信息简报） | `portfolio:pead-targets` |
+| `technical-review` | 周一至周五 08:30 纽约 | `portfolio:portfolio` |
 | `macro-review` | 周六 09:00 台北 | `portfolio:portfolio` |
 | `sector-review` | 周六 09:30 台北（Dispatcher 先补跑 `layer-review`） | `sector:ai_hardware` |
 
-日历事件的路由在 `config/workflow/event_routes.yaml`，常驻进程每天 06:10、18:10（UTC）消费已发布的事件：
+日历事件的路由在 `config/workflow/event_routes.yaml`，常驻进程每 30 分钟（每小时 :05、:35 UTC）消费已发布的事件，重复消费不会重复派发：
 
 - 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（例行模式在财报前 `prep_days_before`＝3 天内建立基线）。
 - 财报**已发布**且已准入公告或申报材料 → 信息简报 + 基本面事件评审（冻结基线、打分）。
@@ -107,7 +107,7 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 ```bash
 # 停用：定时与日历事件不再唤醒它（不需要批准，随时可做；有正在运行的认领时拒绝）
 ats dispatch pause --workflow <workflow_id> --actor <谁> --reason "<为什么>"
-# 恢复：交回 Dispatcher（需要批准原文；检查读路由与数据产品健康；有未完成认领须说明作废理由）
+# 恢复：交回 Dispatcher（需要批准原文；检查数据产品健康；有未完成认领须说明作废理由）
 ats dispatch resume --workflow <workflow_id> --actor <谁> --approval "<批准原文>" --reason "<为什么>"
 # 查看停用 / 恢复的追加式记录
 ats dispatch owner-log [--workflow <workflow_id>]
@@ -116,13 +116,13 @@ ats dispatch owner-log [--workflow <workflow_id>]
 停用的工作流不会被任何定时任务或日历事件运行；要补跑，先 `resume`，再用 `ats workflow run`。
 
 停用期间到点的触发不会丢得无声无息：定时、手动、日历三条路径对每个被跳过的触发各写一条 `skipped_owner_legacy` 记录（同一触发只记一次，在 `ats dispatch runtime-state` 输出的 history 里可查）。
-覆盖核验（`ats dispatch runtime-expected` 与 `runtime-compare`）会把停用区间内到点的触发标为 `skipped_by_pause`，不算遗漏；因停用而作废的触发标为 `voided_by_pause`。
+覆盖核验（`ats dispatch coverage-expected` 与 `coverage-compare`，r5 8.8 前叫 `runtime-expected` / `runtime-compare`）会把停用区间内到点的触发标为 `skipped_by_pause`，不算遗漏；因停用而作废的触发标为 `voided_by_pause`。
 只有 `pause` 开出的区间才算停用：从未迁移的工作流虽然负责人也是 `legacy`，它的触发仍按遗漏处理。
 旧名 `owner-rollback` / `owner-switch` 已改名，运行它们会提示新命令且不改任何状态。
 
 > 已知技术债：库里「已停用」仍存成内部值 `legacy`（只改了对外的命令与文档用语）。长期做法是取消这个开关，
 > 由 `research_schedules.yaml` 的 `enabled: false` / `event_triggers` 决定是否运行；见
-> `openspec/changes/retire-legacy-and-migration-tooling/verification.md` 的「上线后待办」。
+> `openspec/changes/archive/2026-11-12-retire-legacy-and-migration-tooling/verification.md` 的「上线后待办」。
 
 - 一次事务同时改该工作流的模板行与所有标的行，不会出现一半新一半旧。
 - 有 `running` 认领时拒绝切换；`failed/pending` 认领须带理由作废；`owner-log` 只增不改。
@@ -141,21 +141,14 @@ ats dispatch owner-log [--workflow <workflow_id>]
 - **读取前**：Dispatcher 要真正执行某个分析师的任务时（可复用上一次投影时不查），先检查它读的产品。不合格就不执行，
   该任务记为 `blocked`、缺口 `data_product_unhealthy`，整次运行 `incomplete`。
 
-两处都只告警、不改读路由；同一个分析师只在状态由好转坏、由坏转好时发一次飞书并记一行日志。
+两处都只告警；同一个分析师只在状态由好转坏、由坏转好时发一次飞书并在工作流主库（`var/ats.sqlite` 的 `data_health_log`）记一行。2026-11-11 之前的记录在 `var/phase_f_cutover.sqlite` 的 `consumer_cutover_log`，只读。
 
 ```bash
 ats data health --consumer <id>                  # 立即检查一个分析师读的数据产品
 ats data health-log [--consumer <id>]             # 健康状态变化记录
-# 读路由已固定为 target，不再提供状态命令
 ```
 
-研究分析师的读路由固定为 target，没有切换入口。万一某个分析师的读路由不在 target（2026-10-20 技术面就被已移除的每日自动切回机制切过一次，表现为该工作流报 `no explicitly authorized read window`），用下面的命令恢复；它只会把路由移向 target，要求批准原文、原因和通过的数据产品检查，并写入只增不改的日志：
-
-```bash
-# （读路由已固定为 target）
-ats consumer-cutover restore --consumer-id technical --actor <谁> \
-    --approval "<用户批准原文>" --reason "<为什么>"
-```
+读路由表与读取资格账本已在 2026-11-11 删除（switch-trade r5 9.3）：每个消费者只按自己声明的数据产品、在当次入口绑定的业务 scope 内读取，越界或产品不合格时显式失败。`ats consumer-cutover`、`ats data assurance` 已退役，用法存档见 `docs/archive/R5C_MIGRATION_COMMANDS.md`。
 
 Chief 不在其中（交易路径未切换）。
 
@@ -176,9 +169,14 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
   摄入上月最终版）、第三方序列的链证据采集（`chain-source-collect`）：L1 三个证据观察器每天 09:00 UTC
   （`chain_l1_governed_evidence_daily`），韩国/台湾出口与 DRAM 合约价每周一 09:30 UTC
   （`chain_regional_*_weekly`）。这类任务不调用模型。
-- SEC 正文任务（`sec_official_body_daily`，每天 09:30 UTC，在文件索引 08:00 之后）每次最多取 20 份申报，**请求预算只算入库成功的申报**：
+- 财报申报每天分两班进入日历，06:00 和 18:00（台北）。每班在同一次数据刷新里按顺序跑：EDGAR 文件发现（`sec_edgar_discovery_*`，
+  只查财报日在前 3 天到后 1 天内的标的，每家一次请求）→ SEC 正文（`sec_official_body_*`）→ 发布确认（`calendar_finalize_*`）。
+  美股盘后 16:00 的财报，8-K 几分钟后就在 EDGAR 上，次日 06:00 那班就能确认；DefeatBeta 文件索引（每天 08:00 UTC，上游约 08:35 才更新）
+  照常运行，作为全量的兜底。所有访问 sec.gov 的请求共用一个跨进程的节流（`ats.data.sec_rate`，默认每秒 4 次，SEC 上限是 10 次），
+  一旦 SEC 回 429 或“Request Rate Threshold Exceeded”，所有进程暂停 10 分钟，状态在 `var/run/sec_rate.json`。
+- SEC 正文任务每次最多取 20 份申报，**请求预算只算入库成功的申报**：
   取不到正文的（如没有新闻稿附件的 8-K）退还请求；已入库的 7 天内不再取；同一份在 3 个不同日子都找不到（或 5 个不同日子都失败）就不再试；
-  预算用完没轮到的记为“延后”而不是失败，下次排在最前。日历“发布确认”在 10:00 UTC，紧接着这个任务。
+  预算用完没轮到的记为“延后”而不是失败，下次排在最前。
 - 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](data/STRUCTURED_DATA_OPERATIONS.md)。
 
 ## 6. 事件日历
@@ -196,19 +194,96 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 真不一致时，被挡住的是另一来源那一条（`conflict`），日历里该事件仍按已采用的一条（通常是 Finnhub）存在；
 挂起的只是一条备选说法，距离财报日还远时可以不处理，临近时对照公司公告核一次，不一致再 `override`。
 
-## 7. 交易路径（尚未切换）
+## 7. 交易路径（已切换 S1–S5；实盘锁定）
 
-- Chief、风控主管、Boss 审批、Trader、Clerk **尚未切换，也没有定时排程**。Chief 只能手动运行：
+- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 改读新路径（S1；读路由表本身已于 2026-11-11 随 R5d 删除，读取只按声明与业务 scope），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 18:00 纽约；11-02 起由 16:30 改为 18:00）。**`chief-daily` 已启用**（S5，2026-11-02；11-03 由 09:00 改为 09:45 纽约，台北冬令时 22:45，因为订单规范化只接受常规时段内的实时买卖价，开盘前的周期过不了，见 blockers B9）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
+- Chief 每个交易日由 `chief-daily` 自动跑一次；也可手动运行：
 
   ```bash
-  ats chief run --channel feishu_bot   # 默认 dry-run，推飞书审批卡；绝不要加 --yes
+  ats chief run --channel pending   # 默认 dry-run；不要加 --live 或 --yes
   ats chief show
   ```
 
-- 审批卡上是签名链接（不是飞书原生回调），点击后由 `com.ats.serve` 校验签名并恢复执行。
+- 审批只在命令行完成（`ats approval`），没有飞书审批卡，也没有签名链接；`com.ats.serve` 不参与审批。
 - 实盘锁定：`ats live gate` 在没有授权引用时返回 `refused / no_live_authorisation`。实盘授权库里有一行来源
-  未核实的 `LIVE-X`，在核实前不得把它当作实盘授权。
+  未核实（已作废）的 `LIVE-X`，不得把它当作实盘授权。
 - **`--yes`（自动批准）在实盘环境绝对不能用。** 系统里记录的止损价只是声明，不会在券商挂真实止损单。
+
+### 7.1 切换后的操作
+
+> **状态：** S1–S5 已生效；`clerk-daily` 第一次定时运行已观察到（11-03 18:00 纽约 = 台北 11-04 07:00，completed，日报已生成）；`chief-daily` 第一次定时运行（11-03 09:45 纽约）因模型输出被截断以 `manual_review` 结束（B10，已修），修复后由手动运行验证了完整链路（建周期、风控驳回一次后修订、停在 `pending_approval`），定时路径的第二次运行见 11-04 09:45 纽约。
+> 各步见 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5/design.md` D3。
+
+**现状事实（切换后）**
+
+- Chief 的上下文只读研究快照与 Internal State；决策、风控、审批都只认审计表（`decision_cycles` / `decision_revisions` / `risk_reviews` / `boss_approvals`），旧决策表只剩镜像写，观察窗口结束后随 R5 移除。
+- 审批只在命令行完成（`ats approval`），没有飞书审批卡，也没有签名链接。`com.ats.serve` 不再参与审批。
+- 只有**需要下单且已通过风控**的周期才会等你。纯持有、没有订单、或风控未通过的周期不会出现在待审批列表。
+- 实盘仍然锁定（三道锁，见下）。批准后周期的终态是 **`approved_not_executed`（已批准未执行）**：Trader 已跑完授权十字段、新鲜度、实时报价、资金上限检查并记录每项结果，在券商交接点被拒绝，没有任何订单到达券商。
+
+**每天会发生什么**
+
+| 工作流 | 时间（工作日，仅 NYSE 交易日） | 内容 |
+|---|---|---|
+| `clerk-daily` | 18:00 纽约（收盘后；台北次日 07:00） | 对账：把成交与持仓写入账本（只认审计表） |
+| `chief-daily` | 09:45 纽约（开盘后，台北晚上 22:45；排在 08:00/08:30 的研究之后；订单只在常规时段内取价，所以要在开盘后、并当晚批准） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
+
+**成交读取的两层保障（B11，tasks 11.12）：** TWS 的 `reqExecutions` 只返回账户“自午夜起”（TWS 本地时间 = 台北）的成交，所以台北 07:00 的 Clerk 看不到前一晚午夜前的成交。补救有两层：(1) dispatcher 里的 `phase_e:fills-capture` 每天台北 23:58 读一次当日成交（`ats clerk capture-fills` 可手动跑一次；只记成交，不动 Clerk 窗口），迟到超过 10 分钟就跳过；(2) 每次 Clerk 对账后用 IBKR Flex 对账单（`.env` 的 `IBKR_FLEX_TOKEN`、`IBKR_FLEX_QUERY_ID`，查询 `ats-trades`，美东时间，落后一个营业日）补入库里没有的成交，建账日之前的不补，已有同一笔成交（含手工补录行）的不重复（`ats clerk flex-backfill --dry-run` 只看）。Flex 拉不到只记在对账摘要的 `flex` 里，不让 Clerk 失败。令牌一年到期，到期前要在 IBKR 网页重新生成并改 `.env`。
+
+**隔夜时段下单（tasks 11.13）：** 订单的 `execution_basis.venue` 为 `regular`（默认，SMART，常规时段实时买卖价）或 `overnight`（合约交易所 `OVERNIGHT`，IBEOS）。定时的首席运行若落在隔夜时段（美东周日 18:00 起、周一至周四 20:00 起，至次日 03:50；周五夜间不开）就用 overnight：价格读 OVERNIGHT 合约的实时买卖价（≤30 秒、点差 ≤1%，合约交易时段已关则 fail-closed），只下限价单，审批与执行前检查沿用订单绑定的 venue。审批必须在隔夜时段关闭前完成，否则执行前检查会要求重新审批。当前调度未前移，因此该路径只有在首席于隔夜时段运行时才会触发。
+
+两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → `ats dispatch resume --workflow <id> ...`（第 3.4 节）→ **最后**重启 `com.ats.dispatcher`，并用 `launchctl list` 确认新 PID、看 `var/logs/dispatcher.err.log` 里的 `dispatcher started: workflows=…` 一行含该工作流。每一步都需要你批准。**必须先 `resume` 再重启**：Dispatcher 在启动时才按负责人决定注册哪些交易工作流，`resume` 前启动的进程不会注册它（2026-11-01 启用 `clerk-daily` 时核实）。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
+
+**审批：查看 → 批准 / 修改 / 拒绝**
+
+```bash
+ats approval pending                  # 待审批周期、修订 hash、订单、风控结论、已等多久
+ats approval show <cycle_id>          # 完整审批对象：快照、订单、风控审查、锁定原因
+ats approval approve [<cycle_id>] [--actor <谁>]     # 终端里：看审批卡，输入 approve 确认
+ats approval revise  [<cycle_id>] [--note "<修改意见>"]
+ats approval reject  [<cycle_id>] [--note "<备注>"]
+ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚本或管道：必须写明
+```
+
+- **终端里不用敲 hash：** 不带周期时，只有一个待审批周期就直接选中，多个则让你选序号。命令打印审批卡（含修订号和 hash），你输入完整的 `approve` / `revise` / `reject` 才执行，其他任何输入都取消；`revise` 会提示输入意见。答复绑定的是这张卡上的 hash，确认前若出现更新的修订会拒绝。
+- `show` 默认把研究快照引用折叠成一行汇总，`ats approval show <cycle_id> --full` 看全部。
+
+- `approve` 本身就是确认动作：命令先取新的组合快照，对**同一修订**确定性地重新风控，打印与审批时相比的变化，然后立即继续执行；
+  不会再弹第二次审批，也不会生成新的修订。快照新鲜度预算是 60 秒，所以不要把“确认”和“执行”拆成两步。
+- 重新风控若给出**不同**结论（例如价格波动后超限），命令拒绝执行并说明差异；需要你 `revise` 或 `reject`。
+- `revise` = 驳回当前修订并给出修改意见：Chief 只据此再改一次，新修订重新过风控、重新等你；一个周期最多 2 次，第三次会被拒绝。
+- `reject` = 周期终止（`approval_rejected`）。
+- 脚本或管道必须写明周期和 hash 前缀：旧修订、旧周期的答复不会落到新修订上。hash 不匹配、短于 12 位、周期已终态都会被拒绝，报错会说出当前修订的 hash 前缀。
+- 同一周期重复 `approve` 会直接返回第一次的结果，不会再执行一次。
+- 新一轮 `chief-daily` 开始时，仍在等待的上一周期会被标为 `superseded` 并给你发一次说明；已经批准过的不受影响。
+- 没有人点审批、周期一直 `pending_approval` 本身不是故障，只会过期；不要因此用 `--yes`。
+- 手动跑一个周期：`ats chief run --channel pending --live`（`--live` = 非演练，与 `chief-daily` 一致；实盘锁定下批准后终态为 `approved_not_executed`）。不加 `--live` 是演练，批准后不走 Trader 的检查。`--no-execute` 只跑到风控，但同样会留下一个待审批周期，直到被下一轮 supersede，目前是已知行为。
+
+**三道实盘锁（本 change 一律不动）**
+
+1. `trader/execute.py` 的 `AUTO_EXECUTION_ENABLED = False`（C3）：生产里任何券商提交都被拒绝；
+2. 实盘路由 `live_trader` 为 `disabled`；
+3. `ats live gate` 没有有效的实盘授权引用。授权库里那行 `LIVE-X`（占位字段、来源未核实）按你 2026-10-21 的确认作废，作废记录追加、原记录保留，实盘门不会再把它当授权。
+
+**切换期的边界开关已不再可查。** `ats cutover` 已随 r5 8.4 退役（只剩提示桩）；它显示的六个边界开关从未接线，本就不是权威状态，
+读路由与切换控制库已在 R5d（2026-11-11）停用，库文件留作历史只读。真实的状态看：数据产品用 `ats data health`，
+调度负责人用 `ats dispatch owner-log`，切换发生在哪个提交见 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5/verification.md`。
+
+**怎么读 `ats dispatch owner-log`。** 它是"每个工作流的定时触发由谁负责"的审计日志：负责人要么是 `legacy`（旧的 launchd 触发），要么是 `dispatcher`。
+每一条是一次切换或回退，看这几个字段就够了：`workflow`（哪个工作流）、`action`（`switch` 切过去 / `rollback` 切回）、`from_owner → to_owner`、`at`（时间）。
+一个工作流**当前**归谁，看它在日志里的**最后一条**。`approval` 字段原样记录你当时授权这次切换的回复，因为切换负责人是生产变更，
+日志要留下"谁批准的"的证据，所以读起来像聊天记录；它不参与工作流的运行。现在日志里有 7 个研究工作流（`information-brief`、`fundamental-routine`、`fundamental-event`、
+`technical-review`、`macro-review`、`layer-review`、`sector-review`），最后一条都是 `dispatcher`。`clerk-daily` 与 `chief-daily` 在 S4、S5 启用时各有一条 `resume` 记录，带着你的批准原话（`ats dispatch owner-log` 看最后一条确认当前负责人）。
+
+**回退**
+
+1. 停用：`ats dispatch pause --workflow chief-daily --actor <谁> --reason "…"`，再停 `clerk-daily`（不需要批准）。
+   从未恢复过的工作流还没有调度归属记录，`pause` 会拒绝并报 `workflow has no declared schedule owner`。这表示它本来就是停用的（dispatcher 不注册它，`launchctl` 重启后日志里只列研究工作流），这一步跳过即可（2026-10-29 T0.7 演练实测）。
+2. 必要时按 S3 → S2 → S1 倒序 revert 对应提交，重启 `com.ats.dispatcher`，用 `launchctl list` 确认 PID。镜像写保留，旧读取方仍能看到观察期内的决策，回退不需要恢复数据。
+3. 实盘锁定期间没有在途订单需要排空，但要做一次路由冻结核验，确认没有未终结授权。
+
+**观察窗口的停止条件**（任一出现就停用两个工作流并记录）：出现真实券商提交；主理人上下文出现旧表读取；批准的 hash 与风控修订不一致，或旧修订被接受；
+决策链（快照 → 修订 → 风控 → 审批）断裂；Clerk 对账与 TWS 不一致且无法解释；同一触发重复执行或同一输入重复发模型请求；主理人连续 2 个交易日因非数据缺口原因失败。
 
 ## 8. 首次安装
 
@@ -247,7 +322,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | `var/ats.sqlite` | 领域记录：决策、绩效、风控、Workflow Memory 与投影 |
 | `var/data.sqlite` | 数据平台：原始与准入数据、数据产品 |
 | `var/data_refresh.sqlite`、`var/persistent_ingestion.sqlite` | 采集账本与受管队列 |
-| `var/phase_f_*.sqlite` | 调度认领、读路由、切换与授权台账（只增不改） |
+| `var/phase_f_*.sqlite` | 调度认领、交易路由与授权台账（只增不改）；`phase_f_cutover.sqlite` 的读路由、切换与健康记录自 2026-11-11 起只读 |
 | `var/checkpoints.sqlite` | 等待审批的暂停态 |
 | `var/phase_f_evidence/` | 台账引用的证据文件；`tmp/` 下同名路径是指向这里的符号链接，清空 `tmp/` 后按 `MANIFEST.json` 重建 |
 
@@ -260,7 +335,10 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ## 12. 诊断工具
 
-- 新旧结果差异诊断：`ats shadow`，用法见 [`SHADOW_COMPARISON_RUNBOOK.md`](SHADOW_COMPARISON_RUNBOOK.md)（只作诊断，不是验收标准）。
+- 切换期工具已退役（switch-trade r5 第 8、9 组，2026-11-10/11）：`ats drill`、`ats cutover`、`ats shadow`、`ats batch`、`ats read`、`ats intake`、
+  `ats consumer-cutover`、`ats data assurance` 与 `ats dispatch` 的所有权、回滚去重子命令只剩提示桩；删除前的用法存档在
+  [`archive/R5C_MIGRATION_COMMANDS.md`](archive/R5C_MIGRATION_COMMANDS.md)，影子比较手册归档在
+  [`archive/SHADOW_COMPARISON_RUNBOOK.md`](archive/SHADOW_COMPARISON_RUNBOOK.md)。实盘路由演练仍用 `ats live drill` / `ats live rollback-drill`。
 - 历史手册（切换期间的逐 scope 授权、批次切换、持久部署许可、旧上线 checklist）已归档在
   [`archive/`](archive/)：`PHASE_F_OPERATIONS.md`、`PHASE_F_NEW_LOGIC_SWITCH_CONDITIONS.md`、
   `PHASE_F_PERSISTENT_RUNTIME.md`、`GO_LIVE.md`。

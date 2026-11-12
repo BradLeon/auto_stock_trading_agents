@@ -300,7 +300,7 @@ def restore_stopped_simulation(switch_token: str, *, expected_generation: int,
     code. No grant is issued, and old authorizations never regain their generation.
     A post-bump retry may finish opening the same target without another bump.
     """
-    from ..workflow.business_replay_inputs import implementation_hashes
+    from ..workflow.assurance_surface import implementation_hashes
     from ..workflow.isolation import verified_isolation_root
     from .route_arbitration import authority_lock
     from .simulation import selected_simulation

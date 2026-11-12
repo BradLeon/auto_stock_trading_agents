@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -202,6 +203,115 @@ def _publish_cited_document(store, document_id: str, fetched_at: str) -> None:
         source="test", text=f"published body for {document_id}", fetched_at=stamp))
 
 
+# Ports a local TWS / IB Gateway listens on (live, paper).
+_TWS_PORTS = frozenset({7496, 7497, 4001, 4002})
+
+
+@pytest.fixture(autouse=True)
+def _never_reach_flex(monkeypatch):
+    """No test may call the IBKR Flex service with the Boss's token from `.env`: the Clerk's reconcile step would."""
+    monkeypatch.setattr("ats.trader.flex_statement.credentials", lambda: None)
+
+
+@pytest.fixture(autouse=True)
+def _never_reach_tws(monkeypatch):
+    """No test may open a connection to a broker on this machine. A code path that
+    builds a real IBKRBroker fails here instead of reading the user's account."""
+    import asyncio
+    import socket
+
+    def refuse(host, port):
+        if port in _TWS_PORTS:
+            raise ConnectionRefusedError(f"test attempted a TWS connection to {host}:{port}")
+
+    connect, create = socket.socket.connect, asyncio.BaseEventLoop.create_connection
+
+    def guarded_connect(self, address):
+        if isinstance(address, tuple) and len(address) >= 2:
+            refuse(*address[:2])
+        return connect(self, address)
+
+    async def guarded_create(self, factory, host=None, port=None, *args, **kwargs):
+        refuse(host, port)
+        return await create(self, factory, host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(asyncio.BaseEventLoop, "create_connection", guarded_create)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "governed_decision_reads: run Risk/Clerk reads through the real governed read API "
+                   "(the default test double reads the sources directly)")
+
+
+@pytest.fixture(autouse=True)
+def _decision_reads_direct(request, monkeypatch):
+    """Risk and Clerk read through the governed read API (switch-trade r5 task 6.4). In production their routes
+    are `target`; the test environment's are not, and the API refuses a native read on a non-target route. So a
+    test about what Risk computes or what Clerk books reads the same sources directly, through the seams these
+    tests already stub (`trader.portfolio.snapshot`, `fundamentals.cached_beta`, ...). The read path itself is
+    tested where it is the subject: mark the test `governed_decision_reads`."""
+    if request.node.get_closest_marker("governed_decision_reads"):
+        return
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from ats.data.runtime import clerk_reads
+    from ats.risk import inputs
+
+    def rules():
+        from ats.config import get_config, load_instrument_risk_registry, load_risk_policy
+
+        return inputs.Rules(get_config().app.risk, load_risk_policy(), load_instrument_risk_registry())
+
+    def account():
+        from ats.trader import portfolio
+
+        return portfolio.snapshot()
+
+    def performance_history(*, limit=250):
+        from ats.execution import state_api
+        from ats.memory import get_store
+
+        store = get_store()
+        return state_api.performance_history(store, limit=limit), state_api.completeness(store)
+
+    def beta(symbol):
+        from ats.data import fundamentals
+
+        return fundamentals.cached_beta(symbol)
+
+    def close_history(symbols):
+        from ats.data import sector_snapshot
+
+        return sector_snapshot.fetch_prices(symbols) if symbols else {}
+
+    def atm_iv(symbol):
+        from ats.data import options
+
+        return options.fetch(symbol).get("atm_iv")
+
+    for name, value in (("rules", rules), ("account", account), ("performance_history", performance_history),
+                        ("beta", beta), ("close_history", close_history), ("atm_iv", atm_iv),
+                        ("book", lambda portfolio, registry=None: nullcontext())):
+        monkeypatch.setattr(inputs, name, value)
+
+    def clerk_read(consumer, product, *, scope, broker=None, audit=None, **_kw):
+        from ats.data.runtime.broker import broker_step
+
+        try:
+            if product == "DECISION_APPROVAL_CONTEXT":
+                return SimpleNamespace(status="complete", payload=audit.read_chain(scope["cycle_id"]), gaps=[])
+            packet = broker_step(broker, scope["step"])
+            return SimpleNamespace(status=packet["status"], payload=packet["payload"], gaps=[])
+        except Exception as exc:  # noqa: BLE001 - the API records a failed read the same way
+            return SimpleNamespace(status="unavailable", payload=None,
+                                   gaps=[f"input_unavailable:{type(exc).__name__}:{exc}"])
+
+    monkeypatch.setattr(clerk_reads, "_read_input", clerk_read)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_db(tmp_path, monkeypatch):
     """Point Context Memory + checkpoints at throwaway DBs per test."""
@@ -217,9 +327,6 @@ def _isolate_db(tmp_path, monkeypatch):
     from ats.workflow.schedule_runtime import initialize
 
     initialize()
-    from ats.workflow.cutover import bootstrap
-
-    bootstrap(actor="test-fixture", path=tmp_path / "cutover.sqlite")
     monkeypatch.delenv("ATS_STRUCTURED_DB_PATH", raising=False)
     monkeypatch.setenv("ATS_STRUCTURED_ARTIFACT_ROOT", str(tmp_path / "structured_artifacts"))
     monkeypatch.setenv("ATS_CHECKPOINT_DB", str(tmp_path / "ckpt.sqlite"))
@@ -240,6 +347,15 @@ def _isolate_db(tmp_path, monkeypatch):
     yield
     reset_store_cache()
     reset_repository_cache()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_sec_rate(tmp_path, monkeypatch):
+    """The machine-wide SEC pace keeps its state per test and does not slow fake requests down."""
+    from ats.data import sec_rate
+
+    monkeypatch.setenv("ATS_SEC_RATE_STATE", str(tmp_path / "sec_rate.json"))
+    monkeypatch.setattr(sec_rate, "_interval", lambda: 0.0)
 
 
 @pytest.fixture(autouse=True)
@@ -436,7 +552,10 @@ def broker(monkeypatch, tmp_path):
     monkeypatch.setattr(texec, "IBKRBroker", FakeBroker)
     monkeypatch.setattr(texec, "_last_price", lambda s: 100.0)
     monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: _fresh_portfolio())
+    monkeypatch.setattr("ats.broker.account.account_broker",
+                        lambda: SimpleNamespace(get_portfolio=_fresh_portfolio))
     monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda p: None)
+    monkeypatch.setattr("ats.risk.assess.warm_betas", lambda p: 0)      # approving warms betas: never the network
     monkeypatch.setattr("ats.risk.assess.enrich_options", lambda p: None)
     monkeypatch.setattr("ats.risk.assess.assess",
                         lambda p, **k: RiskReview(as_of=datetime.now(timezone.utc),
@@ -488,6 +607,9 @@ class FakeChannel:
 
     def request_approval(self, req: ApprovalRequest) -> BossApproval:
         self.requests.append(req)
+        # A real verdict is stamped when it is given, not when the channel was set up.
+        if self.verdict.reviewed_at is not None:
+            return self.verdict.model_copy(update={"reviewed_at": datetime.now(timezone.utc)})
         return self.verdict
 
     def fetch_report_context(self, query: str) -> ReportBundle:
@@ -531,6 +653,11 @@ def open_decision_read_gate(monkeypatch):
 
     monkeypatch.setattr(dr, "freeze_read_dependencies", lambda plan: [])
     monkeypatch.setattr(dr, "validate_read_dependencies", lambda plan, requirements: None)
+    # The Chief's context reads account state through a native input whose guard demands the same
+    # qualified route outside an isolated run (its own tests cover the refusal).
+    from ats.workflow import runtime_reads
+
+    monkeypatch.setattr(runtime_reads, "guard_input", lambda *a, **k: None)
 
 
 @pytest.fixture(autouse=True)
@@ -540,3 +667,13 @@ def _no_installed_product_health_gate(monkeypatch):
     from ats.workflow import ownership
 
     monkeypatch.setattr(ownership, "PRODUCT_HEALTH_GATE", None)
+
+
+@pytest.fixture(autouse=True)
+def _clear_risk_market_data_memo():
+    """The review's two-minute market-data memo must not carry one test's fetch into the next."""
+    from ats.risk import assess
+
+    assess._MEMO.clear()
+    yield
+    assess._MEMO.clear()

@@ -105,6 +105,41 @@ entities:
     market: US
     filings: sec
 
+  # 2026-11-04 补：PEAD targets 新成员。不登记的话身份闸只认代码，文章/文件里写
+  # 公司名（"Sandisk"、"FormFactor"）就关联不上。
+  SNDK:
+    name: Sandisk
+    aliases: [SANDISK, "SANDISK CORPORATION", "SANDISK CORP"]
+    market: US
+    filings: sec
+
+  FORM:
+    name: FormFactor
+    aliases: [FORMFACTOR, "FORMFACTOR INC"]
+    market: US
+    filings: sec
+
+  # META：observe 成员，IBKR 新闻按 PEAD 名单抓取后才发现未登记。名字写全称——单词 "Meta" 太常见，
+  # 别名又是不区分大小写的整串匹配；代码 META 本身按大小写敏感匹配。
+  META:
+    name: Meta Platforms
+    aliases: ["META PLATFORMS", "META PLATFORMS INC", "META PLATFORMS, INC."]
+    market: US
+    filings: sec
+
+  # TSLA / AAPL：用户关注、但与 AI 硬件链相关性低的 targets，不进链证据（schedules.yaml chain_evidence_daily）。
+  TSLA:
+    name: Tesla
+    aliases: [TESLA, "TESLA INC", "TESLA, INC."]
+    market: US
+    filings: sec
+
+  AAPL:
+    name: Apple
+    aliases: [APPLE, "APPLE INC", "APPLE INC."]
+    market: US
+    filings: sec
+
   NVDA:
     name: NVIDIA
     aliases: [NVIDIA, "NVIDIA CORPORATION"]

@@ -1,19 +1,38 @@
-# Lumentum (LITE) — optical-module PEAD peer. Uses generic dims + normal bar
-# until calibrated. Signal chain mirrors COHR (same AI-optical complex).
+# Lumentum (LITE) — PEAD config. L3 光互联：EML/CW 激光器、光模块、OCS 光交换。
+# 财年 6 月底结：11 月初报 FQ1，2 月初报 FQ2。fiscal_label 由财报日历派生，无需手填。
+# 2026-11-04 由通用打分卡改为定制。依据（网络检索，二手来源为主）：FQ4 FY2026 营收同比翻倍；FQ1 FY2027 指引
+# $1.225–1.275B、非 GAAP 营业利润率约 40%，OCS 首次单季超 $100M；EML/CW 激光器需求延续到 2027；
+# CPO 超高功率激光芯片 2027 下半年起量产出货。
+# 2026-11-04 信号链去掉 AAOI：不在 PEAD 名单，不再采集。
 
 symbol: LITE
 company_name: "Lumentum"
-# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填；读档案用 data/period.label_for_reads。
-#   2026-10-17：手填的季度名每季都会过期（ASML/TSM 财报已出 Q3，这里仍是 Q2），改为不写。
 sector_etf: SMH
 benchmark: QQQ
+run_up_warn_pct: 5.0
 long_threshold: 1.0
 
+# 权重之和 = 1.00
+scorecard_dims:
+  - {key: forward_guide,   weight: 0.25, label: 次季营收/EPS 与营业利润率指引}
+  - {key: lasers,          weight: 0.20, label: EML/CW 激光器出货与产能（InP 供给约束）}
+  - {key: ocs,             weight: 0.15, label: OCS 光交换营收与客户扩展}
+  - {key: transceivers,    weight: 0.10, label: 光模块（800G/1.6T）营收}
+  - {key: cpo,             weight: 0.10, label: CPO/外置光源订单进展}
+  - {key: gross_margin,    weight: 0.15, label: 毛利率}
+  - {key: call_tone,       weight: 0.05, label: 电话会语气：2027 需求能见度}
+
 signal_chain:
-  - {symbol: GOOG, role: upstream}
-  - {symbol: META,  role: upstream}
-  - {symbol: MSFT,  role: upstream}
-  - {symbol: AMZN,  role: upstream}
-  - {symbol: NVDA,  role: downstream}
+  - {symbol: GOOG, role: downstream}    # OCS 与光模块的云厂客户
+  - {symbol: META,  role: downstream}
+  - {symbol: MSFT,  role: downstream}
+  - {symbol: AMZN,  role: downstream}
+  - {symbol: NVDA,  role: downstream}   # scale-up/CPO 生态
   - {symbol: COHR,  role: peer}
-  - {symbol: AAOI,  role: peer}
+  - {symbol: AXTI,  role: upstream}     # InP 衬底
+  - {symbol: MRVL,  role: upstream}     # 光模块 DSP
+
+narrative_seed: >
+  AI 数据中心光互联的激光器核心供应商，EML/CW 激光器供不应求，OCS 光交换在 2026 年快速放量成为第二曲线；
+  营业利润率约 40%、营收同比翻倍，市场已给高估值，财报对次季指引与产能（InP）扩张节奏极敏感；
+  CPO 是 2027–2028 的增量，订单与时间表的兑现度是长期估值锚。

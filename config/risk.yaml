@@ -4,13 +4,17 @@
 # L1-L6 全局限额
 limits:
   # L1 标的
-  max_position_pct: 0.25
+  # 2026-11-06 用户放宽：单票净敞口 25% → 35%（按经济实体合并杠杆 ETF / 期权 delta 后计）。
+  max_position_pct: 0.35
   max_sector_pct: 0.50
   stop_loss_pct: 0.25
   # L2 组合
-  max_gross_leverage: 1.0
+  # 2026-11-06 用户放宽：1.0x → 1.5x。IBKR 的保证金占用/剩余流动性两条仍在，杠杆到 1.5x 时它们更可能是真正起作用的约束。
+  max_gross_leverage: 1.5
   max_single_order_usd: 25000
-  cash_floor_pct: 0.10
+  # 2026-11-06 用户放宽：现金可以为 0，且杠杆上限 1.5x 意味着需要借入，所以有效现金地板写成负数。
+  # 取 −(max_gross_leverage − 1)：有效现金不得低于 −50%，与杠杆上限同一条边界、不再互相打架。
+  cash_floor_pct: -0.50
   max_margin_util_pct: 0.50
   min_excess_liquidity_pct: 0.10
   # L3 市场/因子
@@ -53,12 +57,12 @@ limits:
 # ⚠️ **cap 是天花板，不是分配**：八层合计 135% 是正常的，它们不会同时满仓
 #    （还有总杠杆、现金下限、单票上限、相关簇上限管着）。六层时合计也是 115%。
 #
-# ⚠️ **单票层的实际上限是 cap × 40%**（单票限额 single_name_cap_frac）：
-#    L1(GOOG) 10% → 实际最多 4%；L7(TSM) 20% → 实际最多 8%。
-#    L7 给到 20% 正是为了让 TSM 能到 8%，不是因为它比 L4 重要。
+# ⚠️ 2026-11-06 **「单票 ≤ 层 cap × 40%」已废弃**：篮子里的单票不再按层 cap 的 40% 截断，
+#    单票上限只由 limits.max_position_pct（35%）管。层内只有一只票时，它可以占满本层预算
+#    （例如 L7 只有 TSM，它最多可占 20%）。
 sector_layer_caps:
   ai_hardware:
-    # 单票(GOOG)且**本层无命题** —— 判断没有证据基础，且 GOOG 兼属 L2。实际上限 4%。
+    # 单票(GOOG)且**本层无命题** —— 判断没有证据基础。风险归层上 GOOG 已改记入 L2（见 instruments.GOOG.layer_key），本层持仓暂为 0。
     L1_app: {weight_cap: 0.10}
     # 需求源头；超大市值、现金流防御性最强；5 条命题是全链最完备的一层。
     L2_cloud: {weight_cap: 0.25}
@@ -112,7 +116,33 @@ directive:
   limited_headroom_pct: 0.10
 
 # 执行证券 -> 经济风险实体；未配置证券默认自身为实体、1x 敞口
+# layer_key：风险归层的显式覆盖（优先于 layer_symbol 在层名册里的查找）。
 instruments:
+  # 2026-11-06 用户指定的归层。
+  GOOG:
+    layer_key: L2_cloud               # 名册里 L1/L2 都列了它；按市场定位记入 L2
+  DRAM:
+    economic_entity: DRAM_ETF         # Roundhill 存储主题 ETF（一篮子），不并入 SK_HYNIX
+    label: Roundhill Memory ETF
+    risk_symbol: DRAM
+    layer_key: L6_memory
+    product_type: etf
+  SKUU:                               # GraniteShares 2x Long SK Hynix Daily（美股）
+    economic_entity: SK_HYNIX
+    label: SK Hynix
+    risk_symbol: HY9H
+    layer_symbol: SKHY
+    exposure_multiplier: 2.0
+    product_type: leveraged_etf
+  NVDX:                               # T-REX 2x Long NVIDIA Daily Target
+    economic_entity: NVDA
+    label: NVIDIA
+    risk_symbol: NVDA
+    layer_symbol: NVDA
+    exposure_multiplier: 2.0
+    product_type: leveraged_etf
+  FORM:
+    layer_key: L8_equipment           # FormFactor：探针卡/测试，归设备层
   "7709":
     economic_entity: SK_HYNIX
     label: SK Hynix

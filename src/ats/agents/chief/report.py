@@ -20,19 +20,67 @@ def render(result: ChiefResult) -> str:
         "",
     ]
     if result.decisions:
-        lines += ["| 动作 | 标的 | 规模 | 信心 | 理由 |", "|---|---|---|---|---|"]
+        if result.outcome_note:
+            lines += [f"> ⚠️ **以下建议没有形成订单，不在待审批里**：{result.outcome_note}", ""]
+        if result.skipped_note:
+            lines += [f"> 另有建议本轮没有下单：{result.skipped_note}", ""]
+        lines += ["| 动作 | 标的 | 规模 | 限价 | 信心 | 理由 | 引用 |", "|---|---|---|---|---|---|---|"]
         for d in result.decisions:
-            size = f"${d.notional_usd:,.0f}" if d.notional_usd else (
-                f"w={d.target_weight:.0%}" if d.target_weight else "—")
-            lines.append(f"| {d.action} | {d.symbol} | {size} | {d.conviction:.2f} "
-                         f"| {d.rationale} |")
+            lines.append(f"| {d.action} | {d.symbol} | {_size(d)} | {_price(d)} | {d.conviction:.2f} "
+                         f"| {d.rationale} | {', '.join(r[:8] for r in d.references) or '—'} |")
     else:
         lines.append("**（无行动 — 零决策）**")
+    if result.option_actions:
+        lines += ["", "## 期权建议（人工执行，系统不下单）", "",
+                  "| 动作 | 合约 | 张数 | 展期到 | 理由 |", "|---|---|---|---|---|"]
+        for a in result.option_actions:
+            roll = f"{a.get('roll_to_expiry') or ''} {a.get('roll_to_strike') or ''}".strip() or "—"
+            lines.append(f"| {a['action']} | {a['symbol']} {a['expiry']} {a['strike']:g}{a['right']} "
+                         f"| {a.get('contracts') or '—'} | {roll} | {a.get('rationale', '')} |")
+    lines += _reasoning_lines(result.reasoning)
     if result.context_text:
         lines += ["", "---", "", "## 决策时所见的完整上下文（审计）", "",
                   "```", result.context_text, "```"]
     lines.append("")
     return "\n".join(lines)
+
+
+def _size(d) -> str:
+    """Shares and money both, whichever the order has; a proposal with neither says so instead of a bare dash."""
+    parts = []
+    if d.qty:
+        parts.append(f"{d.qty:g} 股")
+    if d.notional_usd:
+        parts.append(f"≈ ${d.notional_usd:,.0f}" if d.qty else f"${d.notional_usd:,.0f}")
+    if parts:
+        return " ".join(parts)
+    return f"目标权重 {d.target_weight:.0%}" if d.target_weight is not None else "未给规模"
+
+
+def _price(d) -> str:
+    if d.limit_price:
+        return f"{d.limit_price:,.2f}"
+    return "市价" if d.order_type == "market" else "系统按盘口定"
+
+
+def _reasoning_lines(r: dict) -> list[str]:
+    if not r:
+        return []
+    out = ["", "## 推理", "", f"**组合判断：** {r.get('portfolio_stance', '')}", ""]
+    if r.get("holdings_review"):
+        out += ["### 逐个持仓复查", "", "| 标的 | 判断 | 依据 | 冲突信号与取舍 |", "|---|---|---|---|"]
+        out += [f"| {h['symbol']} | {h['verdict']} | {h['basis']} | {h.get('conflicts') or '—'} |"
+                for h in r["holdings_review"]]
+        out.append("")
+    if r.get("evidence_weighing"):
+        out += ["### 证据权衡", "", "| 来源 | 结论 | 采用 | 理由 |", "|---|---|---|---|"]
+        out += [f"| {e['source']} | {e['said']} | {e['use']} | {e['why']} |" for e in r["evidence_weighing"]]
+        out.append("")
+    if r.get("considered_not_taken"):
+        out += ["### 考虑过但没做", ""] + [f"- {a['idea']}：{a['why_not']}" for a in r["considered_not_taken"]]
+        out.append("")
+    out += ["### 风险与证伪", "", r.get("risks_and_invalidation", "")]
+    return out
 
 
 def write(result: ChiefResult, out_dir: str) -> Path | None:

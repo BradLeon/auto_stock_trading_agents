@@ -67,11 +67,18 @@ def technical_report(outcomes: list[dict], *, store_path: str | None) -> dict[st
             close=levels.get("close"), sma20=levels.get("sma20"), sma50=levels.get("sma50"),
             sma200=levels.get("sma200"), bars=0, stale=False, note=""))
     as_of = max(datetime.fromisoformat(str(row["as_of"])) for row in rows)
+    payloads = [row["payload"] for row in rows]
+    vix = next((p["vix"] for p in payloads if p.get("vix") is not None), None)
+    vix3m = next((p["vix3m"] for p in payloads if p.get("vix3m") is not None), None)
+    recorded = any("vix" in p or "vix3m" in p or p.get("volatility_status") for p in payloads)
+    notes = ["由本次运行已发布的技术面投影汇总"]
+    if not recorded:
+        notes.append("这些投影没有保存 VIX 与 VIX3M 读数（旧版本投影），市场状态只显示是否触发恐慌层")
     review = TechnicalReview(
         name=cfg.name, as_of=as_of, strategy=cfg.strategy,
         fingerprint=str(rows[0].get("model_version", "")).rsplit("@", 1)[-1],
-        market_panic=any(r.panic_fired for r in readings), readings=readings,
-        notes=["由本次运行已发布的技术面投影汇总；VIX 与 VIX3M 数值不在投影内，市场状态只显示是否触发恐慌层"])
+        vix=vix, vix3m=vix3m, volatility_recorded=recorded,
+        market_panic=any(r.panic_fired for r in readings), readings=readings, notes=notes)
     path = tech_report.write(review, cfg)
     if path is None:
         return {"report": "technical", "status": "skipped", "reason": "output_dir_unset_or_missing"}

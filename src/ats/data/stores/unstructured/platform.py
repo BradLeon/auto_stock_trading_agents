@@ -267,7 +267,9 @@ class PlatformUnstructuredRepository:
                 if legacy_version:
                     version = legacy_version
                 if version["document_id"] not in selected:
-                    selected[version["document_id"]] = {
+                    # The newest publication decides: a withdrawal hides the document from
+                    # this point on (earlier as-of reads still see what was known then).
+                    selected[version["document_id"]] = None if metadata.get("withdrawn") else {
                         **metadata, "version": version,
                         "metadata_history": history_basis}
         for row in self.documents(ok_only=True, limit=10_000):
@@ -287,7 +289,7 @@ class PlatformUnstructuredRepository:
                 continue
             selected[row["document_id"]] = {
                 **row, "version": version, "metadata_history": "legacy_current_only"}
-        return sorted(selected.values(), key=lambda row: (
+        return sorted((row for row in selected.values() if row is not None), key=lambda row: (
             row["version"]["fetched_at"], row["document_id"]),
                       reverse=True)[:max(1, min(int(limit), 10_000))]
 
@@ -960,6 +962,46 @@ class PlatformUnstructuredRepository:
                 for entity in revised["related_entities"]])
             self.conn.execute("INSERT OR IGNORE INTO data_document_publications VALUES (?,?,?,?,?)",
                 (publication_id, document_id, version["version_id"], stamp, encoded))
+        return publication_id
+
+    def withdraw_document(self, document_id: str, *, reason: str,
+                          known_at: datetime | None = None) -> str:
+        """Withdraw an admitted document that turned out to be wrong (managed writers only).
+
+        Nothing is deleted: the bodies, versions and earlier publications stay for audit and
+        for as-of replay before the withdrawal. A withdrawal publication (ok=0, completeness
+        "withdrawn", reason) is appended and the current index row is switched off, so every
+        current read and every as-of read after `known_at` stops seeing it.
+        """
+        if not self.writable:
+            raise RuntimeError("platform repository is read-only")
+        self._require_managed_writer()
+        return self._withdraw_document(document_id, reason=reason, known_at=known_at)
+
+    def _withdraw_document(self, document_id: str, *, reason: str,
+                           known_at: datetime | None = None) -> str:
+        if not reason.strip():
+            raise ValueError("a withdrawal requires a reason")
+        stamp_at = (known_at or datetime.now(timezone.utc))
+        if stamp_at.tzinfo is None:
+            raise ValueError("withdrawal known_at must be timezone-aware")
+        stamp = stamp_at.astimezone(timezone.utc).isoformat()
+        row = self.conn.execute("SELECT * FROM data_documents WHERE document_id=?",
+                                (document_id,)).fetchone()
+        version = self.latest_document_version(document_id)
+        if row is None or version is None:
+            raise KeyError(f"unknown document {document_id!r}")
+        metadata = {**dict(row), "ok": 0, "completeness": "withdrawn",
+                    "note": f"withdrawn: {reason}", "withdrawn": True, "withdrawal_reason": reason,
+                    "fetched_at": stamp}
+        encoded = json.dumps(metadata, sort_keys=True, ensure_ascii=False)
+        publication_id = hashlib.sha256(
+            f"withdraw|{version['version_id']}|{stamp}|{encoded}".encode()).hexdigest()
+        with self.conn:
+            self.conn.execute("INSERT OR IGNORE INTO data_document_publications VALUES (?,?,?,?,?)",
+                              (publication_id, document_id, version["version_id"], stamp, encoded))
+            self.conn.execute("UPDATE data_documents SET ok=0, completeness='withdrawn', note=? "
+                              "WHERE document_id=?", (f"withdrawn: {reason}", document_id))
         return publication_id
 
     def document_by_content_hash(self, content_hash: str, *, entity: str | None = None) -> dict | None:

@@ -30,6 +30,56 @@ structured:
         attempts: 3
         backoff_seconds: [60, 300, 900]
       semantics: compare reference_period/methodology_fingerprint/payload_sha256; append new periods or revisions, never overwrite
+    # 2026-11-12 (user): the other three L1 production-adoption sources had no job at all, so the L1 observer kept
+    # reading the one manual load of 2026-09-10. All three discover the newest upstream release over the network
+    # (Census BTOS API, FRED series metadata, the Hugging Face repository listing) and only download on a new
+    # release, so a weekly check is cheap even for the quarterly / irregular ones. Friday mornings UTC: BTOS
+    # publishes every other Thursday; all three land before the 09:00 L1 observer run.
+    us_census_btos_weekly:
+      enabled: true
+      source: us_census_btos
+      datasets: [ai_enterprise_adoption_us]
+      schedule: weekly
+      weekday: friday
+      at: "08:10"
+      timezone: UTC
+      command: ats data release-check --source us_census_btos --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: biweekly survey release; a new release appends its periods, an unchanged release is no_change
+    rps_genai_adoption_weekly:
+      enabled: true
+      source: rps_genai_adoption
+      datasets: [ai_worker_adoption_us]
+      schedule: weekly
+      weekday: friday
+      at: "08:15"
+      timezone: UTC
+      command: ats data release-check --source rps_genai_adoption --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: quarterly FRED series; weekly check catches the release within a week, revisions become new vintages
+    anthropic_economic_index_weekly:
+      enabled: true
+      source: anthropic_economic_index
+      datasets: [ai_work_adoption]
+      schedule: weekly
+      weekday: friday
+      at: "08:20"
+      timezone: UTC
+      command: ats data release-check --source anthropic_economic_index --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: irregular commit-pinned releases; discovery reads repository metadata only, CSVs are downloaded once per new complete release
     openrouter_rankings_p7d_ingest:
       enabled: true
       source: openrouter_rankings
@@ -246,155 +296,19 @@ structured:
     # --- PEAD consensus refresh (added 2026-10-16, enabled 2026-10-16 on the user's approval) -----------------
     # yfinance_consensus snapshots stopped on 2026-09-04: no job ever refreshed them, and the target route
     # now ignores a snapshot older than 14 days (data/consensus.py `align`). The adapter takes exactly one
-    # entity per snapshot, so there is one job per PEAD target. Validate with `ats.data.refresh validate` after any change.
-    consensus_goog_daily:
+    # entity per snapshot, so the job expands to one job per PEAD target. Validate with `ats.data.refresh validate` after any change.
+    # 2026-11-04: the 11 hand-copied consensus_<sym>_daily jobs (06:00..06:30, 3 minutes apart) became this one
+    # job over config/pead.yaml targets, so a name added there is collected without editing this file. The
+    # expanded jobs are due together and run one after another in the same tick.
+    consensus_daily:
       enabled: true
       source: yfinance_consensus
+      entities: {from_pead: [targets]}
       datasets: [market_consensus]
       schedule: daily
       at: "06:00"
       timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity GOOG
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_nvda_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:03"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity NVDA
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_skhy_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:06"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity SKHY
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_tsm_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:09"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity TSM
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_asml_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:12"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity ASML
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_cohr_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:15"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity COHR
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_lrcx_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:18"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LRCX
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_lite_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:21"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity LITE
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_avgo_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:24"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity AVGO
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_mrvl_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:27"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MRVL
-      concurrency: 1
-      freshness_slo_days: 3
-      retry:
-        attempts: 2
-        backoff_seconds: [300, 900]
-      semantics: provider snapshot of the vendor's current-quarter estimate; immutable vintage per fetch, never overwritten
-    consensus_msft_daily:
-      enabled: true
-      source: yfinance_consensus
-      datasets: [market_consensus]
-      schedule: daily
-      at: "06:30"
-      timezone: UTC
-      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity MSFT
+      command: ats data ingest --source yfinance_consensus --dataset market_consensus --entity {entity}
       concurrency: 1
       freshness_slo_days: 3
       retry:
@@ -417,7 +331,8 @@ structured:
       # 2026-10-22 (G0): the scope is the PEAD target list (config/pead.yaml) plus MU, as the dataset's
       # `coverage_from` declares; it was only GOOG, MU, LRCX during the pilot. Names a vendor cannot supply a complete
       # package for (SKHY currency, ASML/TSM foreign filers) stay visible as failed/quarantined runs, not silent gaps.
-      entities: [GOOG, NVDA, SKHY, TSM, ASML, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      # 2026-11-04: read from config/pead.yaml targets instead of a copy (MU is a target now).
+      entities: {from_pead: [targets]}
       datasets: [company_financials]
       schedule: weekly
       weekday: saturday
@@ -435,10 +350,11 @@ structured:
       # yfinance) lag a filing by days to weeks (MU: SEC had the FY ending 2026-09-03 filed 10-09 while the vendors
       # still ended at 2026-05-31). Both jobs write the same dataset: the read side takes the first complete package
       # per period, so the vendor still wins a period both have, and a period only the SEC has is served from the SEC.
-      # Foreign private issuers (TSM, ASML, SKHY) file 20-F/6-K, which carry no quarterly XBRL: not listed here.
+      # Foreign private issuers (TSM, ASML, SKHY) file 20-F/6-K, which carry no quarterly XBRL: excluded.
+      # 2026-11-04: the PEAD targets minus those, read from config/pead.yaml instead of a copy.
       enabled: true
       source: sec_companyfacts
-      entities: [GOOG, NVDA, COHR, LRCX, LITE, AVGO, MRVL, MSFT, MU]
+      entities: {from_pead: [targets], exclude: [TSM, ASML, SKHY]}
       datasets: [company_financials]
       schedule: daily
       at: "07:00"
@@ -508,13 +424,56 @@ unstructured:
       freshness_slo_days: 3 # refresh/check cadence, not age of latest upstream release
       retry: {attempts: 2, backoff_seconds: [300, 900]}
       semantics: pinned HF revision/spec/hash; index metadata only, never SEC body
+    # 2026-10-29: earnings filings reach the calendar twice a day, 06:00 and 18:00 Taipei. Discovery, body and
+    # calendar-finalize share one due time and the controller runs due jobs in file order within one tick, so each
+    # shift goes discovery -> body -> finalize in a single tick (the tick is hourly, so a fixed minute per step would
+    # not keep that order). 06:00 Taipei is 17:00/18:00 New York: last night's 16:00 prints are on EDGAR by then.
+    sec_edgar_discovery_morning:
+      enabled: true
+      source: sec_edgar_submissions_index
+      datasets: [sec_filing_index]
+      schedule: daily
+      at: "06:00"
+      timezone: Asia/Taipei
+      command: ats data document-ingest --source sec_edgar_submissions_index
+      freshness_slo_days: 3
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      scope:
+        required_env: [SEC_EDGAR_USER_AGENT]
+      semantics: EDGAR submissions of the entities with earnings due within -3..+1 days; index metadata only, never SEC body
+    sec_edgar_discovery_evening:
+      enabled: true
+      source: sec_edgar_submissions_index
+      datasets: [sec_filing_index]
+      schedule: daily
+      at: "18:00"
+      timezone: Asia/Taipei
+      command: ats data document-ingest --source sec_edgar_submissions_index
+      freshness_slo_days: 3
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      scope:
+        required_env: [SEC_EDGAR_USER_AGENT]
+      semantics: EDGAR submissions of the entities with earnings due within -3..+1 days; index metadata only, never SEC body
+    sec_official_body_morning:
+      enabled: true
+      source: sec_edgar_filing_body
+      datasets: [sec_filing_documents]
+      schedule: daily
+      at: "06:00"
+      timezone: Asia/Taipei
+      command: ats data document-ingest --source sec_edgar_filing_body
+      freshness_slo_days: 3
+      retry: {attempts: 2, backoff_seconds: [300, 900]}
+      scope:
+        required_env: [SEC_EDGAR_USER_AGENT]
+      semantics: official HTTPS URL and accession from accepted fixed index only
     sec_official_body_daily:
       enabled: true   # 2026-10-21: G0 verification; sec.gov reachable again, one manual run admitted 4 bodies
       source: sec_edgar_filing_body
       datasets: [sec_filing_documents]
       schedule: daily
-      at: "09:30"   # 2026-10-26: was 08:30; the index it reads is refreshed ~08:34, so 08:30 always read yesterday's
-      timezone: UTC
+      at: "18:00"   # 2026-10-29: evening shift (10:00 UTC), after the DefeatBeta index (08:00 UTC, upstream ~08:34)
+      timezone: Asia/Taipei
       command: ats data document-ingest --source sec_edgar_filing_body
       freshness_slo_days: 3
       retry: {attempts: 2, backoff_seconds: [300, 900]}
@@ -605,11 +564,19 @@ derived:
   jobs:
     chain_evidence_daily:
       # 2026-10-16: moved out of the legacy PEAD score window (`pead_observe_window`, left false).
-      # PILOT LIST ONLY (user decision: validate the path on a few names, widen after go-live).
-      # Widen by extending `entities`; one job (own ledger row, retry, freshness) per name.
+      # Pilot list was TSM/ASML/MU/SKHY (validate the path on a few names, widen after go-live). 2026-11-03: widened
+      # to every company witness of Layers L4, L5 and L8, whose evidence had stopped (L4 on 08-30, L5 on 10-16, L8 on
+      # 10-17) because none of their witnesses was on the list. ORCL and 005930.KS are left out until their fiscal
+      # period resolves (tasks 11.5): their document is quarantined as `period_unresolved` after the model has already
+      # read it, so each run would spend requests for nothing.
+      # 2026-11-04 (user): the chain scope stays inside config/pead.yaml (targets + observe), so one company is
+      # collected and processed once and every analysis reads the same evidence. CRDO and KLAC left with that (they had
+      # already left PEAD; their history stays). TSLA and AAPL are targets the user follows outside the AI-hardware
+      # chain: their earnings carry no chain evidence, so extracting them would spend requests and put AI-chain
+      # framing into their own review. Widen by adding names to config/pead.yaml; one job per name.
       enabled: true
       source: chain_evidence_observer
-      entities: [TSM, ASML, MU, SKHY]
+      entities: {from_pead: [targets, observe], exclude: [ORCL, "005930.KS", TSLA, AAPL]}
       schedule: daily
       at: "22:00"
       timezone: UTC
@@ -628,8 +595,15 @@ derived:
       # 08:00 UTC) and before the daily layer review. No model call: the observers' own trend rules give direction.
       # One job per source (own ledger row, retry, freshness); `entities` here lists chain source ids.
       enabled: true
+      # 2026-11-03: the queue lease must name the chain source the command collects (`--source {entity}`), so
+      # each entity is its own lease source. With a shared `chain_l1_governed_observers` name every scheduled run
+      # was refused ("requires an active managed-queue lease") from 10-26 on and L1 evidence stopped at 10-25.
       source: chain_l1_governed_observers
       entities: [l1_ai_production_adoption, l1_frontier_labs_commercialization, l1_frontier_raw_capability]
+      entity_sources:
+        l1_ai_production_adoption: l1_ai_production_adoption
+        l1_frontier_labs_commercialization: l1_frontier_labs_commercialization
+        l1_frontier_raw_capability: l1_frontier_raw_capability
       schedule: daily
       at: "09:00"
       timezone: UTC
@@ -773,15 +747,29 @@ derived:
       request_budget: {requests_per_run: 1}
       retry: {attempts: 2, backoff_seconds: [300, 1800]}
       semantics: PCE and GDP release dates from the BEA schedule
-    calendar_finalize_daily:
-      # 2026-10-26: moved from 07:10 to 10:00 UTC, after the filing index (08:00) and the SEC body job (09:30), so a
-      # print whose material was admitted this morning is confirmed this morning and the 18:10 calendar consumption
-      # wakes its review the same day instead of a day later.
+    calendar_finalize_morning:
+      # 2026-10-29: two shifts, 06:00 and 18:00 Taipei, each in the same tick as (and after) the EDGAR discovery and
+      # the SEC body job of that shift. The dispatcher consumes the calendar every 30 minutes, so a confirmed print
+      # wakes its review within half an hour of this job, whatever minute the hourly tick lands on.
       enabled: true
       source: calendar_maintenance
       schedule: daily
-      at: "10:00"
-      timezone: UTC
+      at: "06:00"
+      timezone: Asia/Taipei
+      command: ats data calendar-finalize
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 1}
+      retry: {attempts: 2, backoff_seconds: [300, 1800]}
+      semantics: confirm which planned prints have been released with admitted material, so the event workflows can run on them
+    calendar_finalize_daily:
+      # 2026-10-26: moved from 07:10 to 10:00 UTC, after the filing index (08:00) and the SEC body job (09:30).
+      # 2026-10-29: evening shift of two, 18:00 Taipei (= 10:00 UTC), see calendar_finalize_morning.
+      enabled: true
+      source: calendar_maintenance
+      schedule: daily
+      at: "18:00"
+      timezone: Asia/Taipei
       command: ats data calendar-finalize
       concurrency: 1
       freshness_slo_days: 3

@@ -33,6 +33,9 @@ class ApprovalRequest(BaseModel):
     # so a callback can be checked against the current revision on arrival.
     revision_no: int = 0
     decision_hash: str = ""
+    # How many change requests ("revise") the Boss has used on this cycle, and the cap.
+    boss_revisions: int = 0
+    max_boss_revisions: int = 2
 
 
 class ReportBundle(BaseModel):

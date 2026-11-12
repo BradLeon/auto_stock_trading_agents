@@ -26,6 +26,9 @@ from ats.schemas.risk import RiskReview
 from ats.trader import execute as trader
 from ats.workflow.isolation import isolated_run
 
+# The risk role's reads in these end-to-end runs go through the real governed read API (task 6.4).
+pytestmark = pytest.mark.governed_decision_reads
+
 
 def quote(**changes):
     now = datetime.now(UTC)
@@ -58,6 +61,9 @@ def execution(tmp_path, monkeypatch, price_clock):
         pf = PortfolioSnapshot(as_of=datetime.now(UTC), net_liquidation=1_000_000,
                                cash=1_000_000, daily_pnl=0, gross_exposure=0, positions=[])
         monkeypatch.setattr("ats.trader.portfolio.snapshot", lambda: pf)
+        # The risk role reads the book through the governed API (task 6.4) from this handle.
+        monkeypatch.setattr("ats.broker.account.account_broker",
+                            lambda: __import__("types").SimpleNamespace(get_portfolio=lambda: pf))
         monkeypatch.setattr("ats.risk.assess.enrich_beta", lambda pf: None)
         monkeypatch.setattr("ats.risk.assess.enrich_options", lambda pf: None)
         monkeypatch.setattr("ats.risk.assess._prices", lambda symbols: {})
@@ -298,6 +304,45 @@ def test_read_only_bid_ask_adapter_preserves_server_timestamp(monkeypatch):
     assert calls == ["read", "cancel_subscription"]
 
 
+def _slow_quote_broker(monkeypatch, *, first_tick_after: float):
+    """A transport whose first bid/ask tick arrives `first_tick_after` seconds after the subscription."""
+    from ats.broker.ibkr import IBKRBroker
+    ticker = SimpleNamespace(marketDataType=1, tickByTicks=[])
+    state = {"waited": 0.0}
+    class IB:
+        def qualifyContracts(self, c):
+            return [c]
+        def reqTickByTickData(self, c, *a):
+            return ticker
+        def cancelTickByTickData(self, *a):
+            pass
+        def sleep(self, delay):
+            state["waited"] += delay
+            if state["waited"] >= first_tick_after - 1e-9 and not ticker.tickByTicks:
+                ticker.tickByTicks.append(SimpleNamespace(time=datetime.now(UTC), bidPrice=100, askPrice=100.1))
+    @contextmanager
+    def session(*a, **kw):
+        yield IB()
+    broker = IBKRBroker()
+    monkeypatch.setattr(broker, "session", session)
+    return broker, state
+
+
+def test_a_quiet_premarket_tick_arriving_within_ten_seconds_is_used(monkeypatch):
+    broker, state = _slow_quote_broker(monkeypatch, first_tick_after=7.0)
+    row = broker.get_execution_quote("AAPL", currency="USD", metadata={"symbol": "AAPL", "currency": "USD"})
+    assert row["bid"] == 100 and row["market_data_mode"] == "live"
+    assert 6.9 <= state["waited"] <= 7.2          # stops at the first tick, does not wait out the window
+
+
+def test_no_tick_in_ten_seconds_is_still_a_refusal(monkeypatch):
+    from ats.broker.ibkr import IBKRUnavailable
+    broker, state = _slow_quote_broker(monkeypatch, first_tick_after=60.0)
+    with pytest.raises(IBKRUnavailable, match="execution_quote_source_timestamp_missing"):
+        broker.get_execution_quote("AAPL", currency="USD", metadata={"symbol": "AAPL", "currency": "USD"})
+    assert 9.9 <= state["waited"] <= 10.2
+
+
 def test_execution_age_rechecked_at_actual_broker_handoff(execution, monkeypatch):
     from phase_f_broker_harness import FakeIB, broker_for
     state = ready_state(execution)
@@ -426,25 +471,6 @@ def test_later_handoff_failure_preserves_first_receipt(execution, monkeypatch):
     assert execution.store.conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 2
 
 
-def test_price_native_api_cannot_borrow_production_legacy_or_isolated_candidate(execution, monkeypatch):
-    from ats.workflow.cutover_routing import RouteUnavailable
-
-    seen = []
-    def legacy(identity):
-        seen.append(identity)
-        return SimpleNamespace(route="legacy")
-    monkeypatch.setattr("ats.workflow.runtime_reads.gate_read", legacy)
-    monkeypatch.setattr("ats.workflow.isolation.verified_isolation_root", lambda: None)
-    order = TradeDecision(symbol="AAPL", action="buy", qty=1)
-    with prices.price_request("trader", [order], cycle_id="unqualified",
-                              purpose="preapproval_normalization"), pytest.raises(
-                                  RouteUnavailable, match="enabled exact business scope"):
-        prices.read_price("trader", order)
-    assert execution.calls == []
-    assert all(i.consumer_id == "trader" and i.contract_version == "target-dataflow-v2"
-               and i.scope["entities"] == ["AAPL"] for i in seen)
-
-
 def test_runtime_quotes_do_not_write_shared_facts_or_memory(execution):
     changes = execution.store.conn.total_changes
     orders, _notes = prices.normalize_orders([
@@ -456,6 +482,8 @@ def test_runtime_quotes_do_not_write_shared_facts_or_memory(execution):
 def test_overnight_chief_refreshes_price_and_revision_at_regular_session(execution, monkeypatch):
     close = datetime.now(UTC) - timedelta(hours=12)
     monkeypatch.setattr(prices, "session_context", lambda now: (False, close))
+    # a closed market that is NOT IBKR's overnight session (premarket, weekend): deferred, priced from the close
+    monkeypatch.setattr("ats.data.runtime.execution_prices.overnight_session_candidate", lambda point: False)
     historical = quote(source_as_of=close, price_kind="previous_session_close", close=100,
                        session="previous_completed_regular", market_data_mode="historical",
                        source_precision="session_date")
@@ -481,3 +509,169 @@ def test_overnight_chief_refreshes_price_and_revision_at_regular_session(executi
 
     with pytest.raises(AuthorizationError, match="human approval"):
         build_authorization(DecisionAuditRepository(execution.store), refreshed.cycle_id)
+
+
+def _historical_quote(monkeypatch, price=100):
+    close = datetime.now(UTC) - timedelta(hours=12)
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, close))
+    historical = quote(source_as_of=close, price_kind="previous_session_close", close=price,
+                       session="previous_completed_regular", market_data_mode="historical",
+                       source_precision="session_date")
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",
+                        lambda symbol, *a, **kw: historical.model_copy(update={"symbol": symbol}))
+
+
+def _normalize(order, positions, net=100_000):
+    return prices.normalize_orders([order], cycle_id="tw", overnight=True,
+                                   net_liquidation=net, positions=positions)
+
+
+def test_target_weight_zero_sells_exactly_what_is_held(execution, monkeypatch):
+    """2026-10-30 T0.2: a target weight is the weight AFTER the trade; 0 closes the holding."""
+    _historical_quote(monkeypatch)
+    orders, _ = _normalize(TradeDecision(symbol="GOOG", action="sell", target_weight=0,
+                                         order_type="market"), {"GOOG": 60})
+    assert orders[0].qty == 60
+
+
+def test_target_weight_trims_and_adds_by_the_gap_to_the_holding(execution, monkeypatch):
+    _historical_quote(monkeypatch)
+    trim, _ = _normalize(TradeDecision(symbol="AVGO", action="trim", target_weight=.05,
+                                       order_type="market"), {"AVGO": 100})
+    assert trim[0].qty == 50                     # 100 held -> 5% of 100k at 100 = 50
+    add, _ = _normalize(TradeDecision(symbol="AVGO", action="add", target_weight=.15,
+                                      order_type="market"), {"AVGO": 100})
+    assert add[0].qty == 49                      # gap 50, priced at the 100.5 limit, rounded down
+
+
+def test_target_weight_against_the_action_and_selling_unheld_stock_are_refused(execution, monkeypatch):
+    _historical_quote(monkeypatch)
+    with pytest.raises(prices.PriceUnavailable, match="action_contradicts_target"):
+        _normalize(TradeDecision(symbol="AVGO", action="buy", target_weight=.05,
+                                 order_type="market"), {"AVGO": 100})
+    with pytest.raises(prices.PriceUnavailable, match="no_position_to_sell"):
+        _normalize(TradeDecision(symbol="COHR", action="sell", target_weight=0,
+                                 order_type="market"), {"GOOG": 60})
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_position"):
+        _normalize(TradeDecision(symbol="GOOG", action="sell", qty=80, order_type="market"),
+                   {"GOOG": 60})
+    assert prices.proposal_error("GOOG:no_position_to_sell")
+    assert not prices.proposal_error("input_unavailable:IBKRUnavailable:execution_quote_source_timestamp_missing")
+
+
+def test_a_sell_sized_in_money_that_rounds_a_share_over_the_holding_sells_what_is_held(execution, monkeypatch):
+    """2026-11-06: "sell $10,100" of 100 shares at 100 and a lower bid rounds to 101 shares; the intent is to close."""
+    _historical_quote(monkeypatch)
+    orders, notes = _normalize(TradeDecision(symbol="AXTI", action="sell", notional_usd=10_100,
+                                             order_type="market"), {"AXTI": 100})
+    assert orders[0].qty == 100 and any("按持仓全部卖出" in n for n in notes)
+
+
+def test_a_money_overshoot_beyond_rounding_and_an_explicit_share_count_are_still_refused(execution, monkeypatch):
+    _historical_quote(monkeypatch)
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_position"):
+        _normalize(TradeDecision(symbol="AXTI", action="sell", notional_usd=20_000, order_type="market"),
+                   {"AXTI": 100})                      # twice the position is a mistake, not rounding
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_position"):
+        _normalize(TradeDecision(symbol="AXTI", action="sell", qty=101, order_type="market"), {"AXTI": 100})
+
+
+def test_a_missing_size_is_refused_with_what_to_change():
+    assert "target_weight=0" in prices.proposal_hint("AXTI:quantity_or_budget_missing")
+    assert "qty" in prices.proposal_hint("AXTI:quantity_exceeds_position")
+    assert prices.proposal_hint("AXTI:something_else") == "AXTI:something_else"
+
+
+@pytest.mark.parametrize("node_age", [timedelta(seconds=90), timedelta(minutes=30)])
+def test_price_request_window_is_its_own_not_the_nodes_entry_instant(execution, monkeypatch, node_age):
+    """A node bound on a consumer-wide route carries a single-instant window taken at entry. A quote read after a
+    slow portfolio snapshot must not fall outside it: each price_request block opens its own window."""
+    from types import SimpleNamespace
+
+    from ats.workflow import runtime_reads
+    from ats.workflow.read_scope import ReadScope
+
+    order = TradeDecision(symbol="AAPL", action="buy", qty=1)
+    entered = datetime.now(UTC) - node_age
+    contract = runtime_reads.consumer_contract("risk")
+    parent = SimpleNamespace(identity=ReadScope(
+        contract["domain_id"], "risk", contract["contract_version"],
+        {"kind": "decision", "id": "pending", "entities": ["AAPL"],
+         "time_range": {"start": entered.isoformat(), "end": entered.isoformat()}}))
+    monkeypatch.setattr(runtime_reads, "current_read_context", lambda: parent)
+    # Entering the block binds the identity and checks its window against now: the refusal was raised here.
+    with prices.price_request("trader", [order], cycle_id="pending", purpose="preapproval_normalization"):
+        pass
+
+
+def test_reference_quote_drops_only_age_and_session_rules(monkeypatch):
+    """A stored quote reviewed again at approval keeps every rule about the quote itself; only its age and
+    whether the market is open now no longer count."""
+    monkeypatch.setattr(prices, "session_context", lambda now: (False, now - timedelta(days=1)))
+    old = datetime.now(UTC) - timedelta(hours=3)
+    stored = quote(source_as_of=old, queried_at=old)
+    with pytest.raises(prices.PriceUnavailable, match="outside_regular_session"):
+        prices.validate_quote(stored, symbol="AAPL")
+    assert prices.validate_quote(stored, symbol="AAPL", as_reference=True).bid == 100.
+    for changes, reason in [({"bid": float("nan")}, "price_invalid"), ({"currency": "EUR"}, "currency_mismatch"),
+                            ({"symbol": "NVDA"}, "symbol_mismatch"), ({"market_data_mode": "delayed"}, "not_current"),
+                            ({"price_kind": "last"}, "not_current"), ({"ask": 110}, "spread_invalid"),
+                            ({"min_size": 0}, "precision_missing"), ({"session": "pre"}, "outside_regular_session")]:
+        with pytest.raises(prices.PriceUnavailable, match=reason):
+            prices.validate_quote(quote(source_as_of=old, queried_at=old, **changes), symbol="AAPL",
+                                  as_reference=True)
+
+
+def test_review_of_a_stored_quote_does_not_age_out(execution, monkeypatch):
+    """The approval-time review reads the quote stored on the revision; an hour later it must still pass, while
+    the hash binding is still enforced."""
+    from ats.risk import checks as risk_checks
+
+    state = ready_state(execution)
+    decisions = list(state.decisions)
+    assert decisions[0].execution_basis
+    from ats.workflow import evaluation_clock
+
+    monkeypatch.setattr(evaluation_clock, "_now", lambda tz: datetime.now(tz) + timedelta(hours=1))
+    review = risk_checks.review_revision(decisions, execution.pf, cycle_id=state.cycle_id)
+    assert review.verdict == "approved", review.notes
+    tampered = decisions[0].model_copy(update={"execution_basis": {
+        **decisions[0].execution_basis, "quote_ref": "execution-quote:" + "0" * 64}})
+    review = risk_checks.review_revision([tampered], execution.pf, cycle_id=state.cycle_id)
+    assert review.verdict != "approved"
+
+
+def test_fresh_reads_ignore_the_reference_flag(execution, monkeypatch):
+    """Only a risk review of stored quotes may ask for reference validation; the trader's fresh read of a stale
+    quote is refused even if its scope carries the flag."""
+    old = datetime.now(UTC) - timedelta(minutes=10)
+    monkeypatch.setattr("ats.data.runtime.execution_prices.fetch_execution_price",
+                        lambda symbol, **kw: quote(symbol=symbol, source_as_of=old, queried_at=old))
+    order = TradeDecision(symbol="AAPL", action="buy", qty=1)
+    with prices.price_request("trader", [order], cycle_id="pending", purpose="preapproval_normalization"):
+        scope = {"kind": "execution_price", "entity": "AAPL", "currency": "USD", "cycle_id": "pending",
+                 "purpose": "preapproval_normalization", "reference_quote": True}
+        packet = read_input("trader", "MARKET_DATA", scope=scope)
+    assert packet.status != "complete" and "quote_stale" in ";".join(packet.gaps)
+
+
+def test_a_sale_is_not_refused_for_a_bid_that_moved_up_since_approval(execution):
+    """The funds cap is a buy-side spending bound; a better bid on a sale is not 'funds exceeded'."""
+    order = TradeDecision(symbol="AAPL", action="sell", qty=10, order_type="market")
+    normalized, _ = prices.normalize_orders([order], cycle_id="s", net_liquidation=100_000,
+                                            positions={"AAPL": 50})
+    decision = normalized[0]
+    better = quote(bid=100.4, ask=100.5)                     # +0.4% on the bid: inside the 1% band
+    assert 10 * better.bid > decision.execution_basis["max_notional"]
+    prices.check_execution(decision, 10, better)             # must not raise
+
+
+def test_a_sale_with_a_share_count_is_not_refused_for_a_rounding_sized_budget_but_a_buy_still_is(execution):
+    """Chief wrote qty and an approximate amount: the share count rules a sale; a buy stays inside its budget."""
+    sale = TradeDecision(symbol="AAPL", action="sell", qty=100, notional_usd=9990, order_type="market")
+    normalized, _ = prices.normalize_orders([sale], cycle_id="s", net_liquidation=1_000_000,
+                                            positions={"AAPL": 100})      # 100 x bid 100.0 = 10,000 > 9,990
+    assert normalized[0].qty == 100 and normalized[0].notional_usd == pytest.approx(10_000)
+    buy = TradeDecision(symbol="AAPL", action="buy", qty=100, notional_usd=9990, order_type="market")
+    with pytest.raises(prices.PriceUnavailable, match="quantity_exceeds_budget"):
+        prices.normalize_orders([buy], cycle_id="b", net_liquidation=1_000_000, positions={})

@@ -96,16 +96,6 @@ Dispatcher SHALL 在资源组限制内并发运行已就绪任务，只在上游
 - **THEN** 必需类别 SHALL 来自该范围明确发布的决策需求清单
 - **AND** 系统 SHALL NOT 伪造 Layer 输出或因任务未登记而静默缩减必需类别
 
-### Requirement: 旧分析入口迁移必须保持单一调度所有者
-
-每个已迁移的分析 workflow SHALL 由 Dispatcher 独占执行所有权；旧 CLI 和 scheduler 入口 SHALL 转发到相同运行契约，或在兼容窗口内明确保持旧所有者。影子运行 SHALL 禁止真实券商写入，并 SHALL 能对比新旧任务身份、输入与结果。
-
-#### Scenario: 同一日度分析被新旧 scheduler 同时唤醒
-
-- **WHEN** 一个 workflow ID 已切给 Dispatcher，但旧日度作业也被唤醒
-- **THEN** 旧入口 SHALL 不再直接调用该 Agent
-- **AND** 同一逻辑窗口 SHALL 只有一个执行所有者
-
 ### Requirement: Chief 完整性门禁必须同时满足必需类别与所选任务模式
 
 完整决策请求 SHALL 在启动前固定必需分析类别、各类别所选任务及依赖、scope、Fundamental 模式与有效性条件。实际 Dispatcher、研究快照、run contract 和 Chief 开周期入口 SHALL 使用同一固定需求判定，要求必需类别齐全且所选任务依赖闭包成功或合法复用。选择 Event SHALL 满足 Event，选择 Routine SHALL 满足 Routine；另一模式 SHALL NOT 替代所选模式的缺失或失败，未选模式 SHALL NOT 被强制同时运行。任一 Fundamental 模式 SHALL NOT 替代其他必需类别；单任务/局部研究完成 SHALL NOT 被当作完整决策资格。
@@ -130,76 +120,6 @@ Dispatcher SHALL 在资源组限制内并发运行已就绪任务，只在上游
 - **THEN** 完整性门禁 SHALL NOT 因未选模式缺失而拒绝
 - **AND** SHALL 继续独立执行风控、审批和交易门禁
 
-### Requirement: 旧调度入口必须接入统一逻辑触发身份
-
-仍可能触发生产执行的旧调度作业与旧事件入口 SHALL 映射到共同的逻辑触发身份，由 workflow 标识、scope 与计划时点，或事件标识与版本共同确定。旧入口在执行前 SHALL 读取共享的 owner 状态与其代次，并登记对该逻辑触发的认领。仅修改 owner 模式的配置 SHALL NOT 被视为旧入口已停止触发。配置变更的重载或受控重启方式 SHALL 明确登记。
-
-实际新 cron/event、手动入口和 Dispatcher SHALL 使用同一权威认领与执行记录；仍可执行的旧入口 SHALL 受相同失权/发布控制，或提供可核验关停证明。结果发布点 SHALL 重验 owner/代次。控制表与 YAML 启用状态的生效关系 SHALL 明确，SHALL NOT 仅改变未被 scheduler 读取的控制状态便宣告调度切流。接线验收 SHALL 调用实际入口，保留独立预期触发集合及实际记录；空账本 SHALL 判无从核验，SHALL NOT 视为无双活。研究调度批次 SHALL 明确其实际消费者与依赖读 scope，SHALL NOT 以 consumers 为空绕过资格。
-
-#### Scenario: 旧 worker 在移交后发布结果
-
-- **WHEN** 已在运行的旧 worker 在 owner/代次改变后尝试发布同一逻辑触发结果
-- **THEN** 实际发布点 SHALL 拒绝该发布并记录旧代次
-- **AND** SHALL NOT 仅依赖认领表更新或人工确认旧进程退出
-
-#### Scenario: 旧业务不可运行但退出安全可核验
-
-- **WHEN** 旧业务失败或不完整，但其入口已关停/失权，迟到发布与提交被拒，新调度满足独立需求
-- **THEN** 系统 SHALL 允许新调度验收通过
-- **AND** SHALL NOT 要求旧分析工作成功
-
-#### Scenario: 旧日度级联与新 schedule 对应同一工作
-
-- **WHEN** 旧日度级联中的某项工作与新调度路径的某项 schedule 对应同一逻辑工作
-- **THEN** 二者 SHALL 解析为同一逻辑触发身份
-- **AND** 该身份在同一时刻 SHALL 至多有一个执行所有者
-
-#### Scenario: 旧常驻进程未退出即开始新路径运行
-
-- **WHEN** 旧常驻调度进程仍在运行而新路径已开始执行
-- **THEN** 旧进程 SHALL 因代次或认领不符而不能发布同一结果
-- **AND** 系统 SHALL 报告该冲突双方
-
-#### Scenario: 手动调度与自动触发同一逻辑工作
-
-- **WHEN** 同一逻辑工作经手动调度与自动触发同时到达
-- **THEN** 二者 SHALL 归并为同一逻辑触发身份
-- **AND** SHALL 至多执行一次
-
-### Requirement: 调度路径切换必须先冻结新认领再清点
-
-切换调度路径前，系统 SHALL 先冻结新认领，再清点未完成触发，并逐个声明处置方式：迁由新路径承接、由旧路径执行完毕，或作废并记录原因。存在处置方式未声明的未完成触发时 SHALL 拒绝切换。冻结 SHALL 先于清点，SHALL NOT 在清点后仍允许产生新认领。切换 SHALL NOT 使同一逻辑触发同时被两条路径认领。
-
-#### Scenario: 清点后又产生新触发
-
-- **WHEN** 清点已完成但冻结未生效，其间出现新的认领
-- **THEN** 切换 SHALL 判定无效并重新冻结与清点
-- **AND** SHALL NOT 继续执行移交
-
-#### Scenario: 存在处置方式未声明的未完成触发
-
-- **WHEN** 某未完成触发未声明其承接、执行完毕或作废的处置方式
-- **THEN** 切换 SHALL 被拒绝并列出该触发标识
-- **AND** SHALL NOT 以默认方式处置该触发
-
-#### Scenario: 同一触发被两条路径同时认领
-
-- **WHEN** 切换过程中同一逻辑触发同时被旧路径与新路径认领
-- **THEN** 系统 SHALL 判定为所有权冲突并拒绝该认领
-- **AND** SHALL 报告两个认领方与认领时间
-
-#### Scenario: 切换时作废未完成触发
-
-- **WHEN** 某未完成触发被声明为作废
-- **THEN** 系统 SHALL 记录作废原因与操作者
-- **AND** 该触发 SHALL NOT 在切换后被任一路径自动执行
-
-#### Scenario: 承接任务需证明旧执行方已停止发布
-
-- **WHEN** 某未完成触发被移交由新路径承接
-- **THEN** 系统 SHALL 能证明旧执行方不能继续发布该触发的同一结果
-- **AND** 无法证明时 SHALL 拒绝该承接
-
 ### Requirement: 调度安全恢复不得重复消费已执行触发
 
 安全停止或恢复已验收版本 SHALL 保留权威触发记录、owner/generation 与结果引用；任何恢复目标 SHALL 按真实执行记录跳过已完成触发，不按时间窗口猜测。记录缺失或目标不可用 SHALL 保持停止。旧入口仅在明确选择且核验可用时作为目标，SHALL NOT 要求其业务运行成功作为新入口验收前置。
@@ -213,24 +133,6 @@ Dispatcher SHALL 在资源组限制内并发运行已就绪任务，只在上游
 - **WHEN** 恢复时无法读取真实执行记录
 - **THEN** 系统 SHALL 保持停止并列明缺口
 - **AND** SHALL NOT 为恢复服务重跑未知范围
-
-### Requirement: 新调度覆盖必须依据独立预期触发集合
-
-系统 SHALL 从已固定的新需求、schedule/event 配置及已发布事件版本独立导出预期触发集合，对照新路径实际认领、执行与发布记录核验覆盖、去重与遗漏。旧侧是否触发 SHALL NOT 定义预期集合或通过判据；缺少基准或来源不一致 SHALL 明确未验收，不静默采用执行记录并集。
-
-#### Scenario: 新旧均遗漏
-- **WHEN** 新调度缺少独立预期集合中的必需触发，且旧侧也没有执行
-- **THEN** 新调度覆盖 SHALL 失败并列出遗漏
-- **AND** SHALL NOT 因双方一致而通过
-
-#### Scenario: 仅旧侧未执行
-- **WHEN** 新路径满足独立预期集合，而旧侧无记录或失败
-- **THEN** 系统 SHALL 依据新路径覆盖判定
-- **AND** SHALL NOT 因旧侧缺失阻塞
-
-#### Scenario: 预期来源不一致
-- **WHEN** 预期集合的需求/配置/事件版本与本次范围不一致
-- **THEN** 系统 SHALL 拒绝据此判通过并报告来源缺口
 
 ### Requirement: 调度切流不得被误作数据源重启
 
@@ -253,3 +155,129 @@ Dispatcher SHALL 在资源组限制内并发运行已就绪任务，只在上游
 #### Scenario: 同一逻辑触发重复到达
 - **WHEN** 已完成触发再次到达，即使 owner 代次已变化
 - **THEN** 系统 SHALL 依据原逻辑触发记录跳过，SHALL NOT 重复执行或发布
+
+### Requirement: 研究工作流必须只经 Dispatcher 执行
+
+每个已迁移的分析 workflow SHALL 由 Dispatcher 独占执行所有权。迁移完成后，研究分析的旧手动入口与旧调度入口 SHALL 退役，手动运行 SHALL 经 Dispatcher 的手动触发入口，与定时、事件触发使用同一运行契约、认领与执行记录。影子运行 SHALL 禁止真实券商写入。工作流被停用时 SHALL NOT 由任何其他入口执行该工作流。
+
+#### Scenario: 同一日度分析被手动与定时同时触发
+
+- **WHEN** 一个研究 workflow 的同一逻辑窗口同时收到手动触发与定时触发
+- **THEN** 二者 SHALL 经同一 Dispatcher 认领
+- **AND** 同一逻辑窗口 SHALL 只执行一次
+
+#### Scenario: 调用已退役的旧分析入口
+
+- **WHEN** 操作者调用已退役的旧研究分析命令
+- **THEN** 系统 SHALL 报告该入口已退役并给出 Dispatcher 手动运行方式
+- **AND** SHALL NOT 直接调用对应 Agent
+
+#### Scenario: 已停用的工作流
+
+- **WHEN** 某研究工作流处于停用状态
+- **THEN** 定时、事件与手动触发 SHALL 都不执行它，并记录被跳过的原因
+
+### Requirement: 工作流停用与恢复必须先冻结新认领再清点
+
+停用或恢复一个研究工作流前，系统 SHALL 先冻结新认领，再清点未完成触发，并逐个声明处置方式：恢复后承接、执行完毕，或作废并记录原因。存在处置方式未声明的未完成触发时 SHALL 拒绝停用或恢复。冻结 SHALL 先于清点，SHALL NOT 在清点后仍允许产生新认领。停用与恢复 SHALL NOT 使同一逻辑触发被执行两次。
+
+#### Scenario: 清点后又产生新触发
+
+- **WHEN** 清点已完成但冻结未生效，其间出现新的认领
+- **THEN** 停用或恢复 SHALL 判定无效并重新冻结与清点
+- **AND** SHALL NOT 继续执行
+
+#### Scenario: 存在处置方式未声明的未完成触发
+
+- **WHEN** 某未完成触发未声明其承接、执行完毕或作废的处置方式
+- **THEN** 停用或恢复 SHALL 被拒绝并列出该触发标识
+- **AND** SHALL NOT 以默认方式处置该触发
+
+#### Scenario: 有正在运行的认领
+
+- **WHEN** 停用时该工作流存在 running 状态的认领
+- **THEN** 系统 SHALL 拒绝停用并报告该认领
+- **AND** SHALL NOT 强行作废它
+
+#### Scenario: 停用时作废未完成触发
+
+- **WHEN** 某未完成触发被声明为作废
+- **THEN** 系统 SHALL 记录作废原因与操作者
+- **AND** 该触发 SHALL NOT 在恢复后被自动执行
+
+### Requirement: 调度覆盖必须依据独立预期触发集合
+
+系统 SHALL 从已固定的需求、schedule/event 配置及已发布事件版本独立导出预期触发集合，对照实际认领、执行与发布记录核验覆盖、去重与遗漏。缺少基准或来源不一致 SHALL 明确未验收，不静默采用执行记录并集。
+
+#### Scenario: 调度遗漏必需触发
+- **WHEN** 实际执行记录缺少独立预期集合中的必需触发
+- **THEN** 覆盖核验 SHALL 失败并列出遗漏
+- **AND** SHALL NOT 以执行记录本身作为预期
+
+#### Scenario: 停用期间的触发
+- **WHEN** 某工作流在停用期间有预期触发
+- **THEN** 核验 SHALL 把这些触发记为因停用而跳过，SHALL NOT 记为遗漏
+
+#### Scenario: 预期来源不一致
+- **WHEN** 预期集合的需求/配置/事件版本与本次范围不一致
+- **THEN** 系统 SHALL 拒绝据此判通过并报告来源缺口
+
+### Requirement: 研究工作流的可读报告必须由 Dispatcher 路径生成
+
+旧手动入口退役之前，Dispatcher 路径 SHALL 承担这些入口原先生成的可读报告：技术面报告、行业报告（含层级报告与可视化页面）、每周产业链证据周报；宏观周报沿用既有行为。报告 SHALL 是已发布投影与存档的派生物，生成失败 SHALL NOT 改变分析运行的状态，也 SHALL NOT 阻断下游任务，失败 SHALL 被记录（运行详情或日志）。报告文件 SHALL 以新版本写入、SHALL NOT 覆盖既有文件；复用既有投影而没有新产出的运行 SHALL NOT 重复生成同一份报告。
+
+#### Scenario: 技术面定时运行后
+
+- **WHEN** 技术面工作流一次运行结束且产生了新的读数投影
+- **THEN** Dispatcher 路径 SHALL 生成一份汇总所有标的的技术面报告
+- **AND** 不会因逐标的任务而每个标的各写一份
+
+#### Scenario: 周度行业评审后
+
+- **WHEN** 行业评审工作流完成并发布了新的配置结论
+- **THEN** Dispatcher 路径 SHALL 生成行业报告、层级报告与可视化页面，并在其后生成本周产业链证据周报
+- **AND** 报告内容 SHALL 与该次已发布的投影一致
+
+#### Scenario: 报告生成失败
+
+- **WHEN** 报告目录未配置、不可写或渲染失败
+- **THEN** 分析运行 SHALL 仍按其任务结果记为完成或不完整
+- **AND** 报告失败的原因 SHALL 被记录（运行详情或日志）
+
+#### Scenario: 复用既有投影
+
+- **WHEN** 一次运行复用了既有投影而没有新的发布
+- **THEN** SHALL NOT 重复生成同一份报告
+
+### Requirement: 交易路径工作流必须由 Dispatcher 按交易日排程
+
+交易路径切换后，主理人每日决策与 Clerk 每日对账 SHALL 作为两个独立工作流由 Dispatcher 排程，各有独立的逻辑触发身份与幂等键，只在交易所交易日触发。主理人每日决策 SHALL 经既有 Chief 完整性门禁进入决策周期；Clerk 对账 SHALL NOT 依赖主理人决策成功。两者 SHALL 可分别停用。错过、跳过与失败的触发 SHALL 在触发台账中可见并带原因。
+
+#### Scenario: 休市日不触发
+
+- **WHEN** 当天是交易所休市日
+- **THEN** 两个交易路径工作流 SHALL NOT 触发
+- **AND** 触发台账 SHALL 记录跳过及休市原因
+
+#### Scenario: 研究不完整时不建决策周期
+
+- **WHEN** 主理人每日决策触发时，任一必需分析类别缺失、失败或过期
+- **THEN** 该次运行 SHALL 以不完整终结并产出缺口报告
+- **AND** SHALL NOT 创建决策周期，也 SHALL NOT 调用主理人、风控或 Trader
+
+#### Scenario: 主理人失败不影响对账
+
+- **WHEN** 当天主理人每日决策失败或被阻断
+- **THEN** Clerk 每日对账 SHALL 照常按自己的时间表运行
+
+#### Scenario: 重启后不重复执行已完成触发
+
+- **WHEN** Dispatcher 在某交易路径触发完成后重启并执行启动补跑
+- **THEN** 同一逻辑触发 SHALL NOT 再次执行
+- **AND** SHALL NOT 产生第二个决策周期或第二次对账事实
+
+#### Scenario: 停用期间不被唤醒
+
+- **WHEN** 某交易路径工作流处于停用状态
+- **THEN** 定时 SHALL NOT 唤醒它，触发台账 SHALL 记录跳过原因
+- **AND** 另一个交易路径工作流的排程 SHALL 不受影响

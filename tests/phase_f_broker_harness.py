@@ -68,9 +68,9 @@ def broker_for(ib, *, expected="DU1"):
 
 def record_boundary_proof(record_property, site, kind):
     """JUnit properties bind an executed local scenario to its scope and mode."""
-    from ats.workflow.scoped_routes import RouteIdentity, canonical_json
+    from ats.workflow.read_scope import ReadScope, canonical_json
 
-    who = RouteIdentity("ai_hardware", "trader", "v1", {
+    who = ReadScope("ai_hardware", "trader", "v1", {
         "kind": "sector", "id": "ai_hardware", "entities": ["NVDA", "AMD"],
         "time_range": {"start": "2026-10-07T00:00:00Z", "end": "2026-10-08T00:00:00Z"}})
     for key, value in {"entry_exercised": site, "mode": "isolated", "path_kind": kind,

@@ -18,6 +18,7 @@ class ThemeAssessView(BaseModel):
 
 class SectorTiltView(BaseModel):
     sector: str = Field(description="板块/行业名，如 半导体/能源/公用事业/成长股")
+    sector_key: str = Field(default="", description="从上下文「可选板块清单」里选一个 key；清单里没有对应板块就留空")
     stance: str = Field(default="中性", description="超配 | 中性 | 低配")
     rationale: str = ""
 
@@ -30,6 +31,10 @@ class ScenarioView(BaseModel):
 
 
 class MacroReviewLLMView(BaseModel):
+    # Field order is the order the model writes the tool call in, and when the output reaches max_tokens the relay
+    # returns only the parameters already finished (2026-11-12: four of the six macro calls on 11-03..11-12 lost their
+    # tail this way). So the short, high-value fields come first and the two long ones — themes (~2K chars) and the
+    # FactSet assessment (~3K chars) — come last: a cut then costs the longest material, not the falsifier.
     regime: str = Field(description="risk-on/neutral/risk-off + 周期位置，一句话自包含（会被注入其他 agent）")
     summary: str = Field(default="", description="5-10 行总评，面向 prep/monitor/行业分析师读者")
     conclusion_delta: str = Field(
@@ -40,8 +45,17 @@ class MacroReviewLLMView(BaseModel):
     sector_tilts: list[SectorTiltView] = Field(default_factory=list,
                                                description="核心交付物：超配/低配哪些板块行业")
     asset_implications: str = Field(default="", description="股/债/美元/黄金/原油含义")
-    themes: list[ThemeAssessView] = Field(default_factory=list)
     top_risks: list[str] = Field(default_factory=list)
+    scenarios: list[ScenarioView] = Field(
+        default_factory=list,
+        description=("2-3 个情景（基准情景必须在内），每个给出可观测的触发条件和对板块倾斜的影响；"
+                     "与 falsifier 互补：falsifier 说什么推翻本判断，情景说推翻后会走向哪里。"))
+    horizon: str = Field(default="", description="本判断适用的时间范围，如 未来 4-8 周，并说明下次需要重估的时点")
+    falsifier: str = Field(
+        default="",
+        description=("什么**具体可观测**的事件会推翻这次判断。"
+                     "'如果经济恶化' 不合格；'初请 4 周均值连续两周高于 26 万' 合格。"))
+    themes: list[ThemeAssessView] = Field(default_factory=list)
     factset_earnings_assessment: FactSetEarningsAssessment | None = Field(
         default=None,
         description=("FactSet 盈利周期的八项判断。每项必须给出结论、实际使用的 metric_id、"
@@ -60,13 +74,3 @@ class MacroReviewLLMView(BaseModel):
     @classmethod
     def _strlists(cls, v):
         return _as_strlist(v)
-
-    scenarios: list[ScenarioView] = Field(
-        default_factory=list,
-        description=("2-3 个情景（基准情景必须在内），每个给出可观测的触发条件和对板块倾斜的影响；"
-                     "与 falsifier 互补：falsifier 说什么推翻本判断，情景说推翻后会走向哪里。"))
-    horizon: str = Field(default="", description="本判断适用的时间范围，如 未来 4-8 周，并说明下次需要重估的时点")
-    falsifier: str = Field(
-        default="",
-        description=("什么**具体可观测**的事件会推翻这次判断。"
-                     "'如果经济恶化' 不合格；'初请 4 周均值连续两周高于 26 万' 合格。"))

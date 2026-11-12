@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ats.agents.sector import assemble, context as sector_context, report, review as sector_review
+from ats.agents.sector import assemble, report, review as sector_review
 from ats.agents.sector.outputs import (
     CompanyCallView,
     LayerAssessView,
@@ -305,30 +305,6 @@ def test_report_render_and_write(tmp_path, monkeypatch):
     assert report.write(r, CFG) is None                           # unset dir degrades
 
 
-def test_injection_blocks(monkeypatch):
-    store = get_store()
-    assert sector_context.prep_block("test_sector", "COHR") == ""   # no review yet
-    assert sector_context.monitor_hint("COHR", "test_sector") == ""
-
-    monkeypatch.setattr("ats.config.load_sector_config", lambda name="x": CFG)
-    store.save_sector_review(SectorReview(
-        sector="test_sector", as_of=NOW, regime="L3 是瓶颈", summary="SUM",
-        layers=[LayerAssessment(key="L3", label="L3 光互联", boom_score=80, signal="bullish")],
-        company_calls=[CompanyCall(symbol="COHR", layer="L3", stance="增持",
-                                   conviction=0.6, rationale="RA")],
-        rotation_advice="ROT"))
-    block = sector_context.prep_block("test_sector", "COHR")
-    assert "L3 是瓶颈" in block and "增持" in block and "ROT" in block
-    hint = sector_context.monitor_hint("COHR", "test_sector")
-    assert "L3 是瓶颈" in hint and "景气 80" in hint and len(hint) <= 280
-
-    # Stub reviews (no-llm) are not injected.
-    store.save_sector_review(SectorReview(sector="test_sector",
-                                          as_of=datetime(2027, 1, 1, tzinfo=timezone.utc),
-                                          regime="(no-llm)"))
-    assert sector_context.prep_block("test_sector", "COHR") == ""
-
-
 # --------------------------------------------------------------------------- #
 # Cross-sectional layer basket (hermetic — no network; drives rank_cohort)
 # --------------------------------------------------------------------------- #
@@ -345,7 +321,7 @@ def test_cross_section_rank_and_sizing():
                   gross_margin=0.30, op_margin=-0.05, fwd_pe=38, mom_60d=-30, rating_delta=-0.2),
         FactorRow(symbol="DDD"),   # data desert -> excluded
     ]
-    rank_cohort(rows, layer_cap=0.10, single_name_cap_frac=0.40)
+    rank_cohort(rows, layer_cap=0.10)
     by = {r.symbol: r for r in rows}
 
     # data desert flagged, ranked last, zero weight
@@ -359,9 +335,8 @@ def test_cross_section_rank_and_sizing():
     comps = [r.composite for r in ranked]
     assert comps == sorted(comps, reverse=True)
 
-    # weights sum to the layer cap and respect the single-name cap
+    # weights sum to the layer cap (no per-name fraction of it any more; risk.yaml max_position_pct owns that)
     assert abs(sum(r.weight for r in rows) - 0.10) < 1e-9
-    assert all(r.weight <= 0.10 * 0.40 + 1e-9 for r in rows)
 
 
 def test_cross_section_structural_blend_reranks():
@@ -393,7 +368,6 @@ def test_cross_section_structural_blend_reranks():
     assert midq.quant_rank > strongq.quant_rank                 # and it was behind on quant
     # sizing invariants still hold
     assert abs(sum(r.weight for r in rows) - 0.14) < 1e-9
-    assert all(r.weight <= 0.14 * 0.40 + 1e-9 for r in rows)
 
 
 # --- cross-section orchestration resilience -------------------------------- #

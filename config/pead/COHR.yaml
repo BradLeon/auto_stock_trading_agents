@@ -2,39 +2,45 @@
 # 已完成-基本面分析-COHR-Q3FY2026.md scorecard. COHR needs a HIGHER long bar
 # (+1.5 vs the normal +1.0) due to extreme valuation + high beta + a repeated
 # "beat-but-drops" pattern.
+# 财年 6 月底结：11 月中报 FQ1，2 月初报 FQ2。
+# 2026-11-04 更新：去掉手填的 fiscal_label（"Q FY2026" 已过期，改由财报日历派生）；指引维度改为"次季"；叙事按最新进展改写。
+# 依据（网络检索，二手来源为主）：FQ4 FY2026 营收 $2.05B（+34%）；FQ1 FY2027 指引 $2.2–2.4B、非 GAAP 毛利率 39.5–41.5%；
+# 1.6T 在 2026 下半年至 2027 爬坡，OCS/CPO/multi-rail 为新增长点；内部 InP 产能年底翻倍、2027 再增一倍以上。
+# 信号链去掉 AAOI（不在 PEAD 名单）、改正方向：云厂是下游客户，不是上游。
 
 symbol: COHR
 company_name: "Coherent"
-fiscal_label: "Q FY2026"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
 sector_etf: SMH
 benchmark: QQQ
 run_up_warn_pct: 5.0          # >+5% excess vs SMH raises the long bar further
 long_threshold: 1.5           # COHR special threshold (not 1.0)
 
 scorecard_dims:
-  - {key: gross_margin,  weight: 0.25, label: 非GAAP毛利率(是否破40%)}
-  - {key: forward_guide, weight: 0.20, label: Q4营收+EPS指引}
+  - {key: gross_margin,  weight: 0.25, label: 非GAAP毛利率(能否稳在 40% 以上)}
+  - {key: forward_guide, weight: 0.20, label: 次季营收+EPS指引}
   - {key: revenue,       weight: 0.10, label: 总营收超预期}
   - {key: datacom,       weight: 0.10, label: 数据中心+通信增速}
   - {key: eps,           weight: 0.05, label: EPS超预期}
-  - {key: inp_capacity,  weight: 0.10, label: InP 6英寸产能进展}
+  - {key: inp_capacity,  weight: 0.10, label: InP 产能扩张进度（年底翻倍目标）}
   - {key: t16,           weight: 0.05, label: 1.6T出货节奏}
-  - {key: ocs,           weight: 0.05, label: OCS商业化}
+  - {key: ocs,           weight: 0.05, label: OCS/CPO 商业化}
   - {key: bookings,      weight: 0.05, label: 订单+预订比}
   - {key: call_tone,     weight: 0.05, label: 电话会语气}
 
 signal_chain:
   - {symbol: TSM,   role: upstream}
   - {symbol: ASML,  role: upstream}
-  - {symbol: GOOG, role: upstream}
-  - {symbol: META,  role: upstream}
-  - {symbol: MSFT,  role: upstream}
-  - {symbol: AMZN,  role: upstream}
+  - {symbol: AXTI,  role: upstream}     # InP 衬底
+  - {symbol: MRVL,  role: upstream}     # 光模块 DSP
+  - {symbol: GOOG, role: downstream}
+  - {symbol: META,  role: downstream}
+  - {symbol: MSFT,  role: downstream}
+  - {symbol: AMZN,  role: downstream}
   - {symbol: NVDA,  role: downstream}
   - {symbol: LITE,  role: peer}
-  - {symbol: AAOI,  role: peer}
 
 narrative_seed: >
-  AI 数据中心光互联头部供应商；800G→1.6T 切换主线；InP 6英寸产能为最大业务约束；
-  II-VI 整合尾声→毛利率扩张故事；极端估值(TTM PE ~310x)+高beta(2.01)是 PEAD 放大器，
-  历史上多次"beat 后仍跌"。
+  AI 数据中心光互联头部供应商；800G→1.6T 切换在 2026 下半年至 2027 爬坡是主线，OCS/CPO 是新增量；
+  InP 产能是最大业务约束，内部产能年底翻倍、2027 再翻倍的进度直接决定出货上限；
+  毛利率能否稳在 40% 以上是估值核心；高估值+高 beta 是 PEAD 放大器，历史上多次"beat 后仍跌"。

@@ -55,15 +55,17 @@ def test_source_and_consumer_rollout_flags_are_independent(monkeypatch, tmp_path
     # real legacy/platform point equivalence), so the baseline promotes the
     # chain_regional consumer together with the source — env flags stay independent.
     assert read_mode("chain_regional", source_id="tw_mof_exports") == "platform"
-    assert source_mode("sec_companyfacts") == "shadow"
-    assert source_mode("company_disclosures") == "shadow"
+    # 2026-11-12: every source the running system reads is platform in the checked-in baseline
+    # (the runtime overlay was folded back), the financial-statement sources included.
+    assert source_mode("sec_companyfacts") == "platform"
+    assert source_mode("company_disclosures") == "platform"
     # MSFT's governed package completed the PEAD fundamentals acceptance, so the
     # baseline publishes this consumer as platform too.
     assert read_mode("pead_fundamentals", source_id="sec_companyfacts") == "platform"
 
-    monkeypatch.setenv("ATS_STRUCTURED_SOURCE_SEC_COMPANYFACTS_MODE", "platform")
+    monkeypatch.setenv("ATS_STRUCTURED_SOURCE_SEC_COMPANYFACTS_MODE", "shadow")
     monkeypatch.setenv("ATS_STRUCTURED_PEAD_FUNDAMENTALS_MODE", "fallback")
-    assert source_mode("sec_companyfacts") == "platform"
+    assert source_mode("sec_companyfacts") == "shadow"
     assert read_mode("pead_fundamentals", source_id="sec_companyfacts") == "fallback"
 
 

@@ -4,14 +4,13 @@
 import pytest
 from datetime import datetime, timedelta, timezone
 
-import ats.config as _config
 
-from ats.agents.chief import assemble, decide
+from ats.agents.chief import decide
 from ats.memory import get_store
 from ats.schemas.decision import TradeDecision
 from ats.schemas.macro_strategy import MacroReview, SectorTilt
 from ats.schemas.pead import ExpectationSet, PeadDossier, Scorecard
-from ats.schemas.risk import RiskDirective, RiskReview
+from ats.schemas.risk import RiskReview
 from ats.schemas.sector import CompanyCall, SectorReview
 
 pytestmark = pytest.mark.usefixtures("open_decision_read_gate")
@@ -43,84 +42,18 @@ def _seed_store():
     return store
 
 
-def test_assemble_gathers_all_blocks(monkeypatch):
-    # Pin the PEAD target universe so operational config/pead.yaml changes don't
-    # break this test (it seeds + asserts on a COHR dossier).
-    import ats.config as _config
-
-    real = _config.load_pead_global
-    monkeypatch.setattr(_config, "load_pead_global",
-                        lambda: {**real(), "targets": ["COHR"]})
-    _seed_store()
-    ctx = assemble.build(live_broker=False)
-    text = ctx.as_context()
-    assert "新鲜可行动" in text and "+1.80" in text           # fresh score dossier
-    assert "建议: buy COHR" in text                            # PEAD recommendation
-    assert "增持 COHR" in text                                 # sector company_call
-    assert "neutral 晚周期" in text                            # macro regime
-    assert "normal" in text                                    # risk state
 
 
-def test_sector_block_renders_layer_boom_scores():
-    """Per-layer 景气 must reach the chief.
-
-    Regression: the block read a `layer_views` attribute SectorReview never had, so
-    the loop silently never ran — the weekly engine scored all six chain layers and
-    the chief saw none of it.
-    """
-    from ats.schemas.sector import LayerAssessment
-
-    get_store().save_sector_review(SectorReview(
-        sector="ai_hardware", as_of=NOW, regime="L5 是瓶颈",
-        layers=[LayerAssessment(key="L5_fab", label="L5 芯片制造", boom_score=82.0,
-                                signal="bullish", supply_demand="紧张：HBM 仍是最大瓶颈")]))
-    text = assemble._sector_block(set())
-    assert "L5 芯片制造" in text and "景气82" in text
-    assert "bullish" in text and "HBM 仍是最大瓶颈" in text
 
 
-def test_pead_block_renders_signal_chain_summary():
-    """Cross-ticker read-through belongs on the decision desk, not only in Obsidian."""
-    import ats.config as _config
-
-    real = _config.load_pead_global
-    _config.load_pead_global = lambda: {**real(), "targets": ["COHR"]}
-    try:
-        cfg = _config.load_pead_config("COHR")
-        get_store().save_dossier(PeadDossier(
-            symbol="COHR", fiscal_label=cfg.fiscal_label, phase="prep", updated_at=NOW,
-            signal_chain_summary="上游 TSM CoWoS 产能扩张，对本标的供给上限构成支持"))
-        assert "信号链: 上游 TSM CoWoS 产能扩张" in assemble._pead_block(set(), None)
-    finally:
-        _config.load_pead_global = real
 
 
-def test_assemble_derisk_prepends_hard_instruction():
-    store = get_store()
-    store.save_risk_review(RiskReview(as_of=NOW, risk_state="derisk"))
-    ctx = assemble.build(live_broker=False)
-    assert "只允许减仓" in ctx.as_context()
 
 
-def test_assemble_exposes_compact_risk_directive():
-    store = get_store()
-    store.save_risk_review(RiskReview(
-        as_of=NOW, risk_state="caution",
-        directive=RiskDirective(
-            state="REPAIR_ONLY", can_increase_risk=False,
-            allowed_actions=["reduce", "hedge_if_verified_improving"],
-            blocked_entities=["SK_HYNIX"], blocked_layers=["L5_fab"],
-            required_repairs=["L5制造层 32%→30%"])))
-
-    text = assemble.build(live_broker=False).as_context()
-
-    assert "RiskDirective=REPAIR_ONLY" in text
-    assert "可增加风险=False" in text
-    assert "SK_HYNIX" in text and "L5_fab" in text
 
 
 def test_decide_no_llm_zero_decisions():
-    result = decide.run(use_llm=False, live_broker=False)
+    result = decide.from_context("ctx", cycle_id="chief-test", as_of=NOW, use_llm=False)
     assert result.decisions == [] and result.cycle_id.startswith("chief-")
 
 
@@ -133,79 +66,83 @@ def test_decide_llm_failure_degrades():
     orig = d.run_structured
     d.run_structured = boom
     try:
-        result = decide.run(use_llm=True, live_broker=False)
+        result = decide.from_context("ctx", cycle_id="chief-test", as_of=NOW, use_llm=True)
         assert result.decisions == [] and "fallback" in result.summary
     finally:
         d.run_structured = orig
 
 
 def test_chief_run_store_roundtrip():
+    """`last_chief_run` reads the decision audit: the cycle's current revision and its summary."""
+    from ats.decision.repository import DecisionAuditRepository
+
     store = get_store()
-    store.save_chief_run(cycle_id="chief-20260705-1", as_of=NOW, summary="test run",
-                         decisions=[TradeDecision(symbol="COHR", action="buy",
-                                                  notional_usd=5000, rationale="r")])
+    repo = DecisionAuditRepository(store)
+    repo.create_cycle(cycle_id="chief-20260705-1", trigger_source="manual")
+    repo.append_revision(cycle_id="chief-20260705-1", rationale="test run",
+                         orders=[{"symbol": "COHR", "action": "buy", "notional_usd": 5000,
+                                  "rationale": "r"}])
     run = store.last_chief_run()
-    assert run["cycle_id"] == "chief-20260705-1"
+    assert run["cycle_id"] == "chief-20260705-1" and run["manager_summary"] == "test run"
     assert run["decisions"][0]["symbol"] == "COHR"
 
 
-def test_run_chief_cli_executes_when_decisions(monkeypatch):
+def test_run_chief_cli_executes_when_decisions(monkeypatch, tmp_path, broker):
     """run_chief -> decision graph: chief run persisted + dry-run trade log with source=chief.
 
-    Phase D: the decide path requires a complete six-category research snapshot,
-    so the test seeds one projection per category/scope first (same shape as
-    tests/test_chief_snapshot.py).
+    The decide path requires a complete research snapshot whose projections carry the
+    frozen lineage (see tests/phase_d_frozen_harness.py), so the test publishes one
+    projection per category/scope of a pinned one-name universe. It runs inside the
+    isolated environment the `broker` fixture enters, as the other decision-path tests do:
+    a production-mode run needs an authorized read route, which a hermetic test does not have.
     """
+    from phase_d_frozen_harness import freeze_config, publish_with_lineage
+
     from ats.agents.chief.decide import ChiefResult
     from ats.agent.task_projection import ProjectionScope, build_envelope
+    from ats.graph.chief_state import ChiefDecisionState
     from ats.runtime import cli
-    real_global = _config.load_pead_global
 
-    def pinned_global():
-        g = dict(real_global())
-        g["targets"] = ["COHR"]
-        g["sector_review"] = {**g.get("sector_review", {}), "sectors": ["ai_hardware"]}
-        return g
-
-    monkeypatch.setattr(_config, "load_pead_global", pinned_global)
-    # The frozen decision plan reads pead.yaml itself (planning._targets), not load_pead_global: pin it too,
-    # otherwise the checked-in 11-name roster makes this one-name snapshot incomplete.
-    monkeypatch.setattr("ats.workflow.planning._targets", lambda config_dir: ["COHR"])
-    now = datetime.now(timezone.utc)
+    freeze_config(tmp_path, monkeypatch)
+    now = datetime.now(timezone.utc) - timedelta(seconds=2)
     valid = (now + timedelta(hours=48)).isoformat(timespec="seconds")
+    rows = {}
 
-    def publish(role, payload, scope):
-        get_store().save_task_projection_envelope(build_envelope(
+    def publish(name, role, payload, scope):
+        rows[name] = build_envelope(
             role=role, payload=payload, scope=scope,
-            as_of=now.isoformat(timespec="seconds"), valid_until=valid))
+            as_of=now.isoformat(timespec="seconds"), valid_until=valid,
+            data_vintage_refs=["dataset@test"])
 
-    sector_cfg = _config.load_sector_config("ai_hardware")
-    for layer in sector_cfg.layers:
-        publish("layer_analysis",
-                {"layer": layer.key, "status": "steady", "summary": "持平",
+    for key in ("L1_app", "L3_optics"):
+        publish(f"layer:{key}", "layer_analysis",
+                {"layer": key, "status": "steady", "summary": "持平",
                  "findings": ["读数平稳"], "confidence": 0.5},
-                ProjectionScope(kind="layer", id=layer.key))
-    publish("information_brief",
+                ProjectionScope(kind="layer", id=key))
+    publish("brief", "information_brief",
             {"entity": "COHR", "headline": "无重大变化", "summary": "例行简报",
              "relevance": "medium", "sources": ["rss:test"],
              "fact_changes": ["无"], "impact_candidates": ["none"],
              "entities": ["COHR"], "confidence": 0.4, "freshness": "today",
              "unverified": []},
             ProjectionScope(kind="entity", id="COHR"))
-    publish("fundamental_expectation_update",
+    publish("fund", "fundamental_expectation_update",
             {"entity": "COHR", "metric": "gross_margin", "period": "Q3 FY2026",
              "previous_value": 0.25, "new_value": 0.26, "driver": "例行读数"},
             ProjectionScope(kind="entity", id="COHR"))
-    publish("sector_allocation",
+    publish("sector", "sector_allocation",
             {"sector": "ai_hardware", "stance": "neutral", "target_weight": 0.3,
              "rationale": "标配", "drivers": []},
             ProjectionScope(kind="sector", id="ai_hardware"))
-    publish("macro_review",
+    publish("macro", "macro_review",
             {"regime": "transition", "summary": "利率维持", "indicators": ["10Y"]},
             ProjectionScope(kind="portfolio"))
-    publish("technical_review",
+    publish("tech", "technical_review",
             {"entity": "COHR", "signal": "neutral", "summary": "区间", "levels": {}},
             ProjectionScope(kind="entity", id="COHR"))
+    publish_with_lineage(get_store(), rows, ChiefDecisionState(
+        cycle_id="chief-cli", as_of=now, source="chief", decide=True,
+        fundamental_mode="routine", use_llm=False, use_broker=False))
 
     monkeypatch.setattr(
         "ats.agents.chief.decide.from_context",
@@ -213,7 +150,10 @@ def test_run_chief_cli_executes_when_decisions(monkeypatch):
             cycle_id=cycle_id, as_of=as_of, summary="s",
             decisions=[TradeDecision(symbol="COHR", action="buy", notional_usd=1000)]))
     monkeypatch.setattr("ats.trader.execute._last_price", lambda s: 100.0)
-    cli.run_chief(execute=True, dry_run=True, auto=True, offline=True)
+    # The decision path sizes and prices orders from a portfolio snapshot and refuses without
+    # one ("portfolio_snapshot_unavailable"), so the run is not offline; the `broker` fixture
+    # supplies a fresh snapshot and a no-network transport.
+    cli.run_chief(execute=True, dry_run=True, auto=True, offline=False)
     run = get_store().last_chief_run()
     assert run["decisions"][0]["symbol"] == "COHR"
     row = get_store().recent_trades("COHR")[0]

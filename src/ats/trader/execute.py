@@ -170,14 +170,11 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     刻意与上面的授权拒绝同形——「不成交」必须有可见且有据的原因，
     而不是一个数字为 0 的静默丢弃。
     """
-    from ..execution.shadow_execution import selected_shadow
     from ..execution.simulation import selected_simulation
 
+    # The only isolated transport is the simulation; the shadow refusal transport was retired (r5 8.4).
     simulated_broker = selected_simulation()
-    shadow_broker = selected_shadow()
-    if simulated_broker is not None and shadow_broker is not None:
-        raise PermissionError("multiple_isolated_transports_selected")
-    if simulated_broker is None and shadow_broker is None:
+    if simulated_broker is None:
         entries = [TradeLogEntry(order_id="", cycle_id=cycle_id, symbol=d.symbol,
                                  action=d.action, qty=q, revision_no=revision_no,
                                  order_seq=i, status="rejected", submitted_at=_now(),
@@ -245,7 +242,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     try:
         auth = ExecutionAuthorization.model_validate(authorization)
         stored = build_authorization(repo, cycle_id)
-        from ..workflow.consumer_reads import record_read
+        from ..workflow.read_scope import record_read
 
         record_read("trader", "ats.execution.authorization.build_authorization",
                     refs=[stored.decision_hash, stored.review_id, stored.approval_id],
@@ -276,7 +273,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
                                                      for key in FIELDS):
                 raise ValueError("governed_authorization_rejected:" + ";".join(packet.gaps))
             for seq, decision, qty in fresh:
-                quote = read_price("trader", decision)
+                quote = read_price("trader", decision, venue=decision.execution_basis.get("venue", "regular"))
                 quotes[json.dumps(decision.model_dump(mode="json"), sort_keys=True)] = quote
                 execution_audit.append({"order_seq": seq,
                                         "quote": quote.model_dump(mode="json"),
@@ -308,10 +305,7 @@ def place_orders(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
     fills: list[dict] = []
     if fresh:
         try:
-            broker = shadow_broker or simulated_broker or IBKRBroker()
-            if shadow_broker is not None:
-                shadow_broker.authorization = auth.model_dump(mode="json")
-                shadow_broker.execution_audit = execution_audit
+            broker = simulated_broker or IBKRBroker()
             # Keep causal receipts if a later order's handoff fails. A rejection
             # must not erase an earlier accepted intent or invent its resubmission.
             for i, d, q in fresh:
@@ -458,3 +452,97 @@ def _last_price_enabled(symbol: str) -> float | None:
         return None
     except Exception:  # noqa: BLE001
         return None
+
+
+# --- pre-execution checks while the live lock is on (switch-trade-path 2.4) ------------------ #
+
+def execution_locked() -> bool:
+    """True when no isolated transport is selected: production, where C3 refuses every submission."""
+    from ..execution.simulation import selected_simulation
+
+    return selected_simulation() is None
+
+
+def preflight_checks(to_place: list[tuple[TradeDecision, float]], cycle_id: str,
+                     *, revision_no: int, authorization: dict | None) -> dict:
+    """Read-only checks an approved batch would face at submission, run while the lock is on.
+
+    The same questions `place_orders` asks before the broker handover — authorization fields and
+    freshness, a live quote within the approval's price band, the approved funds cap — answered
+    without submitting anything. A missing active route is recorded as informational: while the
+    lock is on there is none to bind. `place_orders` is unchanged and still refuses at the handover.
+
+    Returns `{"ok", "checks", "execution_price_audit", "entries"}`; `entries` is non-empty only on
+    failure and uses the refusal error prefixes `place_orders` writes, so the graph treats a failed
+    check exactly as it treats the same failure on a live run.
+    """
+    from ..data.execution_prices import PriceUnavailable, check_execution, price_request, read_price
+    from ..decision.repository import DecisionAuditRepository
+    from ..execution.authorization import (
+        FIELDS,
+        ROUTE_REASONS,
+        ExecutionAuthorization,
+        active_route_state,
+        build_authorization,
+        validate_authorization,
+    )
+    from ..memory import get_store
+
+    checks: list[dict] = []
+    audit: list[dict] = []
+
+    def refuse(prefix: str, reason: str) -> dict:
+        entries = [TradeLogEntry(
+            order_id="", cycle_id=cycle_id, symbol=d.symbol, action=d.action, qty=q,
+            revision_no=revision_no, order_seq=i, order_type=d.order_type,
+            limit_price=d.limit_price, status="rejected", submitted_at=_now(),
+            rationale=d.rationale, error=f"{prefix}: {reason}",
+            execution_price_audit=audit,
+            decision_hash=(authorization or {}).get("decision_hash", ""),
+            approval_id=(authorization or {}).get("approval_id", ""))
+            for i, (d, q) in enumerate(to_place)]
+        return {"ok": False, "checks": checks, "execution_price_audit": audit, "entries": entries}
+
+    if not authorization:
+        checks.append({"check": "authorization_fields", "ok": False, "detail": "missing execution authorization"})
+        return refuse("execution check rejected", "missing execution authorization")
+    repo = DecisionAuditRepository(get_store())
+    try:
+        auth = ExecutionAuthorization.model_validate(authorization)
+        stored = build_authorization(repo, cycle_id)
+        if cycle_id != auth.cycle_id or revision_no != auth.revision_no or any(
+                getattr(stored, key) != getattr(auth, key) for key in FIELDS):
+            raise ValueError("authorization_does_not_match_audit")
+        snapshot_time = (datetime.fromisoformat(auth.portfolio_snapshot_id[3:])
+                         if auth.portfolio_snapshot_id.startswith("pf:") else None)
+        reasons = validate_authorization(repo, auth, snapshot_as_of=snapshot_time, now=_now(),
+                                         route_state=active_route_state())
+        route = [r for r in reasons if r.split(":")[0] in ROUTE_REASONS]
+        hard = [r for r in reasons if r not in route]
+        checks.append({"check": "authorization_fields", "ok": not hard, "detail": ";".join(hard)})
+        checks.append({"check": "route_binding", "ok": not route, "informational": True,
+                       "detail": ";".join(route) or "bound"})
+        if hard:
+            raise ValueError(";".join(hard))
+        orders = json.loads(repo.latest_revision(cycle_id)["orders_json"])
+        if [d.model_dump(mode="json") for d, _ in to_place] != orders:
+            raise ValueError("submitted_orders_do_not_match_approved_revision")
+        checks.append({"check": "orders_match_approved_revision", "ok": True, "detail": ""})
+        with price_request("trader", [d for d, _ in to_place], cycle_id=cycle_id,
+                           purpose="approved_execution_check", audit=repo):
+            for seq, (decision, qty) in enumerate(to_place):
+                # The venue the order was priced on: an overnight order checked against the regular venue
+                # reads a market that is closed and is refused for having no quote.
+                quote = read_price("trader", decision, venue=decision.execution_basis.get("venue", "regular"))
+                row = {"order_seq": seq, "quote": quote.model_dump(mode="json"),
+                       "approval_quote_ref": decision.execution_basis.get("quote_ref")}
+                audit.append(row)
+                row.update(check_execution(decision, qty, quote))
+                checks.append({"check": "live_quote_and_funds", "order_seq": seq, "symbol": decision.symbol,
+                               "ok": True, "detail": ""})
+    except PriceUnavailable as exc:
+        checks.append({"check": "live_quote_and_funds", "ok": False, "detail": str(exc)})
+        return refuse("price conditions rejected; reapprove", str(exc))
+    except (ValueError, PermissionError, RuntimeError) as exc:
+        return refuse("execution check rejected", str(exc))
+    return {"ok": True, "checks": checks, "execution_price_audit": audit, "entries": []}

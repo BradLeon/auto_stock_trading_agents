@@ -118,8 +118,29 @@ class TombstoneVerdict:
 
 # --- gates ------------------------------------------------------------------
 
-G0_VERIFICATION = Path(__file__).resolve().parents[3] / "openspec" / "changes" / \
-    "retire-legacy-and-migration-tooling" / "verification.md"
+_CHANGES = Path(__file__).resolve().parents[3] / "openspec" / "changes"
+_G0_CHANGE = "retire-legacy-and-migration-tooling"
+_TRADE_PATH_CHANGE = "switch-trade-path-and-retire-r5"
+
+
+def _change_record_path(change: str, filename: str, changes: Path = _CHANGES) -> Path:
+    """A gate record inside an OpenSpec change: its active folder, or its dated archive folder once archived.
+
+    Both gate changes were archived on 2026-11-12 (`archive/2026-11-12-<change>`); the signed records moved with
+    them and are still the gates' evidence.
+    """
+    active = changes / change / filename
+    if active.exists():
+        return active
+    archived = sorted((changes / "archive").glob(f"????-??-??-{change}/{filename}"))
+    return archived[-1] if archived else active
+
+
+def _g0_verification_path(changes: Path = _CHANGES) -> Path:
+    return _change_record_path(_G0_CHANGE, "verification.md", changes)
+
+
+G0_VERIFICATION = _g0_verification_path()
 _OPEN_VERDICTS = {"通过", "接受缺口", "不适用"}
 
 
@@ -169,14 +190,40 @@ def read_g0_gate(path: Path | str | None = None) -> GateStatus:
     return GateStatus("G0", True, "all items verified and the G0 conclusion is signed", len(rows), counts, (), True)
 
 
-def evaluate_gate(gate: str, *, g0: GateStatus | None = None) -> tuple[bool, str]:
-    """(open?, why-not). An entry with no gate is not gated; an external gate is never opened from here."""
+TRADE_PATH_OBSERVATION = _change_record_path(_TRADE_PATH_CHANGE, "observation.md")
+
+
+def read_trade_path_gate(path: Path | str | None = None) -> GateStatus:
+    """`trade_path_cutover` is open only when the user has signed the observation-window conclusion.
+
+    Same shape as G0: a marker line `**窗口结论签字：** 通过 …` in observation.md. Read-only; nothing here signs it. A
+    missing file, a missing marker, or a value that is not 通过 (blank, 未签, 通过 / 不通过, 不通过) keeps it shut.
+    """
+    target = Path(path) if path else TRADE_PATH_OBSERVATION
+    if not target.exists():
+        return GateStatus("trade_path_cutover", False, f"observation record not found: {target}")
+    marker = re.search(r"\*\*窗口结论签字：\*\*\s*(.*)", target.read_text(encoding="utf-8"))
+    if not marker:
+        return GateStatus("trade_path_cutover", False, "the observation-window conclusion has no signature line")
+    value = marker.group(1).strip()
+    signed = value.startswith("通过") and "不通过" not in value
+    if not signed:
+        return GateStatus("trade_path_cutover", False, f"the observation-window conclusion is not signed: {value or '空'}")
+    return GateStatus("trade_path_cutover", True, "the observation-window conclusion is signed", concluded=True)
+
+
+def evaluate_gate(gate: str, *, g0: GateStatus | None = None,
+                  trade_path: GateStatus | None = None) -> tuple[bool, str]:
+    """(open?, why-not). An entry with no gate is not gated. A gate this module does not know stays shut."""
     if not gate:
         return True, ""
     if gate == "G0":
         status = g0 or read_g0_gate()
         return status.is_open, ("" if status.is_open else f"gate G0 not met: {status.reason}")
-    return False, f"external gate not met: {gate} (owned by another change, never opened from here)"
+    if gate == "trade_path_cutover":
+        status = trade_path or read_trade_path_gate()
+        return status.is_open, ("" if status.is_open else f"gate trade_path_cutover not met: {status.reason}")
+    return False, f"external gate not met: {gate} (unknown to this module, never opened from here)"
 
 
 @dataclass
@@ -248,6 +295,197 @@ def role_for(module_path: str) -> str:
         "module, not the role (e.g. 'agents.risk_officer.review' → 'risk')")
 
 
+# Consumers that are plain modules, not roles: judged by what the module's own source does.
+# Keyed by the module path the registry names; the value is the file the claim is about.
+# `store.direct_trade_reads` is the only entry measured this way, so the check is specific to
+# it: trades / fills / performance must be read through `ats.execution.state_api`.
+MODULE_TRADE_READ_SOURCES: dict[str, str] = {
+    "risk.assess": "src/ats/risk/assess.py",
+    "channel.context": "src/ats/channel/context.py",
+}
+_RAW_TRADE_CALLS = {"recent_trades", "recent_fills", "recent_performance", "save_performance"}
+_RAW_TRADE_SQL = re.compile(r"\b(from|join)\s+(trades|fills|performance|trade_episodes)\b", re.I)
+
+
+# --- analyst working records (switch-trade r5 tasks 6.3 / 6.5, 2026-11-07) ----------------------
+#
+# `sector_reviews`, `macro_reviews` and `technical_reviews` are not legacy tables. Each is one
+# analyst's full working record: the analyst writes its whole conclusion there and, in the same
+# run, publishes a slimmer projection for the Chief. The next run reads the record back (prior
+# baskets, the conclusion delta, the readings cache). What retired is the *other* use: someone
+# besides the owner reading the record as a compatibility read model (`legacy_read_models`).
+#
+# So the check is per table: who may read it, and nobody else. A sector module reading
+# `macro_reviews` is a cross-analyst read and is a finding like any other.
+ANALYST_RECORD_CALLS: dict[str, str] = {
+    "save_sector_review": "sector_reviews", "latest_sector_review": "sector_reviews",
+    "sector_review_history": "sector_reviews", "recent_sector_reviews": "sector_reviews",
+    "save_macro_review": "macro_reviews", "latest_macro_review": "macro_reviews",
+    "latest_macro_review_before": "macro_reviews", "recent_macro_reviews": "macro_reviews",
+    "save_technical_review": "technical_reviews", "latest_technical_review": "technical_reviews",
+    "previous_technical_review": "technical_reviews", "recent_technical_reviews": "technical_reviews",
+}
+_ANALYST_RECORD_SQL = re.compile(r"\b(from|join|into|update)\s+(sector_reviews|macro_reviews|technical_reviews)\b", re.I)
+# The analysts' own `context` modules wrap reads of the record (they were the Chief's old way in).
+_ANALYST_CONTEXT_MODULE = re.compile(r"agents\.(sector|macro|technical)\.context$")
+_TABLE_OF_CONTEXT = {"sector": "sector_reviews", "macro": "macro_reviews", "technical": "technical_reviews"}
+
+# Who may read each record, as a path prefix under the repo, with the reason. Anything else is a finding.
+ANALYST_RECORD_OWNERS: dict[str, dict[str, str]] = {
+    "sector_reviews": {
+        "src/ats/agents/sector/": "行业分析师自己（上期篮子、层结论、截面原地回写）",
+        "src/ats/chain/kb_review.py": "产业链知识库复核：查行业分析师篮子理由里的盲区（给人看的报告，不进决策）",
+        "src/ats/chain/kb_audit.py": "产业链知识库审计：查篮子打分是否引用了判据（给人看的报告，不进决策）",
+    },
+    "macro_reviews": {"src/ats/agents/macro/": "宏观分析师自己（上一期结论，算结论变化）"},
+    "technical_reviews": {"src/ats/agents/technical/": "技术面分析师自己（读数缓存、上一期对比）"},
+}
+# runtime/cli.py reads the records only inside the owning analyst's own commands: show its record,
+# re-run one layer of its review, render its report. Each command may read its own analyst's table only.
+ANALYST_RECORD_CLI_COMMANDS: dict[str, str] = {
+    "technical_show": "technical_reviews",
+    "macro_show": "macro_reviews",
+    "sector_show": "sector_reviews",
+    "run_layer_review": "sector_reviews",
+    "run_sector_html": "sector_reviews",
+}
+ANALYST_RECORD_STORE = "src/ats/memory/store.py"     # the implementation of the reads themselves
+CLI_SOURCE = "src/ats/runtime/cli.py"
+
+# Consumers of `legacy_read_models` as the registry names them, and the file each claim is about.
+MODULE_ANALYST_RECORD_SOURCES: dict[str, str] = {
+    "channel.context": "src/ats/channel/context.py",
+    "runtime.cli": CLI_SOURCE,
+}
+
+
+@dataclass
+class AnalystRecordRead:
+    """One read (or write) of an analyst's working record found in source."""
+
+    table: str
+    kind: str          # store_call | sql | context_import
+    location: str      # path:line
+    function: str = ""  # enclosing top-level function, when there is one
+
+
+def scan_analyst_record_reads(relative: str, base: Path | None = None) -> list[AnalystRecordRead]:
+    """Every touch of the three analyst records in one source file (AST; read-only)."""
+    import ast
+    import warnings
+
+    from ..config import REPO_ROOT
+
+    path = (Path(base) if base else REPO_ROOT) / relative
+    with warnings.catch_warnings():          # a stray escape in some file's string is not our finding
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found: list[AnalystRecordRead] = []
+
+    def visit(node, function: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = function
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and not function:
+                name = child.name
+            where = f"{relative}:{getattr(child, 'lineno', 0)}"
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) \
+                    and child.func.attr in ANALYST_RECORD_CALLS:
+                found.append(AnalystRecordRead(ANALYST_RECORD_CALLS[child.func.attr], "store_call", where, name))
+            elif isinstance(child, ast.Constant) and isinstance(child.value, str):
+                for m in _ANALYST_RECORD_SQL.finditer(child.value):
+                    found.append(AnalystRecordRead(m.group(2).lower(), "sql", where, name))
+            elif isinstance(child, ast.ImportFrom):
+                module = (child.module or "").lstrip(".")
+                targets = [module] + [f"{module}.{a.name}" for a in child.names]
+                for target in targets:
+                    m = _ANALYST_CONTEXT_MODULE.search(target)
+                    if m:
+                        found.append(AnalystRecordRead(_TABLE_OF_CONTEXT[m.group(1)], "context_import", where, name))
+            visit(child, name)
+
+    visit(tree, "")
+    return found
+
+
+def analyst_record_finding(read: AnalystRecordRead) -> str:
+    """Why this read is not allowed, or "" when the reader may read that record."""
+    relative = read.location.rsplit(":", 1)[0]
+    if relative == ANALYST_RECORD_STORE:
+        return ""
+    if relative == CLI_SOURCE:
+        allowed = ANALYST_RECORD_CLI_COMMANDS.get(read.function)
+        if allowed == read.table:
+            return ""
+        return (f"命令行函数 {read.function or '(模块级)'} 读 {read.table}，"
+                f"它不是该分析师自己的命令（允许的：{sorted(ANALYST_RECORD_CLI_COMMANDS)}）")
+    owners = ANALYST_RECORD_OWNERS.get(read.table, {})
+    if any(relative.startswith(prefix) if prefix.endswith("/") else relative == prefix for prefix in owners):
+        return ""
+    return f"{relative} 不是 {read.table} 的所有者，不得读它（所有者：{sorted(owners)}）"
+
+
+def analyst_record_violations(root: Path | None = None) -> list[tuple[AnalystRecordRead, str]]:
+    """Every read of the three records anywhere under src/ats by someone who does not own it."""
+    from ..config import REPO_ROOT
+
+    base = Path(root) if root else REPO_ROOT
+    bad: list[tuple[AnalystRecordRead, str]] = []
+    for path in sorted((base / "src" / "ats").rglob("*.py")):
+        relative = path.relative_to(base).as_posix()
+        for read in scan_analyst_record_reads(relative, base):
+            why = analyst_record_finding(read)
+            if why:
+                bad.append((read, why))
+    return bad
+
+
+@dataclass
+class ModuleTradeReads:
+    """What one module's source does with the trade ledger tables."""
+
+    module: str
+    violations: list[tuple[str, str]] = field(default_factory=list)   # (kind, location)
+    call_path: tuple[str, ...] = ()
+
+
+def scan_module_trade_reads(module_path: str) -> ModuleTradeReads:
+    """AST scan of one module: raw store trade reads are findings, `state_api` is the way in.
+
+    Zero needs both halves. No raw read alone would also hold for a module that never
+    reads trade history, which is not evidence it moved onto the governed layer.
+    """
+    import ast
+
+    from ..config import REPO_ROOT
+
+    relative = MODULE_TRADE_READ_SOURCES[module_path]
+    path = REPO_ROOT / relative
+    record = ModuleTradeReads(module=module_path)
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    reached: list[str] = []
+    for node in ast.walk(tree):
+        location = f"{relative}:{getattr(node, 'lineno', 0)}"
+        if isinstance(node, ast.ImportFrom):
+            names = {alias.name for alias in node.names}
+            if "state_api" in names or (node.module or "").endswith("state_api"):
+                reached.append("ats.execution.state_api")
+            # Since task 6.4 the risk engine reads its NAV history as HISTORY_DATA through its own read module,
+            # `risk.inputs`, which goes through the governed read API (and from there to state_api).
+            if relative.startswith("src/ats/risk/") and (node.module or "") == "" and node.level == 1 \
+                    and "inputs" in names:
+                reached.append("ats.risk.inputs -> ats.data.consumer_api (HISTORY_DATA)")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            target = node.func.value
+            on_state_api = isinstance(target, ast.Name) and target.id == "state_api"
+            if node.func.attr in _RAW_TRADE_CALLS and not on_state_api:
+                record.violations.append(("direct_store_trade_read", location))
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and _RAW_TRADE_SQL.search(node.value):
+            record.violations.append(("direct_trade_table_sql", location))
+    record.call_path = tuple(dict.fromkeys(reached))
+    return record
+
+
 # --- 12.1 consumer zero ------------------------------------------------------
 
 def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
@@ -280,6 +518,30 @@ def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
             continue
 
         if scan is not None:
+            if consumer in MODULE_ANALYST_RECORD_SOURCES and identifier == "legacy_read_models":
+                reads = scan_analyst_record_reads(MODULE_ANALYST_RECORD_SOURCES[consumer])
+                bad = [(r, why) for r in reads if (why := analyst_record_finding(r))]
+                owner_reads = [r for r in reads if not analyst_record_finding(r)]
+                verdicts.append(ZeroVerdict(
+                    identifier=identifier, consumer=consumer, verdict=NOT_ZERO if bad else ZERO,
+                    reason=("still reads an analyst's working record as a read model" if bad else
+                            ("reads the analyst records only inside the owning analyst's own commands"
+                             if owner_reads else "reads none of the analyst records")),
+                    evidence={"violations": [f"{r.table}@{r.location}" for r, _ in bad],
+                              "owner_reads": sorted({f"{r.function}:{r.table}" for r in owner_reads})}))
+                continue
+            if consumer in MODULE_TRADE_READ_SOURCES and identifier == "store.direct_trade_reads":
+                found = scan_module_trade_reads(consumer)
+                clean = not found.violations and bool(found.call_path)
+                verdicts.append(ZeroVerdict(
+                    identifier=identifier, consumer=consumer, verdict=ZERO if clean else NOT_ZERO,
+                    reason=("reads trade history only through ats.execution.state_api or the governed read API"
+                            if clean
+                            else "reads a trade ledger table directly, or never reaches "
+                                 "ats.execution.state_api"),
+                    evidence={"violations": [f"{kind}@{where}" for kind, where in found.violations],
+                              "call_path": list(found.call_path)}))
+                continue
             try:
                 role = role_for(consumer)
             except KeyError as exc:
@@ -297,12 +559,16 @@ def verify_consumer_zero(identifier: str, consumers: Sequence[str], *,
                            for m in getattr(record, "call_path", ())) or any(
                            m.startswith("ats.data.products")
                            for m in getattr(record, "call_path", ()))
-            verdict = ZERO if governed and "governed_read_surface_not_reached" not in kinds \
+            # A decision role that still reads runtime or internal state directly (`runtime_bypass`)
+            # has not moved to the governed API, whatever else it reaches (task 6.4).
+            verdict = ZERO if governed and not {"governed_read_surface_not_reached",
+                                                "runtime_bypass"} & set(kinds) \
                 else NOT_ZERO
             verdicts.append(ZeroVerdict(
                 identifier=identifier, consumer=consumer, verdict=verdict,
-                reason=("reaches the governed read surface" if governed and
-                        verdict == ZERO else
+                reason=("reaches the governed read surface" if verdict == ZERO else
+                        "the role still reads runtime or internal state directly"
+                        if "runtime_bypass" in kinds else
                         "the role's own modules reach neither the governed read API "
                         "nor the product layer"),
                 evidence={"violations": kinds,

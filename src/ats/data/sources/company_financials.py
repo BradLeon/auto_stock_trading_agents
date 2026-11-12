@@ -460,7 +460,7 @@ class SECCompanyFactsAdapter:
     def fetch(self, request: FetchRequest) -> AdapterBatch:
         import httpx
 
-        from .. import sec
+        from .. import sec, sec_rate
 
         if len(request.entities) != 1:
             raise ValueError("SEC Company Facts adapter requires exactly one entity per slice")
@@ -469,6 +469,8 @@ class SECCompanyFactsAdapter:
         fetched_at = self.clock().astimezone(timezone.utc)
         cik = str(request.query_scope.get("cik", ""))
         if not cik:
+            if self.client is None:
+                sec_rate.wait()
             tickers = client.get(
                 sec.COMPANY_TICKERS, headers=sec._headers(), timeout=30).json()
             cik = next((str(row.get("cik_str", "")) for row in tickers.values()
@@ -481,7 +483,11 @@ class SECCompanyFactsAdapter:
                     status=IngestionStatus.NO_COVERAGE, entity_id=symbol,
                     message="SEC ticker-to-CIK mapping missing")])
         url = f"{COMPANYFACTS}/CIK{int(cik):010d}.json"
+        if self.client is None:
+            sec_rate.wait()
         response = client.get(url, headers=sec._headers(), timeout=60)
+        if self.client is None and sec_rate.observe(response.status_code, response.content):
+            raise sec_rate.SECRateLimited(f"sec throttled the request (http {response.status_code})")
         if hasattr(response, "raise_for_status"):
             response.raise_for_status()
         payload = response.json()

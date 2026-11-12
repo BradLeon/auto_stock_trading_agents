@@ -27,7 +27,8 @@ def _repo(tmp_path, name="audit.sqlite"):
 def test_status_terminality_is_enumerated_completely():
     executable = {CycleStatus.DRAFT, CycleStatus.PENDING_RISK,
                   CycleStatus.RISK_REJECTED, CycleStatus.PENDING_APPROVAL}
-    assert TERMINAL_STATUSES == {CycleStatus.EXECUTED, CycleStatus.MANUAL_REVIEW,
+    assert TERMINAL_STATUSES == {CycleStatus.EXECUTED, CycleStatus.APPROVED_NOT_EXECUTED,
+                                 CycleStatus.MANUAL_REVIEW,
                                  CycleStatus.NO_ACTION,
                                  CycleStatus.APPROVAL_REJECTED,
                                  CycleStatus.SUPERSEDED}

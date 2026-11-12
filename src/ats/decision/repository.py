@@ -62,6 +62,40 @@ def approval_idempotency_key(cycle_id: str, revision_no: int, decision_hash: str
     return hashlib.sha1(body.encode()).hexdigest()[:32]
 
 
+def rationale_summary(value: str | None) -> str:
+    """The approval-card summary of a stored revision rationale (plain text or structured)."""
+    if value and value.startswith("{"):
+        import json
+
+        try:
+            return json.loads(value).get("summary") or ""
+        except ValueError:
+            return value
+    return value or ""
+
+
+def option_advice_lines(value: str | None) -> list[str]:
+    """One line per option advice in a structured rationale; these are executed by hand."""
+    if not (value and value.startswith("{")):
+        return []
+    import json
+
+    try:
+        actions = json.loads(value).get("option_actions") or []
+    except ValueError:
+        return []
+    if not actions:
+        return []
+    lines = ["\n期权建议（人工执行，系统不下单）："]
+    for a in actions:
+        roll = (f" → {a.get('roll_to_expiry') or ''} {a.get('roll_to_strike') or ''}".rstrip()
+                if a.get("action") == "roll" else "")
+        size = f" {a['contracts']:g} 张" if a.get("contracts") else ""
+        lines.append(f"  {a.get('action')} {a.get('symbol')} {a.get('expiry')} {a.get('strike'):g}"
+                     f"{a.get('right')}{size}{roll} — {str(a.get('rationale') or '')[:80]}")
+    return lines
+
+
 def review_round_of(review_id: str) -> int:
     """Parse the round suffix of a round-scoped review id (`...:review:r3`)."""
     try:
@@ -364,9 +398,9 @@ class DecisionAuditRepository:
                       before_metrics: Mapping[str, Any] | None = None,
                       after_metrics: Mapping[str, Any] | None = None,
                       notes: str = "", created_at: str | None = None) -> sqlite3.Row:
-        from ..workflow.cutover_wiring import guard_approval_write
+        from ..workflow.isolation import assert_write_destination
 
-        guard_approval_write(store=self.store, what="a risk review")
+        assert_write_destination(self.store, what="a risk review")
         self.validate_research_dependencies(cycle_id)
         # §5.3/§10.2: a review binds ONE revision under ONE ruleset at ONE
         # snapshot instant. Any missing binding makes the row unverifiable, so
@@ -403,9 +437,9 @@ class DecisionAuditRepository:
                         idempotency_key: str,
                         created_at: str | None = None) -> sqlite3.Row:
         """Idempotent on `idempotency_key`: a replayed callback gets the original."""
-        from ..workflow.cutover_wiring import guard_approval_write
+        from ..workflow.isolation import assert_write_destination
 
-        guard_approval_write(store=self.store, what="a Boss approval")
+        assert_write_destination(self.store, what="a Boss approval")
         self.validate_research_dependencies(cycle_id)
         self.conn.execute(
             "INSERT OR IGNORE INTO boss_approvals (approval_id, cycle_id, "
@@ -463,47 +497,6 @@ class DecisionAuditRepository:
                                                 if a["decision"] == "approved"}),
             "has_execution_approval": bool(executed),
         }
-
-    # --- legacy mirror (design D2, task 3.5) ---------------------------------- #
-    def mirror_revision_to_legacy(self, cycle_id: str, revision_no: int, *,
-                                  as_of: str) -> None:
-        """Double-write a revision into the legacy `cycles`/`decisions` tables.
-
-        Design D2: the revision record is authoritative, but the legacy read
-        entry points (`last_chief_run`, `recent_decisions`, reports) keep
-        working during the transition. The legacy write is a MIRROR, not a
-        second truth — authorization decisions never read it, and the
-        transition-period `decisions` rows carry no approval semantics.
-
-        Replay-safe: an identical (cycle, symbol, action, notional) row is not
-        duplicated. `legacy_unknown` revisions are skipped — they have no
-        recoverable content to mirror.
-        """
-        rev = self.get_revision(cycle_id, revision_no)
-        if rev is None:
-            raise DecisionAuditError(f"unknown revision {cycle_id}/{revision_no}")
-        if rev["revision_source"] == "legacy_unknown" or not rev["orders_json"]:
-            return
-        import json as _json
-        orders = _json.loads(rev["orders_json"])
-        self.conn.execute(
-            "INSERT OR IGNORE INTO cycles (cycle_id, as_of, approval_status, "
-            "manager_summary) VALUES (?,?,NULL,'')", (cycle_id, as_of))
-        for order in orders:
-            exists = self.conn.execute(
-                "SELECT 1 FROM decisions WHERE cycle_id = ? AND symbol = ? AND "
-                "action = ? AND notional_usd IS ?",
-                (cycle_id, order.get("symbol"), order.get("action"),
-                 order.get("notional_usd"))).fetchone()
-            if exists:
-                continue
-            self.conn.execute(
-                "INSERT INTO decisions (cycle_id, symbol, action, notional_usd, "
-                "limit_price, conviction, rationale) VALUES (?,?,?,?,?,?,?)",
-                (cycle_id, order.get("symbol"), order.get("action"),
-                 order.get("notional_usd"), order.get("limit_price"),
-                 order.get("conviction"), order.get("rationale")))
-        self.conn.commit()
 
     # --- recovery facts (2.7) ------------------------------------------------- #
     def has_transition(self, cycle_id: str, idempotency_key: str) -> bool:

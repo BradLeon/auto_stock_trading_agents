@@ -48,7 +48,38 @@ class InternalState(BaseModel):
     fills: list[dict] = Field(default_factory=list)
     performance: dict = Field(default_factory=dict)
     attribution: dict | None = None
+    # Cycles whose approval stands but sent nothing (rehearsal or live lock). Kept apart from
+    # trades, fills and performance: they are neither executions nor results.
+    approved_not_executed: list[dict] = Field(default_factory=list)
+    # The risk role's latest portfolio posture (state, directive, breaches), so the Chief proposes
+    # inside it instead of finding out at the risk gate. None when the risk role has not reviewed yet.
+    risk_posture: dict | None = None
     completeness: Completeness = Field(default_factory=Completeness)
+
+
+def live_account_state(broker) -> dict:
+    """Today's book from the broker: positions (options with greeks), cash, exposure, margin.
+
+    The ledger tables record what happened; they are not the account. A consumer that
+    needs the book reads it here, at the moment it decides, with the broker's own as-of.
+    """
+    from ..data.runtime.broker import portfolio_snapshot
+
+    return portfolio_snapshot(broker)
+
+
+def _risk_posture(store) -> dict | None:
+    review = store.latest_risk_review()
+    if review is None:
+        return None
+    directive = review.directive
+    derisk_only = (not directive.can_increase_risk) if directive else review.risk_state == "derisk"
+    block = review.regime_block(1200)
+    if derisk_only and not directive:
+        block = "**⛔ de-risk 态：只允许减仓决策，禁止任何新买。**\n" + block
+    return {"as_of": review.as_of.isoformat(timespec="seconds"), "risk_state": review.risk_state,
+            "directive_state": directive.state if directive else None,
+            "can_increase_risk": not derisk_only, "block": block}
 
 
 def completeness(store) -> Completeness:
@@ -126,6 +157,41 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     episodes = [EpisodePerformance.model_validate(dict(r)) for r in store.conn.execute(
         "SELECT status, realized_pnl FROM trade_episodes ORDER BY opened_at DESC LIMIT 10000")]
     performance = analytics.summarize(history, episodes)
+    # What the numbers above are computed over, so a reader can judge them: the NAV
+    # snapshots are sparse and not cash-flow adjusted; round trips are the ledger's.
+    span = store.conn.execute(
+        "SELECT COUNT(*) n, MIN(as_of) first, MAX(as_of) last FROM performance").fetchone()
+    # An episode's realized P&L is in its contract's own currency. A round trip in another currency is converted
+    # with its instrument's latest recorded rate (fills.fx_to_usd, trader/fx.py) so it counts in the USD figures; one
+    # with no known rate stays out of them and is totalled per currency instead, never read as USD.
+    info = {r["k"]: (r["currency"], r["rate"]) for r in store.conn.execute(
+        "SELECT COALESCE(NULLIF(instrument_key, ''), symbol) k, MAX(currency) currency, "
+        "(SELECT f2.fx_to_usd FROM fills f2 WHERE COALESCE(NULLIF(f2.instrument_key, ''), f2.symbol) = "
+        "COALESCE(NULLIF(f.instrument_key, ''), f.symbol) AND f2.fx_to_usd > 0 "
+        "ORDER BY COALESCE(f2.time, f2.captured_at) DESC LIMIT 1) rate "
+        "FROM fills f GROUP BY k")}
+    closed: list[tuple[float | None, str, float | None]] = []   # (native P&L, currency, USD rate or None)
+    for r in store.conn.execute(
+            "SELECT realized_pnl, COALESCE(NULLIF(instrument_key, ''), symbol) k "
+            "FROM trade_episodes WHERE status = 'closed'"):
+        ccy, rate = info.get(r["k"], ("", None))
+        ccy = (ccy or "USD").upper()
+        closed.append((r["realized_pnl"], ccy, 1.0 if ccy == "USD" else rate))
+    usd = [(p or 0) * rate for p, _, rate in closed if rate]
+    gross_loss = -sum(p for p in usd if p < 0)
+    other: dict[str, float] = {}
+    for p, ccy, rate in closed:
+        if not rate:
+            other[ccy] = round(other.get(ccy, 0.0) + (p or 0), 2)
+    performance.update(
+        nav_points=span["n"], nav_first_as_of=span["first"], nav_last_as_of=span["last"],
+        closed_episodes=len(closed),
+        closed_wins=sum(1 for p, _, _ in closed if p and p > 0),
+        closed_losses=sum(1 for p, _, _ in closed if p and p < 0),
+        closed_flat=sum(1 for p, _, _ in closed if not p),
+        realized_total=round(sum(usd), 2),
+        profit_factor=round(sum(p for p in usd if p > 0) / gross_loss, 2) if gross_loss else None,
+        realized_other_currencies=other)
 
     attribution = None
     period = datetime.now(timezone.utc).strftime("%Y-%m")
@@ -135,6 +201,10 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     if row is not None:
         attribution = json.loads(row["payload"])
 
+    held_back = _rows_to_dicts(store.conn.execute(
+        "SELECT cycle_id, updated_at, final_outcome FROM decision_cycles "
+        "WHERE status = 'approved_not_executed' ORDER BY rowid DESC LIMIT 20").fetchall())
+    risk_posture = _risk_posture(store)
     queried_at = datetime.now(timezone.utc)
     portfolio_stamp = (getattr(perf_row, "as_of", None) if perf_row else None)
     portfolio_stamp = (portfolio_stamp.isoformat() if isinstance(portfolio_stamp, datetime)
@@ -142,7 +212,8 @@ def get_internal_state(store, *, symbol: str = "", trade_limit: int = 8,
     performance_stamp = store.conn.execute("SELECT MAX(as_of) stamp FROM performance").fetchone()["stamp"]
     return InternalState(as_of=queried_at, portfolio=portfolio,
                          trades=trades, fills=fills, performance=performance,
-                         attribution=attribution, completeness=comp,
+                         attribution=attribution, approved_not_executed=held_back,
+                         risk_posture=risk_posture, completeness=comp,
                          section_as_of={"portfolio": portfolio_stamp,
                                         "performance": performance_stamp,
                                         "trades": comp.last_reconcile_at,

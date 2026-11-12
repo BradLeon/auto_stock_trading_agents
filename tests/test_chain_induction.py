@@ -212,6 +212,11 @@ def test_pending_proposal_reaches_no_factor_and_no_chief(monkeypatch):
     proposal, _ = induction.induce(store, cfg=CFG, now=NOW)
     assert proposal is not None
 
-    ctx = assemble.build(live_broker=False).as_context()
+    # The Chief's context is rendered only from the research snapshot and Internal State, so a
+    # candidate in claim_proposals has no path in; assert both the structure and a rendered block.
+    import inspect
+
+    assert "claim_proposals" not in inspect.getsource(assemble)
+    ctx = assemble.projection_context_block([])
     assert proposal.statement not in ctx
     assert "待确认命题" not in ctx

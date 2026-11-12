@@ -73,7 +73,7 @@ def world(monkeypatch):
     monkeypatch.setattr("ats.data.products.get_platform_data_products", lambda readonly=False: state.products)
     monkeypatch.setattr("ats.data.factset.fetch_sector_material", lambda products=None: dict(state.factset))
     monkeypatch.setattr("ats.memory.get_store", lambda: pytest.fail("health check must not open the memory store"))
-    for name in ("ats.workflow.runtime_reads.gate_read", "ats.workflow.cutover_routing.read_route",
+    for name in ("ats.workflow.runtime_reads.gate_read",
                  "ats.data.consumer_api.read_input"):
         monkeypatch.setattr(name, lambda *a, **k: pytest.fail("health check went through a consumer read gate"))
     monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("health check used the network"))
@@ -282,19 +282,12 @@ OK = {"status": "ok", "problems": [], "warnings": []}
 
 
 def test_a_sector_plan_is_refused_unless_the_layer_dependency_is_dispatcher_owned_as_well(tmp_path):
-    from ats.workflow import consumer_cutover as cc
-    from ats.workflow import cutover_wiring as cw
     from ats.workflow import schedule_runtime as rt
     from ats.workflow.isolation import isolated_run
 
     layer_scope = {"kind": "layer", "id": "L1_app"}
     sector_scope = {"kind": "sector", "id": "ai_hardware"}
-    with isolated_run("sector-dependency", root=tmp_path / "iso") as environment:
-        path = environment.path_for("ATS_CUTOVER_DB")
-        cw.bootstrap_wired(path=path)
-        for consumer in ("layer", "sector"):
-            cc.switch(consumer, actor="op", approval="chat", stop_conditions="health fails", health=OK, path=path,
-                      observe_until=(datetime.now(UTC) + timedelta(hours=72)).isoformat())
+    with isolated_run("sector-dependency", root=tmp_path / "iso"):
         with closing(rt._connect(write=True)) as conn:
             conn.execute("INSERT INTO schedule_scope_owners VALUES(?,?,?,1,0,'')",
                          ("layer-review", rt.canonical(layer_scope), "legacy"))

@@ -469,11 +469,11 @@ stateDiagram-v2
 | 范围 | 状态 |
 |---|---|
 | 六个研究分析师（§7.2） | 已按本文契约实现，产出 §7.1 的 Task Projection |
-| 读取 | 六个分析师读数据产品；数据产品在发布时和每次任务执行前检查，不合格只告警并阻断该任务 |
+| 读取 | 十个角色（六个研究分析师与 Chief、Risk、Trader、Clerk）只按各自声明的数据产品、在当次入口绑定的业务 scope 内读取，越界或产品不合格时显式失败；数据产品在发布时和每次任务执行前检查，不合格只告警并阻断该任务。迁移期的读路由表、读取资格账本、读窗口与读停止机制已于 2026-11-11 删除（交易路径切换 R5d） |
 | 调度（§8、§13） | 7 个研究工作流由 Dispatcher 常驻进程按时间表与日历事件运行，只跑研究、不进 Chief、不下单；财报日历与 FactSet 月末摄入由数据刷新控制器负责，日历上来源冲突的那一条备选说法被挡住待人工裁决（已采用的一条继续生效） |
-| Chief—Risk—Boss—Trader（§5、§10） | 多轮 Loop、不可变 revision 与审批绑定已实现；**生产上尚未切换**：Chief 只手动运行，实盘锁定，任一时刻只有一条可执行真实交易的入口 |
-| Clerk（§11） | 已实现；主理人每日决策与 Clerk 每日对账在交易路径切换时由 Dispatcher 排程 |
-| 旧实现 | 在册 41 条，已退役 20 条：研究侧的旧手动入口与命名、旧分析代码（含只被旧入口用到的 Risk 代码）、层级 allocation 字段、旧调度流程等。其余 21 条未退：1 条是研究所有者的 `legacy` 取值（已由 `pause` / `resume` 取代对外用法，内部取值保留，另案取消）；20 条跟交易路径绑定（Chief 对旧表的直读、切换期工具与读路由机制、旧订单 id 推导等），门是 `trade_path_cutover`，由交易路径切换的 change 接手。逐条状态见 [`PHASE_F_RETIREMENT_RUNBOOK.md`](PHASE_F_RETIREMENT_RUNBOOK.md) 与 `ats retirement decide` |
+| Chief—Risk—Boss—Trader（§5、§10） | 多轮 Loop、不可变 revision 与审批绑定已实现；审计表读取与命令行审批已切换（2026-11-01），`chief-daily` 已启用（2026-11-02）：实盘锁定，任一时刻只有一条可执行真实交易的入口；服务启动时交易路由登记表读不出或出现两条路由即拒绝启动 |
+| Clerk（§11） | 已实现；Clerk 每日对账（`clerk-daily`）已由 Dispatcher 排程（2026-11-01 起）；主理人每日决策（`chief-daily`）已由 Dispatcher 排程（2026-11-02 起） |
+| 旧实现 | 在册 38 条，已退役 37 条（研究侧旧入口与命名、旧分析代码、旧调度流程，以及交易路径切换后的 R5：Chief 旧表直读、旧决策镜像写、切换期工具、读路由与资格机制等）。剩 1 条是研究所有者的 `legacy` 取值（对外已由 `pause` / `resume` 取代，内部取值保留，另案取消）；另有 6 张表登记为长期在用、不退役。逐条状态见 [`PHASE_F_RETIREMENT_RUNBOOK.md`](PHASE_F_RETIREMENT_RUNBOOK.md) 与 `ats retirement decide` |
 
 ## 7. Agent 详细职责和输入输出契约
 
@@ -635,7 +635,7 @@ Fundamental 不读取 Sector 或 Macro 报告，也不调用最终组合 pre-tra
 ### 10.1 决策快照
 
 Chief 开始决策时必须固定一份 `research_snapshot`，其中列出每个被要求角色的
-projection ID、content hash、as-of 和新鲜度状态。Loop 默认不重跑分析师；若研究快照本身失效，
+projection ID、content hash、as-of 和新鲜度状态，以及这次决策读取的业务 scope（不再记录路由与资格状态）。Loop 默认不重跑分析师；若研究快照本身失效，
 当前 cycle 应转为 `superseded` 或人工处理，不在原 revision 中偷换研究输入。
 
 ### 10.2 Revision 和风控
@@ -715,6 +715,8 @@ Clerk 是确定性 Workflow Service，而不是依靠 LLM 生成账本的 Agent�
 `clerk_runs`、`ledger_read_models` 三表（Workflow Memory 归属）；归属三类与决策链字段落在 `trades` / `fills`
 （`origin`、`link_confidence`、`revision_no`、`decision_hash`、`approval_id` 等，可空）；重建与发布见
 `execution/rebuild.py` 与 `execution/state_api.py`；LLM 白名单见 `execution/llm_boundary.py`。
+账本与审批只有一条写入路径（决策审计表与 Clerk）；写入前唯一的通用检查是隔离运行不得写出自己的隔离根
+（`workflow/isolation.assert_write_destination`），迁移期按边界开关放行写入的守卫已随交易路径切换删除。
 
 ### 11.2 LLM 边界
 
@@ -859,8 +861,8 @@ A–F 六阶段迁移（2026-09 至 2026-10）已完成并归档在 `openspec/ch
 
 1. 核心测试在固定的完整测试依赖下全绿。
 2. 状态机、幂等、依赖隔离、Calendar 和 Clerk 测试全绿。
-3. 影子运行期间无未审批真实下单。
-4. 所有影子订单都能追溯到研究快照、revision、Risk 和 Boss 批准。
+3. 观察窗口内无未审批真实下单（2026-11-04 至 11-06，结论已签字；影子运行工具已随切换完成删除）。
+4. 所有订单都能追溯到研究快照、revision、Risk 和 Boss 批准（隔离模拟与长期测试覆盖）。
 5. 回滚步骤已演练，并且任何时刻只有一条可执行真实交易的入口。
 
 ## 16. 已确认的架构决策

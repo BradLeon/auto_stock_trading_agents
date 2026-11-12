@@ -305,17 +305,9 @@ def test_single_real_order_submission_path():
             continue
         from pathlib import Path
         callers.add(str(Path(path)))                      # line-number robust
-    # Phase F added two isolated acceptance callers. Both exist to PROVE the real facade refuses inside an
-    # isolation root (the broker write guard raises BrokerWriteProhibited; acceptance_runner fails if the
-    # facade ever accepts). They are sanctioned only while each still names its guard, so a refactor that
-    # drops the guard turns this into a second real funnel and fails here.
-    isolated = {"src/ats/execution/shadow_execution.py": "verified_isolation_root",
-                "src/ats/workflow/acceptance_runner.py": "broker_write_guard"}
-    assert callers - set(isolated) == {"src/ats/graph/chief.py"}, callers
-    for path, guard_name in isolated.items():
-        if path in callers:
-            from pathlib import Path
-            assert guard_name in (Path(ROOT) / path).read_text(encoding="utf-8"), path
+    # The isolated acceptance callers (acceptance_runner, shadow_execution) were retired in r5 8.4; the simulation
+    # transport is a broker object handed to place_orders, not a second caller of it.
+    assert callers == {"src/ats/graph/chief.py"}, callers
 
 
 # --- chief_revise unit behaviour --------------------------------------------------- #
@@ -335,3 +327,116 @@ def test_chief_revise_adopts_boundary_and_cites_parent():
     assert out["parent_revision_no"] == 1
     assert out["decisions"][0].notional_usd == 25_000
     assert "采纳边界" in out["decisions"][0].rationale
+
+
+def test_chief_revise_with_a_chief_redecides_from_the_review(monkeypatch):
+    """2026-10-30 ruling: with a Chief in the run, a rejection goes back to the model
+    with the violations and boundary — no mechanical adoption."""
+    from ats.agents.chief import decide
+    from ats.schemas.risk import (AllowedBoundary, DecisionRiskReview,
+                                  OrderRiskVerdict, RiskViolation)
+
+    seen = {}
+
+    def _model(text, **kw):
+        seen["text"] = text
+        return decide.ChiefResult(
+            cycle_id=kw["cycle_id"], as_of=kw["as_of"], summary="缩到 20,000 并说明",
+            decisions=[TradeDecision(symbol="NVDA", action="buy", notional_usd=20_000,
+                                     rationale="按边界缩量，留余量")])
+
+    monkeypatch.setattr(decide, "from_context", _model)
+    state = _state(decide=True, use_llm=True, risk_round=1, revision_no=1,
+                   context_text="CTX", summary="原摘要")
+    state.risk_review = DecisionRiskReview(
+        verdict="rejected",
+        order_verdicts=[OrderRiskVerdict(symbol="NVDA", action="buy", verdict="rejected",
+                                         reasons=["cap"], max_allowed_notional=25_000)],
+        violations=[RiskViolation(rule_id="max_single_order_usd", entity="NVDA",
+                                  detail="超上限", severity="hard")],
+        allowed_boundary=AllowedBoundary(max_additional_notional=25_000))
+    out = chief_revise(state)
+    assert seen["text"].startswith("CTX")
+    assert "max_single_order_usd" in seen["text"] and "25,000" in seen["text"]
+    assert "原摘要" in seen["text"]
+    assert out["summary"] == "缩到 20,000 并说明"
+    assert out["decisions"][0].notional_usd == 20_000
+    assert "采纳边界" not in out["decisions"][0].rationale
+    assert out["parent_revision_no"] == 1 and out["proposed_at"] is not None
+
+
+def test_audit_rows_carry_each_roles_finish_time(broker, approve_all, monkeypatch):
+    """2026-10-30 ruling: proposal, review and approval rows show the serial order
+    and the loop — r1 proposal < r1 review < r2 proposal < r2 review < approval."""
+    _normal_review(monkeypatch)
+    from ats.config import get_config
+
+    rc = get_config().app.risk
+    original = rc.max_single_order_usd
+    rc.max_single_order_usd = 25_000
+    try:
+        run_decision_graph(_state(), channel=approve_all)
+    finally:
+        rc.max_single_order_usd = original
+    conn = get_store().conn
+    revs = _revisions()
+    reviews = conn.execute(
+        "SELECT created_at FROM decision_risk_reviews ORDER BY revision_no").fetchall()
+    approval = conn.execute("SELECT created_at FROM boss_approvals").fetchone()
+    chain = [revs[0]["created_at"], reviews[0]["created_at"], revs[1]["created_at"],
+             reviews[1]["created_at"], approval["created_at"]]
+    parsed = [datetime.fromisoformat(t) for t in chain]
+    assert parsed == sorted(parsed) and len(set(parsed)) == len(parsed), chain
+    assert _cycle()["created_at"] <= revs[0]["created_at"]
+    events = [datetime.fromisoformat(e["created_at"]) for e in conn.execute(
+        "SELECT created_at FROM cycle_events ORDER BY rowid").fetchall()]
+    assert events == sorted(events)
+    # seeded run: no model produced these revisions, and that is on record
+    assert {r["model_version"] for r in revs} == {"deterministic-rules"}
+    assert all(r["prompt_version"] for r in revs)
+
+
+def test_fixable_normalization_goes_back_to_the_chief_environment_goes_to_a_person():
+    from ats.graph.chief import _manual_review_reason, route_after_persist
+    from ats.schemas.risk import DecisionRiskReview
+
+    review = DecisionRiskReview(verdict="rejected")
+    fixable = _state(risk_review=review, risk_round=1, normalization_fixable=True,
+                     normalization_errors=["订单规范化拒绝（提案需修改）：COHR:no_position_to_sell"])
+    assert route_after_persist(fixable) == "revise"
+    env = _state(risk_review=review, risk_round=1, normalization_fixable=False,
+                 normalization_errors=["订单规范化拒绝（执行环境不可用）：quote_stale"])
+    assert route_after_persist(env) == "manual_review"
+    assert _manual_review_reason(env).startswith("执行环境不可用")
+    assert "修订后" not in _manual_review_reason(env)
+    emptied = _state(decisions=[], risk_round=2, parent_revision_no=1)
+    assert "没有形成可下的单" in _manual_review_reason(emptied)
+
+
+def test_a_reasoned_revision_keeps_the_summary_for_the_card_and_audits_references():
+    from ats.decision.repository import option_advice_lines, rationale_summary
+    from ats.graph.chief import _revision_rationale
+    import json
+
+    state = _state(summary="清仓 GOOG", research_snapshot={"items": [{"projection_id": "a" * 32}]},
+                   chief_reasoning={"portfolio_stance": "修复", "holdings_review": [
+                       {"symbol": "GOOG", "verdict": "sell", "basis": "技术 0/7",
+                        "references": ["a" * 32, "b" * 32]}]},
+                   option_actions=[{"symbol": "COHR", "expiry": "20261120", "strike": 210.0,
+                                    "right": "P", "action": "close", "contracts": 2,
+                                    "rationale": "标的破位，平掉卖出看跌"}])
+    value = _revision_rationale(state)
+    assert value["reference_audit"] == {"unknown": ["b" * 32], "orders_without_references": ["NVDA"]}
+    stored = json.dumps(value, ensure_ascii=False)
+    assert rationale_summary(stored) == "清仓 GOOG"
+    assert any("close COHR 20261120 210P 2 张" in line for line in option_advice_lines(stored))
+    assert rationale_summary("plain") == "plain"
+
+
+def test_a_failed_chief_is_manual_review_not_no_action():
+    """2026-10-30: a model failure (no answer) was recorded as a No Action decision."""
+    from ats.graph.chief import _manual_review_reason, route_after_persist
+
+    failed = _state(decide=True, decisions=[], summary="[fallback] chief LLM unavailable: length limit")
+    assert route_after_persist(failed) == "manual_review"
+    assert _manual_review_reason(failed).startswith("主理人模型调用失败")

@@ -24,7 +24,7 @@ log = logging.getLogger("ats.clerk")
 
 # The deterministic pipeline, in dependency order. `order attempt` sequences
 # are covered inside reconcile's replay (task 3.9).
-DEFAULT_STEPS = ("reconcile", "marks", "episodes", "predictions", "performance")
+DEFAULT_STEPS = ("reconcile", "marks", "episodes", "predictions", "performance", "positions")
 
 # Domain-fact columns the Clerk must never alter (task 4.3): the trader wrote
 # them at event time; Clerk may only add reconciliation/derivation fields.
@@ -52,18 +52,26 @@ def _portfolio_positions(broker):
 
 
 def _step_reconcile(store, *, broker, dry_run):
-    from ..trader import reconcile
+    from ..trader import flex_statement, reconcile
 
-    return reconcile.reconcile(broker=broker, store=store, dry_run=dry_run)
+    summary = reconcile.reconcile(broker=broker, store=store, dry_run=dry_run)
+    # The API only returns the account's executions since midnight (TWS local time), so a fill made before it
+    # is gone by the 07:00 read. The Flex statement is the broker's own record, a business day behind: it fills
+    # what the live reads missed. Its failure is recorded, never raised: it must not fail the Clerk run.
+    # Only on the live broker read: a Clerk run handed another fill source (a replay, a shadow run, a test) must not
+    # reach the Boss's real account statement and put real executions into a ledger that is not the live one.
+    if type(getattr(broker, "broker", broker)).__module__.startswith("ats.broker."):
+        summary["flex"] = flex_statement.backfill(store=store, dry_run=dry_run)
+    else:
+        summary["flex"] = {"status": "skipped", "reason": "fills came from a source other than the live IBKR read"}
+    return summary
 
 
 def _step_marks(store, *, broker, dry_run):
     from ..journal import marks
 
     portfolio = _portfolio_positions(broker)
-    prices = ({p.symbol: p.market_price for p in portfolio.positions}
-              if portfolio else {})
-    return marks.mark_all(market_prices=prices)
+    return marks.mark_all(market_prices=marks.prices_by_instrument(portfolio))
 
 
 def _step_episodes(store, *, broker, dry_run):
@@ -85,12 +93,28 @@ def _step_performance(store, *, broker, dry_run):
     return {"recorded": rec is not None}
 
 
+def _step_positions(store, *, broker, dry_run):
+    """Keep the positions this run saw, so tomorrow's run can check them against the fills in between."""
+    from . import baseline
+
+    portfolio = _portfolio_positions(broker)
+    if portfolio is None:
+        return {"saved": False, "reason": "portfolio unavailable"}
+    try:
+        return {"saved": baseline.save_run_snapshot(store, portfolio),
+                "positions": len(portfolio.positions)}
+    except Exception as exc:  # noqa: BLE001 - a missing snapshot is reported, it does not undo the ledger work
+        log.warning("clerk: position snapshot not saved (%s)", exc)
+        return {"saved": False, "reason": str(exc)[:120]}
+
+
 _STEPS = {
     "reconcile": _step_reconcile,
     "marks": _step_marks,
     "episodes": _step_episodes,
     "predictions": _step_predictions,
     "performance": _step_performance,
+    "positions": _step_positions,
 }
 
 
@@ -106,6 +130,10 @@ def _register_missed_windows(store, *, broker_available: bool,
     last = store.conn.execute(
         "SELECT value FROM journal_meta WHERE key='last_reconcile_at'").fetchone()
     cutoff = (last["value"][:10] if last else "")
+    from .baseline import baseline_date
+
+    # History before the Day-1 baseline was sealed, not left open; it never becomes a gap again.
+    cutoff = max(cutoff, baseline_date(store))
     rows = store.conn.execute(
         "SELECT DISTINCT DATE(COALESCE(time, captured_at)) d FROM fills "
         "WHERE COALESCE(time, captured_at, '') != '' "
@@ -133,11 +161,11 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     the SAME id for the same window and cannot double-book.
     """
     from ..memory import bound_store, get_store
-    from ..workflow.cutover_wiring import guard_clerk_publication
+    from ..workflow.isolation import assert_write_destination
     from ..workflow.runtime_reads import current_read_context, gate_read
 
     store = store or get_store()
-    guard_clerk_publication(store=store)
+    assert_write_destination(store, what="a ledger publication")
     if steps:
         from ..data.runtime.clerk_reads import ClerkBrokerReads, UnavailableBrokerReads
 
@@ -173,7 +201,7 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
         context = current_read_context()
         if context:
             gate_read(context.identity)
-        guard_clerk_publication(store=store, what=f"Clerk step {step}")
+        assert_write_destination(store, what=f"Clerk step {step}")
         impl = _STEPS.get(step)
         if impl is None:
             errors.append(f"{step}: unknown step")
@@ -182,11 +210,11 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
             with bound_store(store):
                 results[step] = impl(store, broker=broker, dry_run=dry_run)
         except Exception as exc:  # noqa: BLE001 - one failed step must not
-            from ..workflow.cutover_routing import RouteUnavailable
-            from ..workflow.cutover_wiring import BoundaryWriteRefused
-            from ..workflow.shadow_ledger import ShadowLedgerWriteRefused
+            from ..workflow.read_scope import ReadUnavailable
+            from ..workflow.isolation import IsolatedWriteRefused
+            from .trade_publication import TradePublicationRefused
 
-            if isinstance(exc, (ShadowLedgerWriteRefused, BoundaryWriteRefused, RouteUnavailable)):
+            if isinstance(exc, (TradePublicationRefused, IsolatedWriteRefused, ReadUnavailable)):
                 raise
             # Ordinary unavailable steps remain recoverable; publication violations stop.
             log.exception("clerk step %s failed", step)
@@ -197,16 +225,26 @@ def clerk_run(*, store=None, broker=None, steps: tuple[str, ...] = DEFAULT_STEPS
     # This decides whether uncovered windows can still be reconciled later
     # (3.7) or must be registered as permanent gaps now.
     rec_summary = results.get("reconcile") or {}
-    rec_errors = " ".join(rec_summary.get("errors", [])) if isinstance(rec_summary, dict) else ""
+    rec_error_list = rec_summary.get("errors", []) if isinstance(rec_summary, dict) else []
+    rec_errors = " ".join(rec_error_list)
+    # `reconcile` reports a failed read in its summary instead of raising. A window whose ledger was
+    # not reconciled is not complete: recording it as such would make a rerun reuse it and skip the work.
+    errors.extend(f"reconcile: {e}" for e in rec_error_list)
     all_errors = errors + [rec_errors]
     broker_available = not any(
         ("IBKR" in e) or ("broker unavailable" in e) for e in all_errors)
     context = current_read_context()
     if context:
         gate_read(context.identity)
-    guard_clerk_publication(store=store, what="Clerk completion and gap publication")
-    gaps = _register_missed_windows(store, broker_available=broker_available,
-                                    window_end=window_end)
+    assert_write_destination(store, what="Clerk completion and gap publication")
+    # A TWS that could not be reached says nothing about what the broker can still return (2026-11-03: a TWS that
+    # had not logged in registered 30 permanent gaps, from 09-01 to 10-28, none of them verified). The run is
+    # failed, `last_reconcile_at` does not move, and the next run with TWS up sees the same windows again.
+    from ..broker.ibkr import UNREACHABLE_MARK
+
+    unreachable = any(UNREACHABLE_MARK in e for e in all_errors)
+    gaps = ([] if unreachable else
+            _register_missed_windows(store, broker_available=broker_available, window_end=window_end))
     status = "completed" if not errors else "failed"
     store.conn.execute(
         "UPDATE clerk_runs SET status = ?, counts_json = ?, error = ?, "

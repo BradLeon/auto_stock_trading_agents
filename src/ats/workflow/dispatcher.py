@@ -25,7 +25,7 @@ from ..agent.task_projection import (
     content_hash,
 )
 from ..memory import task_store_scope
-from .planning import TASK_ROLE, TaskInstance, WorkflowPlan, task_registry
+from .planning import TASK_ROLE, TaskInstance, WorkflowPlan, task_config_hashes, task_registry
 from .run_contracts import TriggerContext
 from .store import WorkflowStore
 
@@ -183,7 +183,7 @@ class Dispatcher:
         startup(caller="Dispatcher.dispatch", mode=(
             "shadow" if any(task.instance_key.startswith("shadow:")
                             for task in plan.tasks) else ""))
-        from .cutover_routing import RouteUnavailable
+        from .read_scope import ReadUnavailable
         from .runtime_reads import check_plan_reads
         from . import schedule_runtime as scheduling
 
@@ -192,11 +192,6 @@ class Dispatcher:
             scheduling.check_owner(task.task_id, task.scope.model_dump(mode="json"),
                 "shadow" if task.instance_key.startswith("shadow:") else "dispatcher")
 
-        from .isolation import verified_isolation_root
-        if (verified_isolation_root() is None and
-                any(task.instance_key.startswith("dispatcher:") for task in plan.tasks)):
-            from .read_windows import bind_plan
-            plan = bind_plan(plan)
         read_errors = check_plan_reads(plan, collect=True)
         request = {
             "run_id": plan.run_id, "trigger": plan.trigger,
@@ -211,7 +206,7 @@ class Dispatcher:
             plan_hash=plan.plan_hash, status="planned")
         if existing["status"] in {"complete", "incomplete", "failed", "cancelled"}:
             if read_errors:
-                raise RouteUnavailable(f"saved run scope no longer readable: {read_errors}")
+                raise ReadUnavailable(f"saved run scope no longer readable: {read_errors}")
             saved = existing.get("result") or {}
             if saved:
                 return self._result_from_saved(saved)
@@ -334,12 +329,12 @@ class Dispatcher:
                                     for dep in dep_states
                                     for env in dep.projections}
                     input_refs, data_refs, task_inputs = self._task_inputs(plan, task, dependencies)
-                    from .cutover_routing import RouteUnavailable
+                    from .read_scope import ReadUnavailable
                     from .runtime_reads import gate_read, task_identity
 
                     try:
                         gate_read(task_identity(plan, task))
-                    except RouteUnavailable as exc:
+                    except ReadUnavailable as exc:
                         outcomes[key] = self._finish_without_execution(
                             task, plan, status="blocked", detail=str(exc),
                             code="read_scope_unavailable", attempt_no=attempt_counts.get(key, 0) + 1)
@@ -455,7 +450,7 @@ class Dispatcher:
                                             trigger_key=trigger_key,
                                             policy_version=policy_version)
                             made_progress = True
-                        except (DependencyUnavailable, RouteUnavailable) as exc:
+                        except (DependencyUnavailable, ReadUnavailable) as exc:
                             self.workflow_store.finish_attempt(
                                 state["attempt"]["agent_run_id"], status="blocked",
                                 error_code="dependency_unavailable", error_detail=str(exc))
@@ -561,7 +556,7 @@ class Dispatcher:
         input_refs.extend(env.projection_id for env in dependencies.values())
         input_refs.extend(str(ref) for ref in task_inputs.get("admitted_material_refs", []) or [])
         input_refs.extend(f"config:{path}@{digest}"
-                          for path, digest in sorted(plan.source_config_hashes.items()))
+                          for path, digest in sorted(task_config_hashes(plan, task.task_id, task.scope).items()))
         data_refs = task_inputs.get("data_vintage_refs", root.get("data_vintage_refs", [])) or []
         resolver = getattr(self, "vintage_resolver", None)   # some callers invoke this unbound
         if not data_refs and resolver is not None:
@@ -613,6 +608,13 @@ class Dispatcher:
                     reusable, reason = self._projection_reuse_check(
                         envelope, task, input_refs, data_refs, as_of,
                         spec.freshness_seconds, schema.role_schema_name())
+                    if (reusable and task.task_id == "information-brief"
+                            and any(gap.get("status") == "retrying"
+                                    for gap in envelope.payload.get("extraction_gaps") or [])):
+                        # A brief that skipped an article still worth retrying is not a final answer for this data
+                        # vintage: run again, so the skipped article gets its next attempt. (Not applied to the
+                        # shared-trigger replay: that must keep returning what the first run published.)
+                        reusable, reason = False, "extraction_incomplete"
             candidates.append({"projection_id": envelope.projection_id, "reason": reason})
             if reusable:
                 return envelope, {"decision": "hit", "reason": "reusable",
@@ -630,10 +632,10 @@ class Dispatcher:
 
         if task.task_id == "fundamental-routine":
             from .decision_requirements import validate_routine_value_contract
-            from .cutover_routing import RouteUnavailable
+            from .read_scope import ReadUnavailable
             try:
                 validate_routine_value_contract(envelope.payload)
-            except RouteUnavailable:
+            except ReadUnavailable:
                 return False, "routine_value_contract_invalid"
         if envelope.agent_role != TASK_ROLE[task.task_id]:
             return False, "role_mismatch"
@@ -678,24 +680,8 @@ class Dispatcher:
         mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
         with bind_read(task_identity(context.plan, context.task), as_of=context.plan.as_of, mode=mode,
                 publication_path=str(self.workflow_store.path),
-                invocation=(context.plan.task_inputs.get("read_invocations") or {}).get(context.task.instance_key),
                 execution_plan_hash=context.plan.plan_hash):
             return self._invoke_bound_adapter(adapter, context)
-
-    @staticmethod
-    def _record_reused(context, envelopes):
-        from .consumer_reads import record_read
-        from .runtime_reads import current_read_context, gate_read
-        from .payload_digest import digest
-
-        bound = current_read_context()
-        if bound is not None and bound.invocation:
-            gate_read(bound.identity)
-            record_read(bound.identity.consumer_id, "Dispatcher.projection_reuse",
-                refs=[e.projection_id for e in envelopes],
-                source_as_of=[e.as_of for e in envelopes],
-                queried_at=evaluation_now(timezone.utc).isoformat(),
-                payload_hash=digest([e.model_dump(mode="json") for e in envelopes]))
 
     def _invoke_bound_adapter(self, adapter, context):
         from . import schedule_runtime as scheduling
@@ -717,7 +703,6 @@ class Dispatcher:
                 valid = [env for env in envelopes if self._projection_reuse_check(env, context.task, context.input_refs, context.data_vintage_refs, context.plan.as_of, task_registry().spec(context.task.task_id).freshness_seconds, PAYLOAD_SCHEMA_BY_ROLE[TASK_ROLE[context.task.task_id]].role_schema_name())[0]]
                 if not valid:
                     raise ProjectionMissing("shared trigger projections fail current reuse validation")
-                self._record_reused(context, valid)
                 return tuple(valid), "shared_trigger_reused"
         return result
 
@@ -727,7 +712,6 @@ class Dispatcher:
         reusable = getattr(context, "reusable_projection", None)
         if reusable is not None:
             envelopes = tuple(reusable) if isinstance(reusable, (tuple, list)) else (reusable,)
-            self._record_reused(context, envelopes)
             record_reuse([envelope.projection_id for envelope in envelopes])
             return envelopes, "projection_reused"
         return self._invoke_claimed_adapter(adapter, context)
@@ -739,7 +723,6 @@ class Dispatcher:
         mode = "shadow" if context.task.instance_key.startswith("shadow:") else None
         with bind_read(task_identity(context.plan, context.task), as_of=context.plan.as_of, mode=mode,
                        publication_path=str(self.workflow_store.path),
-                       invocation=(context.plan.task_inputs.get("read_invocations") or {}).get(context.task.instance_key),
                        execution_plan_hash=context.plan.plan_hash), \
                 task_store_scope(self.workflow_store.path) as store:
             context.store = store
@@ -809,7 +792,7 @@ class Dispatcher:
         return expected_hash == envelope.content_hash
 
     def _chief_snapshot_gate(self, result: DispatchResult, plan, memory) -> DispatchResult:
-        from .cutover_routing import RouteUnavailable
+        from .read_scope import ReadUnavailable
         from .runtime_reads import bind_read, business_identity, configured_entities
 
         identity = business_identity(
@@ -819,10 +802,9 @@ class Dispatcher:
         mode = "shadow" if any(t.instance_key.startswith("shadow:") for t in plan.tasks) else None
         try:
             with bind_read(identity, as_of=plan.as_of, mode=mode, publication_path=self.workflow_store.path,
-                           invocation=(plan.task_inputs.get("read_invocations") or {}).get("chief:portfolio"),
                            execution_plan_hash=plan.plan_hash):
                 return self._assemble_chief_snapshot(result, plan, memory)
-        except RouteUnavailable as exc:
+        except ReadUnavailable as exc:
             return DispatchResult(
                 run_id=result.run_id, status=result.status, outcomes=result.outcomes,
                 missing_requirements=result.missing_requirements,
@@ -970,9 +952,15 @@ def _layer_adapter(context: TaskContext) -> TaskAdapterResult:
 def _information_adapter(context: TaskContext) -> TaskAdapterResult:
     from ..agents.information.entry import run_information_target
 
-    result = run_information_target(
-        context.task.scope.id, store=context.store, use_llm=_use_llm(context),
-        run_extraction=True, run_once=context.run_once)
+    from ..agents.information.extract import TransientExtractionError
+
+    try:
+        result = run_information_target(
+            context.task.scope.id, store=context.store, use_llm=_use_llm(context),
+            run_extraction=True, run_once=context.run_once)
+    except TransientExtractionError as exc:
+        # The model service did not answer; the articles are fine. Let the retry policy try again later.
+        raise RetryableTaskError(str(exc), code="transient") from exc
     return TaskAdapterResult(detail=result.get("event_summary", ""))
 
 
@@ -1013,7 +1001,11 @@ def _fundamental_routine_adapter(context: TaskContext) -> TaskAdapterResult:
                                      "data_vintage_refs": list(context.data_vintage_refs),
                                      "refresh_baseline": refresh})
     result = run_fundamental_pass(request)
-    return TaskAdapterResult(detail=str(result.get("summary", "routine completed")))
+    detail = str(result.get("summary", "routine completed"))
+    if result.get("skipped"):
+        detail += f"; skipped {len(result['skipped'])} refused fact(s): " + " | ".join(
+            f"#{row['index']} {row['reason']}" for row in result["skipped"])[:300]
+    return TaskAdapterResult(detail=detail)
 
 
 def _fundamental_event_adapter(context: TaskContext) -> TaskAdapterResult:
@@ -1048,6 +1040,8 @@ def _macro_adapter(context: TaskContext) -> TaskAdapterResult:
     if not review.regime or review.regime.startswith("("):
         raise ProjectionMissing("Macro Analyst did not publish a formal regime projection")
     detail = f"regime={review.regime}"
+    if review.as_of >= started and review.llm_truncated:
+        detail += f"; INCOMPLETE truncated, empty={','.join(review.llm_missing_fields) or '-'}"
     # The readable weekly report: the CLI path always wrote it, this path did not (found 2026-10-17). A new
     # version file, never an overwrite. `run` returns the PRIOR review when the model call fails, so a stale
     # review must not be written out under today's name.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from .base import DataProducts
+
+_log = logging.getLogger("ats.data.products.unstructured")
 
 _ROLE_TYPES = {
     "earnings_release": {"company_release", "release"},
@@ -71,6 +74,38 @@ class EarningsDocumentPackage:
         return "\n\n".join(
             f"### {item.title or item.role}\n{item.text[:per_document_chars]}"
             for item in self.official_documents if item.text.strip())
+
+
+def _web_transcript_identified(row: dict[str, Any], entity: str) -> bool:
+    """Read-side identity sweep for web transcripts (every event read, every calendar finalize).
+
+    Admission now requires the page's URL to name the issuer; this applies the same rule to
+    what is already stored, so a page admitted under the old, wider check (Seagate as MSFT,
+    Marvell as NVDA) is never selected, never confirms a release and is logged each time.
+    """
+    source = str(row.get("source") or "")
+    if not source.lower().startswith(("tavily:", "news:")):
+        return True
+    from ..admission import locator_names_entity
+
+    locator = str(row.get("source_url") or "") or source.split(":", 1)[-1]
+    if locator_names_entity(locator, entity):
+        return True
+    _log.error("transcript %s skipped for %s: its URL does not name the issuer (%s)",
+               row.get("document_id"), entity, locator)
+    return False
+
+
+def transcript_source_rank(source: str) -> int:
+    """Trust tier of a transcript's source (higher wins); see collection.evidence.source_rank.
+
+    Manual/official files > ticker-keyed datasets (defeatbeta, FMP) > public-filing
+    assemblies > web search. A web page can never displace a keyed transcript of the same
+    quarter merely by being newer.
+    """
+    from ..collection.evidence import source_rank
+
+    return source_rank(source)
 
 
 def _period_token(value: str) -> str:
@@ -155,7 +190,7 @@ def earnings_document_package(repository, *, entity: str,
     read to trigger SEC, transcript, RSS, or web collection as a hidden side effect.
     """
     selected: dict[str, EarningsDocument] = {}
-    selected_at: dict[str, str] = {}
+    selected_at: dict[str, tuple[int, str]] = {}
     if as_of is not None:
         if as_of.tzinfo is None:
             raise ValueError("document as_of must be timezone-aware")
@@ -174,6 +209,8 @@ def earnings_document_package(repository, *, entity: str,
             if not (event_date and role == "earnings_release" and _filed_near_event(row, event_date)):
                 continue
             by_filing_date = True
+        if role == "earnings_transcript" and not _web_transcript_identified(row, entity):
+            continue
         version = row.get("version") or repository.latest_document_version(row["document_id"])
         if not version:
             continue
@@ -194,9 +231,14 @@ def earnings_document_package(repository, *, entity: str,
             period=str(row.get("period") or ""),
         )
         known_at = str(version.get("known_at") or version.get("fetched_at") or row.get("fetched_at") or "")
-        if role not in selected or known_at > selected_at[role]:
+        # Transcripts: source tier first, recency second. "Newest wins" let a web-searched
+        # page admitted on 11-04 (another company's call) displace the ticker-keyed
+        # defeatbeta transcript of the same quarter admitted on 10-29. Other roles keep
+        # newest-first (issuer IR files rely on it).
+        rank = (transcript_source_rank(item.source) if role == "earnings_transcript" else 0, known_at)
+        if role not in selected or rank > selected_at[role]:
             selected[role] = item
-            selected_at[role] = known_at
+            selected_at[role] = rank
     return EarningsDocumentPackage(
         entity=entity.upper(), period=period,
         documents=tuple(sorted(selected.values(), key=lambda item: _ROLE_ORDER[item.role])),

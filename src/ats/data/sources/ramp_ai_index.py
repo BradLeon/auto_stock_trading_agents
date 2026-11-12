@@ -316,6 +316,16 @@ def parse_spend_tsv(payload: bytes | str, *, fetched_at: datetime | None = None,
     return output
 
 
+def _invisible_suffix(header: str) -> str:
+    """Ramp's model export has columns that differ only by zero-width spaces (e.g. "Cursor grok 4.5 fast\u200b
+    (auto balanced)" next to the same name without it). They are separate provider columns, so they stay
+    separate series: a stable suffix counts the invisible characters instead of merging or summing them."""
+    import unicodedata
+
+    count = sum(1 for char in str(header) if unicodedata.category(char) == "Cf")
+    return f"_ZW{count}" if count else ""
+
+
 def _maker_and_model(header: str) -> tuple[str, str]:
     """"Claude Opus 5.5 (Anthropic)" -> ("Anthropic", "Claude Opus 5.5"); the maker is the last parenthetical."""
     text = str(header or "").strip()
@@ -372,7 +382,7 @@ def parse_token_share_tsv(payload: bytes | str, *, scope: str, fetched_at: datet
             maker, model = _maker_and_model(header)
             if not maker:
                 raise RampExportError(f"export_unreadable:token_model_without_maker:{header}")
-            entity_id, segment = f"TOKEN_MODEL:{_slug(maker)}:{_slug(model)}", model
+            entity_id, segment = f"TOKEN_MODEL:{_slug(maker)}:{_slug(model)}{_invisible_suffix(header)}", model
         else:
             maker, model = str(header).strip(), ""
             entity_id, segment = f"TOKEN_MAKER:{_slug(maker)}", maker

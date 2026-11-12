@@ -609,3 +609,13 @@ def test_sectors_the_page_names_differently_are_still_recognised_as_fred_series(
     assert cross_check_fred(covered, {("NAICS:INFORMATION", "2026-10"): 79.0}, aliases=aliases) == [
         "fred_page_mismatch:NAICS:TECHNOLOGY_AND_MEDIA:2026-10:page=80.1000:fred=79.0000"]
 
+
+def test_model_columns_differing_only_by_zero_width_spaces_stay_separate():
+    payload = ("Date\tCursor grok 4.5 fast (auto) (xAI)\tCursor grok 4.5 fast\u200b (auto) (xAI)\tGPT (OpenAI)\n"
+               "2026-11-01\t0.2\t0.3\t0.5\n")
+    rows, _ = parse_token_share_tsv(payload, scope="token_spend_share_by_model", fetched_at=NOW)
+    assert {row.entity_id for row in rows} == {"TOKEN_MODEL:XAI:CURSOR_GROK_4_5_FAST_AUTO",
+                                               "TOKEN_MODEL:XAI:CURSOR_GROK_4_5_FAST_AUTO_ZW1",
+                                               "TOKEN_MODEL:OPENAI:GPT"}
+    assert not validate_ramp_records(rows)
+

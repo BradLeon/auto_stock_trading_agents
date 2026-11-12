@@ -672,6 +672,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `us_census_btos` | `current_partial` | `persistent` | `ai_enterprise_adoption_us` |
 | `rps_genai_adoption` | `current_partial` | `persistent` | `ai_worker_adoption_us` |
 | `ramp_ai_index` | `current_partial` | `persistent` | `ramp_ai_adoption, ramp_ai_spend` |
+| `ramp_ai_index_fred` | `current_partial` | `persistent` | `ramp_ai_adoption` |
 | `openrouter_rankings` | `current_partial` | `persistent` | `openrouter_rankings_daily` |
 | `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
 | `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks, frontier_ai_public_model_cards` |
@@ -723,6 +724,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `us_census_btos` | `ai_enterprise_adoption_us` | `current_partial` | `platform` | monthly/quarterly | concurrency 1；批量下载；请求预算见 source config |
 | `rps_genai_adoption` | `ai_worker_adoption_us` | `current_partial` | `platform` | biweekly | concurrency 1；按波次批量获取 |
 | `ramp_ai_index` | `ramp_ai_adoption, ramp_ai_spend` | `current_partial` | `platform` | weekly | concurrency 1；每次批量切片；页面/API 预算按 source config |
+| `ramp_ai_index_fred` | `ramp_ai_adoption` | `current_partial` | `platform` | weekly | concurrency 1；14 条 FRED 序列，每条 1 次元数据 + 1 次 CSV |
 | `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | 上游日更；**我方每 7 天** | concurrency 1；每 7 天抓取 14 天重叠窗口；`freshness_slo_days: 10`；按 API 预算退避 |
 | `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起，取消热度分级） | 每周期优先一次 bulk fetch；4 个 job 07:20/07:25/07:27/07:35 UTC |
 | `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起） | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |

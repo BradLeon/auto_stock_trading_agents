@@ -1,67 +1,102 @@
-# Ramp AI Index 采集与运行清单
+# Ramp AI Index 采集与运行清单（v2）
 
-本数据源服务 L1 AI 应用层，仅保存五个公开图表 scope：`adoption_overall`、
-`adoption_overall_models`、`adoption_sector`、`spend_per_employee_overall` 和
-`model_market_share_overall`。Business size 与 Geographies 只做发现，不进入发布。
+本数据源服务 L1 AI 应用层，回答一个问题：企业是否在真实付费采购 AI，以及钱流向哪家厂商。
+2026-11-12 起为 v2 口径（`ramp_ai_index_v2`，OpenSpec change `upgrade-ramp-ai-index-v2`）。
 
-## 访问与发现
+## 两个来源，各管一部分
 
-- 默认入口是 [Ramp AI Index](https://ramp.com/data/ai-index#adoption#overall) 的可见
-  `Get the data` 按钮。按钮复制官方 TSV 后才进入解析；不使用截图、OCR 或猜测隐藏 URL。
-- Ramp 单独由外部 scheduler 每 10 天执行一次 `data release-check --source ramp_ai_index
-  --ingest-new --force-check`；不把 BTOS/RPS/Anthropic 的发现频率改成 10 天。页面导出可用时无需账户。
-- 一次探测应在同一受控采集会话中处理五个白名单 scope；审阅报告只读结构化库，不因报告运行重复打开浏览器。
-- 无头调度时，桌面浏览器 runner 将五个导出按固定文件名写入
-  `var/data/ramp_exports/<scope>.tsv`（也可用 `ATS_RAMP_OFFICIAL_EXPORT_DIR` 指定受管目录），再执行
-  `release-check`。适配器会先读取这个入站快照；同一轮 discovery 的 payload 会直接交给 ingest，
-  不会再次打开浏览器。入站文件只作为下一次 probe 的官方导出快照，最终事实仍写入统一 SQLite/artifact store。
-- 首版不接入 Developer API/MCP，也不要求公司邮箱注册。适配器不会读取
-  `RAMP_DATA_API_KEY`、不会等待 API 重试；未来若获得企业授权需另开 OpenSpec 变更。
-- 已有官方 TSV fixture 时直接入库；没有 fixture 时才需要受控浏览器点击 `Get the data`。
-- 每个 scope 独立失败和发布。剪贴板拒绝、控件消失、空/损坏 TSV 使用
-  `export_unreadable`；网络不可达使用 `source_unreachable`；新定义或样本规则使用
-  `methodology_drift`。
+| 来源 | 采什么 | 怎么采 | 定时任务 |
+|---|---|---|---|
+| `ramp_ai_index_fred` | FRED 发布的 14 条月度序列：总体、3 家供应商（Anthropic、OpenAI、xAI）、7 个 NAICS 行业、3 档企业规模 | FRED 公开 CSV（`fredgraph.csv`）加序列元数据，纯 HTTP，不需要浏览器 | `ramp_ai_index_fred_weekly`（每周五 08:25 UTC） |
+| `ramp_ai_index` | FRED 没有的部分：另外的供应商（Mistral、DeepSeek）、另外 13 个行业、人均 AI 支出、token 花费份额（按厂商、按模型，周度） | 无头浏览器打开页面，点可见的 `Get the data`，截获按钮写入剪贴板的原文 | `ramp_ai_index_p10d_probe`（每 10 天 07:30 UTC） |
+
+- **一个序列只有一个来源。** FRED 序列清单登记在 `config/data/structured.yaml` 的 `ramp_ai_index_fred.fred_series`。网页导出里凡是清单内的（scope, 实体），只用来和 FRED 对数（差值超过 0.01pp 记 `fred_page_mismatch` 警告），不入库。FRED 以后新增序列，加进清单即可，网页对应部分自动停止入库。
+- **两部分失败互不影响。** 各自有调度、账本记录、重试与新鲜度。网页部分被拦、超时或没装浏览器时，只记网页部分失败；FRED 部分照常更新。
+- **不使用的出口：** Ramp Developer API/MCP（需企业授权）、截图或 OCR、猜测页面背后的数据地址。
+
+## 网页 runner
+
+`src/ats/data/sources/ramp_browser_runner.py`，可选依赖：
+
+```bash
+pip install '.[ramp-browser]'
+```
+
+```bash
+playwright install chromium
+```
+
+1. 页面脚本运行前注入一段脚本，包装 `navigator.clipboard.writeText`，记录按钮复制的原文。无头模式下没有系统剪贴板权限也能工作。
+2. 依次点击可见按钮切换图表：
+   - Adoption → Overall + Models
+   - Adoption → Sector
+   - AI spend per employee → Overall
+   - Token spend → By model maker → Shares
+   - Token spend → By model → Shares
+3. 每张图点一次 `Get the data`，header 校验后原子写入 `var/data/ramp_exports/<scope>.tsv`，同时写 `<scope>.json`（导出时间、页面地址、点击路径、SHA-256）。同一次探测的第二个数据集任务读这些文件，不再打开浏览器。
+4. 超时：总 300 秒，每张图 45 秒；一次运行只开一个浏览器，结束即关闭。
+5. 失败一律记 `export_unreadable`，原因码如下。任何一种失败都不回退去读旧文件。
+
+| 原因码 | 含义 |
+|---|---|
+| `browser_not_installed` | 没装 Playwright 或 Chromium |
+| `navigation_blocked` | HTTP 4xx/5xx、挑战页，或页面标题不是 “Ramp AI Index” |
+| `control_missing` | 找不到要点的按钮（页面改版）；同时在 `var/data/ramp_exports/diagnostics/` 存一张截图，仅供人工排查 |
+| `clipboard_not_captured` | 点了 `Get the data` 但没截获到合法的制表符文本 |
+| `timeout` | 超过总时限或单图时限 |
+
+**入站文件的新鲜度：** 只有导出时间在 10 天内的入站文件才算本轮上游结果，否则必须由 runner 重新导出。过期文件永远不会产出 `no_change`。网页部分 35 天没有新的 accepted 数据时，任务新鲜度判为过期，L1 报告显示 `export_stale`。
 
 ## 数据字典
 
-| scope | 统计主体/分母 | entity 形状 | 核心 metric |
-|---|---|---|---|
-| `adoption_overall` | Ramp 相关美国企业中当月有正向 AI 付款的企业 / 相关企业 cohort | `RAMP_OVERALL` | `ai.ramp.paid_business_adoption_share` |
-| `adoption_overall_models` | 同一 Ramp cohort，按 vendor；企业可同时支付多个 vendor | `RAMP_VENDOR:<VENDOR>` | `ai.ramp.vendor_adoption_share` |
-| `adoption_sector` | 同一 Ramp cohort，按 Ramp 内部 NAICS 分组 | `NAICS:<GROUP>` | `ai.ramp.paid_business_adoption_share` |
-| `spend_per_employee_overall` | AI 付款 cohort 的美元支出 / 员工数，按分位数 | `QUANTILE:MEDIAN/TOP10/TOP1` | `ai.ramp.ai_spend_per_employee` |
-| `model_market_share_overall` | Token Spend Management 连接企业的模型归因 API spend | `MODEL:<PROVIDER>:<MODEL>:<TYPE>` | `ai.ramp.api_spend_share` |
+| scope | 来源 | 统计主体/分母 | entity 形状 | 核心 metric | 期间 |
+|---|---|---|---|---|---|
+| `adoption_overall` | FRED | Ramp 相关美国企业中当月有正向 AI 付款的企业 / 相关企业 cohort | `RAMP_OVERALL` | `ai.ramp.paid_business_adoption_share` | 月 |
+| `adoption_overall_models` | FRED（3 家）+ 网页（其余） | 同一 cohort，按供应商；企业可同时支付多家 | `RAMP_VENDOR:<VENDOR>` | `ai.ramp.vendor_adoption_share` | 月 |
+| `adoption_sector` | FRED（7 个）+ 网页（其余） | 同一 cohort，按 NAICS 行业 | `NAICS:<行业全称>` | `ai.ramp.paid_business_adoption_share` | 月 |
+| `adoption_business_size` | FRED | 同一 cohort，按小型、中型、大型企业 | `RAMP_SIZE:SMALL/MEDIUM/LARGE` | `ai.ramp.paid_business_adoption_share` | 月 |
+| `spend_per_employee_overall` | 网页 | AI 付款 cohort 的美元月支出 / 员工数，按分位数 | `QUANTILE:MEDIAN/TOP10/TOP1` | `ai.ramp.ai_spend_per_employee` | 月 |
+| `token_spend_share_by_maker` | 网页 | Token Spend Management 连接企业当周 token 总花费中各厂商的占比 | `TOKEN_MAKER:<厂商>` | `ai.ramp.token_spend_share_by_maker` | 周 |
+| `token_spend_share_by_model` | 网页 | 同一 cohort 当周 token 总花费中各模型的占比 | `TOKEN_MODEL:<厂商>:<模型>` | `ai.ramp.token_spend_share_by_model` | 周 |
 
-`Monthly change (pp)` 与 `Yearly change (pp)` 作为 `provider_monthly_change_pp` 和
-`provider_yearly_change_pp` 原始发布字段保存。vendor share 不要求合计 100%；model share
-不是全 Ramp 企业采用率。所有 observation 都保留原始列、reference month、methodology regime、
-artifact、payload hash、known/fetched time 和 quality 状态。
+- **token 份额只收 Shares 模式。** 页面默认显示 Volumes（指数），那不是份额。解析时若某周各列合计明显超过 100，判为 Volumes 并拒绝入库（`methodology_drift`）。合计偏离 100±1 只记警告，因为可能有四舍五入或长尾。
+- **只发现、不入库：** Geographies、Token volume、Token prices、AI share of business spend。
+- **其他字段：**
+  - `Monthly change (pp)`、`Yearly change (pp)` 作为原始发布字段保存。v2 行业导出没有同比列，就不生成同比，不补零。
+  - 所有 observation 都保留原始列、参考期间、`methodology_regime`、artifact、payload hash、获取时间和质量状态。
+
+## v1 与 v2
+
+- **为什么换口径：** 2026-11 页面改版后，Ramp 对采用率与人均支出整段重算（例如 2026-08 总体采用率从 56.13% 改为 55.17%），行业改用 NAICS 全称，模型份额改为周度 token 花费。
+- **v2 单独成序列：** 写 `methodology_regime: ramp_ai_index_v2`，与 v1 不是同一序列的不同版本。入库比对跨源冲突时只比同一口径，v2 值不会因为和 v1 不同而被标为冲突。
+- **读取规则：** DataProducts 的 Ramp 查询默认只读 v2；显式传 `methodology_regime="ramp_ai_index_v1"` 可审计 v1。`model_market_share_overall` 只存在于 v1，v2 下查询返回 `scope_discontinued`。v1 与 v2 不拼成一条趋势。
+- **第一次 v2 入库：** 走配置里显式批准的口径换代（`approved_methodology_regimes: [ramp_ai_index_v2]`），发现结果记 `approved_regime_transition`。同一口径内的 header 或指纹变化仍然判为 `methodology_drift` 并阻断。
 
 ## L1 报告展示规则
 
-- 五个 scope 各自保留一张趋势图；Overall、vendor 和 NAICS 行业使用全部月度点，但横轴只标注起始期、年度一月和最新期，避免月份标签重叠。
-- `spend_per_employee_overall` 的报告图只展示 Median 与 Top 10% 并使用对数纵轴，以免 Top 1% 极端值压扁中位数趋势。Ramp 当前公开导出没有 Top 30% 字段，因此不插值、不把 Top 1% 改名为 Top 30%；数据表仍保留源端 Top 1%。
-- `model_market_share_overall` 的报告图按最新月份份额最高的 8 个模型绘制 100% 堆叠面积，其余模型合并为 `Other`。底层表仍保留每个 provider/model 的完整 source-native 行，图表不改变观测值。
+- 七个 scope 各一张趋势图。月度图横轴只标起始期、每年一月和最新期；token 份额按周绘制，不与月度采用率共轴。
+- `spend_per_employee_overall` 只画 Median 与 Top 10%，用对数纵轴，以免 Top 1% 压扁中位数；数据表保留 Top 1%。
+- token 份额画 100% 堆叠面积，保留历史累计与最新一周靠前的序列（最多 8 个），其余合并为 `Other`；底层表保留每个厂商或模型的完整行。
+- 网页部分不可用时，总体、供应商、行业、规模采用率照常展示；人均支出与 token 份额标出不可用原因，不把旧数据当作最新。
 
 ## 运行检查
 
-1. `data validate-source ramp_ai_index`
-2. `data release-check --group ai_adoption --force-check`
-3. 使用隔离数据库执行 `data ingest --source ramp_ai_index --dataset ramp_ai_adoption`
-   和 `--dataset ramp_ai_spend`。
-4. `data quality --dataset ramp_ai_adoption`、`data availability --dataset ramp_ai_spend`。
-5. 通过 DataProducts 或 L1 Observer 查询，不直接读取物理表。
+```bash
+ats data validate-source ramp_ai_index_fred
+```
 
-相同 `page_url + chart_slug + latest_release_label + payload_sha256` 幂等；同期间新
-payload 追加 vintage，`as_of` 可重放旧值。未发布或隐私过滤不转为零，不前向填充缺失月份。
+```bash
+ats data validate-source ramp_ai_index
+```
 
-## 周期探测与发布规则
+```bash
+ats data release-check --source ramp_ai_index_fred --ingest-new --force-check
+```
 
-- `reference_period` 是图表数据所属月份，例如 `2026-08`；`fetched_at` 只是本次探测时间，
-  两者不得混用。
-- 参考期间和 payload hash 都未变化时返回 `no_change`，不产生新 observation。
-- 参考期间变新时追加月份；同期间 hash 变化时追加 revision vintage，旧值仍可按 `as_of` 查询。
-- header、方法文本、technology scope 或 methodology fingerprint 变化时标记
-  `methodology_drift`，停止自动 platform 发布并保留诊断。
-- 首次受控 probe 的五个 scope 均通过质量门后，source 才能通过 release overlay 显式切换为
-  `platform`；后续新月份沿用相同质量门，revision/methodology drift 不静默自动升级。
+```bash
+ats data release-check --source ramp_ai_index --ingest-new --force-check
+```
+
+之后通过 DataProducts 或 L1 Observer 查询，不直接读物理表。
+
+相同 payload 幂等；同期间新 payload 追加 vintage，`as_of` 可重放旧值。未发布不转为零，不前向填充缺失期间。

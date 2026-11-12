@@ -1,4 +1,8 @@
-from datetime import datetime, timezone
+"""Ramp AI Index v2 (upgrade-ramp-ai-index-v2): FRED first, the page runner only for what FRED lacks."""
+
+from datetime import datetime, timedelta, timezone
+import json
+import os
 
 import pytest
 
@@ -7,129 +11,365 @@ from ats.data.core.structured_models import FetchRequest
 from ats.data.pipelines.structured.ingestion import IngestionPipeline
 from ats.data.pipelines.structured.discovery import discover_source, release_check
 from ats.data.adapters.structured.registry import validate_source_registration
-from ats.data.products.reporting import build_quality_report
-from ats.data.release import ReleaseManager, load_release_overlay
-from ats.agents.evidence.layer_runner import run_registered_layer_observers
 from ats.agents.evidence.ramp_visualization import render_ramp_charts
-from ats.config import load_sector_config
 from ats.data.sources.ramp_ai_index import (
+    INBOX_MAX_AGE_DAYS,
+    OUT_OF_SCOPE,
+    REGIME,
     RampAIIndexAdapter,
     RampBrowserAdapter,
     RampExportError,
-    OUT_OF_SCOPE,
+    cross_check_fred,
     parse_adoption_tsv,
-    parse_model_market_share_tsv,
     parse_spend_tsv,
+    parse_token_share_tsv,
+    split_fred_covered,
     validate_ramp_records,
 )
+from ats.data.sources.ramp_ai_index_fred import RampAIIndexFredAdapter, fred_coverage, load_fred_series
 from ats.data.stores.structured.repository import SQLiteStructuredRepository
 from ats.data.products.base import DataProducts
 
 
-NOW = datetime(2026, 9, 11, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 12, tzinfo=timezone.utc)
+COVERAGE = fred_coverage(StructuredCatalog.load())
+
+# Shapes copied from the 2026-11-12 official exports (values shortened).
+MODELS = ("Date\tSeries\tAdoption rate (%)\tMonthly change (pp)\tYearly change (pp)\n"
+          "2026-10-01\tRamp Overall\t56.79\t0.97\t13.26\n"
+          "2026-10-01\tAnthropic\t34.10\t1.10\t20.00\n"
+          "2026-10-01\tOpenAI\t35.20\t0.10\t2.00\n"
+          "2026-10-01\txAI\t2.10\t0.20\t1.00\n"
+          "2026-10-01\tMistral AI\t0.80\t0.00\t0.10\n"
+          "2026-10-01\tDeepSeek\t0.30\t0.00\t0.05\n")
+SECTOR = ("Date\tSector\tAdoption rate (%)\tMonthly change (pp)\n"
+          "2026-10-01\tAccommodation and food services\t34.96\t1.98\n"
+          "2026-10-01\tInformation\t80.10\t0.50\n"
+          "2026-10-01\tWholesale trade\t50.00\t0.40\n"
+          "2026-10-01\tUtilities\t41.00\t0.30\n")
+SPEND = ("Date\tMedian (USD / employee / month)\tTop 10% (USD / employee / month)\tTop 1% (USD / employee / month)\n"
+         "2026-10-01\t16.32\t800.84\t10199.20\n"
+         "2026-09-01\t15.38\t793.25\t9346.50\n")
+MAKER_SHARES = ("Date\tAnthropic\tOpenAI\tGoogle\n"
+                "2026-10-25\t55.0\t40.0\t5.0\n"
+                "2026-11-01\t56.0\t39.0\t5.0\n")
+MODEL_SHARES = ("Date\tClaude Opus 5.5 (Anthropic)\tGPT-6 Astra (OpenAI)\tGPT 5.6 TERRA (AUTO) (OpenAI)\n"
+                "2026-10-25\t60.0\t30.0\t10.0\n"
+                "2026-11-01\t61.0\t\t39.0\n")
+MODEL_VOLUMES = ("Date\tClaude Opus 5.5 (Anthropic)\tGPT-6 Astra (OpenAI)\n"
+                 "2026-10-25\t95.0\t55.0\n"
+                 "2026-11-01\t100.0\t55.9\n")
+PAGE = {"adoption_overall_models": MODELS, "adoption_sector": SECTOR, "spend_per_employee_overall": SPEND,
+        "token_spend_share_by_maker": MAKER_SHARES, "token_spend_share_by_model": MODEL_SHARES}
 
 
-def test_catalog_registers_ramp_scopes_and_metrics():
+def _page_adapter(**kwargs):
+    kwargs.setdefault("clock", lambda: NOW)
+    kwargs.setdefault("fred_coverage", COVERAGE)
+    return RampAIIndexAdapter(**kwargs)
+
+
+def _repo(tmp_path, name="ramp.sqlite"):
+    repo = SQLiteStructuredRepository(tmp_path / name, artifact_root=tmp_path / "artifacts")
+    repo.bootstrap_catalog(StructuredCatalog.load())
+    return repo
+
+
+# --- FRED part ---------------------------------------------------------------------------------------------
+
+class _Response:
+    def __init__(self, *, content=b"", payload=None, status=200):
+        self.content, self._payload, self.status_code = content, payload, status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise ConnectionError(f"http {self.status_code}")
+
+    def json(self):
+        return self._payload
+
+
+class _FredClient:
+    """FRED graph CSV + series metadata for every registered Ramp series."""
+
+    def __init__(self, *, values=None, broken=(), frequency="Monthly"):
+        self.values = values or {"2026-09-01": 55.83, "2026-10-01": 56.80}
+        self.broken = set(broken)
+        self.frequency = frequency
+        self.calls = []
+
+    def get(self, url, timeout=60):
+        self.calls.append(url)
+        series_id = url.rsplit("=", 1)[-1]
+        if series_id in self.broken:
+            return _Response(status=503)
+        if "graph/api/series" in url:
+            return _Response(payload={"chart_series": [{"series_objects": {"a": {
+                "series_id": series_id,
+                "title": f"Artificial Intelligence Adoption by Ramp Businesses: {series_id}",
+                "frequency": self.frequency, "season": "Not Seasonally Adjusted", "units": "Percent",
+                "notes": "Ramp AI Index measures the adoption rate ... more than 70,000 American businesses.",
+                "last_updated": "2026-11-11 10:36:24-06"}}}]})
+        rows = "".join(f"{period},{value}\n" for period, value in self.values.items())
+        return _Response(content=f"observation_date,{series_id}\n{rows}".encode())
+
+
+def _fred_request(**scope):
+    return FetchRequest(source_id="ramp_ai_index_fred", dataset_id="ramp_ai_adoption", query_scope=scope)
+
+
+def test_catalog_registers_fred_part_and_v2_scopes():
     catalog = StructuredCatalog.load()
-    source = next(item for item in catalog.sources() if item.id == "ramp_ai_index")
-    assert source.datasets == ["ramp_ai_adoption", "ramp_ai_spend"]
-    assert {item.id for item in catalog.datasets() if item.id.startswith("ramp_")} == {
-        "ramp_ai_adoption", "ramp_ai_spend"
-    }
-    assert {item.id for item in catalog.metrics() if item.id.startswith("ai.ramp")} >= {
-        "ai.ramp.paid_business_adoption_share", "ai.ramp.vendor_adoption_share",
-        "ai.ramp.ai_spend_per_employee", "ai.ramp.api_spend_share",
-    }
+    series = load_fred_series(catalog)
+    assert len(series) == 14
+    assert {spec["scope"] for spec in series.values()} == {
+        "adoption_overall", "adoption_overall_models", "adoption_sector", "adoption_business_size"}
+    assert validate_source_registration("ramp_ai_index_fred", catalog=catalog)["valid"]
+    assert validate_source_registration("ramp_ai_index", catalog=catalog)["valid"]
+    metrics = {item.id for item in catalog.metrics()}
+    assert {"ai.ramp.token_spend_share_by_maker", "ai.ramp.token_spend_share_by_model"} <= metrics
+    raw = catalog.raw["sources"]
+    assert raw["ramp_ai_index"]["approved_methodology_regimes"] == ["ramp_ai_index_v2"]
+    assert raw["ramp_ai_index_fred"]["approved_methodology_regimes"] == ["ramp_ai_index_v2"]
 
 
-def test_adoption_parser_preserves_scope_and_provider_changes():
-    payload = (
-        "Date\tSeries\tAdoption rate (%)\tMonthly change (pp)\tYearly change (pp)\n"
-        "Aug 2026\tRamp Overall\t56.13\t1.20\t8.50\n"
-    ).encode()
-    rows = parse_adoption_tsv(payload, scope="adoption_overall", fetched_at=NOW, slice_key="s")
-    assert rows[0].entity_id == "RAMP_OVERALL"
-    assert rows[0].period == "2026-08-01"
-    assert rows[0].value == 56.13
-    assert {row.provider_field for row in rows} == {
-        "adoption_rate_pct", "monthly_change_pp", "yearly_change_pp"
-    }
+def test_fred_adapter_parses_all_series_and_isolates_failures():
+    adapter = RampAIIndexFredAdapter(client=_FredClient(broken={"RAMPAIXAI"}), clock=lambda: NOW)
+    found = adapter.discover(_fred_request())
+    assert found.status.value == "partial"
+    assert len(found.candidates) == 13 and "RAMPAIXAI" in found.diagnostics["series_failures"]
+    batch = adapter.fetch(_fred_request(discovery_candidates=[item.model_dump(mode="json") for item in found.candidates]))
+    assert batch.status.value == "succeeded"
+    overall = [row for row in batch.records if row.entity_id == "RAMP_OVERALL"]
+    assert [(row.period, row.value) for row in overall] == [("2026-09-01", 55.83), ("2026-10-01", 56.8)]
+    assert overall[0].dimensions["methodology_regime"] == REGIME
+    vendors = {row.entity_id for row in batch.records if row.provider_field == "vendor_adoption_pct"}
+    assert vendors == {"RAMP_VENDOR:ANTHROPIC", "RAMP_VENDOR:OPENAI"}
+    sizes = {row.entity_id for row in batch.records if row.dimensions["scope"] == "adoption_business_size"}
+    assert sizes == {"RAMP_SIZE:SMALL", "RAMP_SIZE:MEDIUM", "RAMP_SIZE:LARGE"}
 
 
-def test_vendor_shares_may_overlap_and_sector_entities_are_stable():
-    payload = (
-        "Date\tSeries\tAdoption rate (%)\n"
-        "Aug 2026\tAnthropic\t43.8\n"
-        "Aug 2026\tOpenAI\t39.8\n"
-    ).encode()
-    rows = parse_adoption_tsv(payload, scope="adoption_overall_models", fetched_at=NOW, slice_key="s")
-    assert {row.entity_id for row in rows} == {"RAMP_VENDOR:ANTHROPIC", "RAMP_VENDOR:OPENAI"}
+def test_fred_frequency_drift_is_refused():
+    adapter = RampAIIndexFredAdapter(client=_FredClient(frequency="Quarterly"), clock=lambda: NOW)
+    found = adapter.discover(_fred_request())
+    assert found.status.value == "unreachable" or not found.candidates
+    assert all("fred_metadata_drift" in reason for reason in found.diagnostics["series_failures"].values())
+
+
+def test_fred_ingest_is_idempotent_and_reruns_report_no_change(tmp_path, monkeypatch):
+    import ats.data.pipelines.structured.discovery as discovery
+
+    repo = _repo(tmp_path)
+    client = _FredClient()
+    monkeypatch.setattr(discovery, "build_ingestion", lambda source_id, **kwargs: (
+        RampAIIndexFredAdapter(client=client, clock=lambda: NOW),
+        FetchRequest(source_id=source_id, dataset_id="ramp_ai_adoption", query_scope=kwargs.get("query_scope") or {})))
+    monkeypatch.setattr(discovery, "ingest_source", lambda repository, source_id, *, query_scope, **kw:
+                        IngestionPipeline(repository).run(
+                            RampAIIndexFredAdapter(client=client, clock=lambda: NOW),
+                            FetchRequest(source_id=source_id, dataset_id="ramp_ai_adoption", query_scope=query_scope)))
+    first = release_check(repo, source_ids=["ramp_ai_index_fred"], ingest_new=True, force=True)
+    assert first["status"] == "succeeded"
+    assert first["sources"][0]["ingestion"]["accepted"] == 28
+    second = release_check(repo, source_ids=["ramp_ai_index_fred"], ingest_new=True, force=True)
+    assert second["status"] == "no_change"
+    repo.close()
+
+
+# --- page part: v2 parsers ---------------------------------------------------------------------------------
+
+def test_v2_adoption_parser_keeps_vendor_and_sector_columns():
+    vendors = parse_adoption_tsv(MODELS, scope="adoption_overall_models", fetched_at=NOW, slice_key="s")
+    assert {row.entity_id for row in vendors} >= {"RAMP_VENDOR:MISTRAL_AI", "RAMP_VENDOR:DEEPSEEK", "RAMP_OVERALL"}
+    assert all(row.dimensions["methodology_regime"] == REGIME for row in vendors)
+    sectors = parse_adoption_tsv(SECTOR, scope="adoption_sector", fetched_at=NOW, slice_key="s")
+    assert "NAICS:ACCOMMODATION_AND_FOOD_SERVICES" in {row.entity_id for row in sectors}
+    # The v2 sector export has no yearly change column: no yearly record, not a zero.
+    assert "yearly_change_pp" not in {row.provider_field for row in sectors}
+
+
+def test_v2_spend_parser_reads_unit_suffixed_headers_and_keeps_quantile_gate():
+    rows = parse_spend_tsv(SPEND, fetched_at=NOW, slice_key="spend")
+    october = {row.entity_id: row.value for row in rows if row.period == "2026-10-01"}
+    assert october == {"QUANTILE:MEDIAN": 16.32, "QUANTILE:TOP10": 800.84, "QUANTILE:TOP1": 10199.2}
     assert not validate_ramp_records(rows)
-    sectors = parse_adoption_tsv(
-        b"Date\tSector\tAdoption rate (%)\nAug 2026\tTechnology and media\t61.2\n",
-        scope="adoption_sector", fetched_at=NOW, slice_key="s")
-    assert sectors[0].entity_id == "NAICS:TECHNOLOGY_AND_MEDIA"
-
-
-def test_spend_parser_and_quantile_gate():
-    payload = (
-        "Date\tMedian\tTop 10%\tTop 1%\nAug 2026\t12.50\t675.60\t7205.13\n"
-    ).encode()
-    rows = parse_spend_tsv(payload, fetched_at=NOW, slice_key="spend")
-    assert {row.entity_id for row in rows} == {"QUANTILE:MEDIAN", "QUANTILE:TOP10", "QUANTILE:TOP1"}
-    assert not validate_ramp_records(rows)
-    bad = parse_spend_tsv(b"Date\tMedian\tTop 10%\tTop 1%\nAug 2026\t10\t5\t7\n", fetched_at=NOW, slice_key="s")
+    bad = parse_spend_tsv(SPEND.replace("16.32", "900.00"), fetched_at=NOW, slice_key="s")
     assert any(item.startswith("spend_quantile_order_failed") for item in validate_ramp_records(bad))
 
 
-def test_model_share_parser_keeps_token_spend_cohort():
-    payload = b"Date\tProvider\tModel\tSpend type\tAPI spend share (%)\nAug 2026\tOpenAI\tGPT-5.6 Sol\tAPI\t17.9\n"
-    row = parse_model_market_share_tsv(payload, fetched_at=NOW, slice_key="models")[0]
-    assert row.entity_id == "MODEL:OPENAI:GPT_5_6_SOL:API"
-    assert row.dimensions["cohort"] == "Token Spend Management connected businesses"
+def test_token_shares_become_weekly_long_rows_and_volumes_are_refused():
+    makers, warnings = parse_token_share_tsv(MAKER_SHARES, scope="token_spend_share_by_maker", fetched_at=NOW)
+    assert {row.entity_id for row in makers} == {"TOKEN_MAKER:ANTHROPIC", "TOKEN_MAKER:OPENAI", "TOKEN_MAKER:GOOGLE"}
+    assert {row.period for row in makers} == {"2026-10-25", "2026-11-01"}      # weeks, not months
+    assert all(row.period_basis == "calendar_week" for row in makers) and not warnings
+    models, _ = parse_token_share_tsv(MODEL_SHARES, scope="token_spend_share_by_model", fetched_at=NOW)
+    entities = {row.entity_id for row in models}
+    assert "TOKEN_MODEL:ANTHROPIC:CLAUDE_OPUS_5_5" in entities
+    assert "TOKEN_MODEL:OPENAI:GPT_5_6_TERRA_AUTO" in entities                    # maker = last parenthetical
+    assert len([row for row in models if row.period == "2026-11-01"]) == 2       # an empty cell is skipped
+    with pytest.raises(RampExportError, match="methodology_drift:token_volume_index_not_share"):
+        parse_token_share_tsv(MODEL_VOLUMES, scope="token_spend_share_by_model", fetched_at=NOW)
+
+
+def test_token_share_total_off_100_is_a_warning_not_a_block():
+    rows, warnings = parse_token_share_tsv("Date\tAnthropic\tOpenAI\n2026-11-01\t50\t40\n",
+                                           scope="token_spend_share_by_maker", fetched_at=NOW)
+    assert rows and warnings == ["token_share_total_off_100:2026-11-01:90.00"]
+
+
+# --- page part: increments only ----------------------------------------------------------------------------
+
+def test_page_rows_fred_publishes_are_not_stored():
+    vendors = parse_adoption_tsv(MODELS, scope="adoption_overall_models", fetched_at=NOW, slice_key="s")
+    kept, covered = split_fred_covered(vendors, COVERAGE)
+    assert {row.entity_id for row in kept} == {"RAMP_VENDOR:MISTRAL_AI", "RAMP_VENDOR:DEEPSEEK"}
+    assert {row.entity_id for row in covered} == {"RAMP_OVERALL", "RAMP_VENDOR:ANTHROPIC",
+                                                  "RAMP_VENDOR:OPENAI", "RAMP_VENDOR:XAI"}
+    sectors = parse_adoption_tsv(SECTOR, scope="adoption_sector", fetched_at=NOW, slice_key="s")
+    kept, covered = split_fred_covered(sectors, COVERAGE)
+    assert {row.entity_id for row in kept} == {"NAICS:WHOLESALE_TRADE", "NAICS:UTILITIES"}
+    assert {row.entity_id for row in covered} == {"NAICS:ACCOMMODATION_AND_FOOD_SERVICES", "NAICS:INFORMATION"}
+
+
+def test_cross_check_flags_page_values_that_differ_from_fred():
+    vendors = parse_adoption_tsv(MODELS, scope="adoption_overall_models", fetched_at=NOW, slice_key="s")
+    _, covered = split_fred_covered(vendors, COVERAGE)
+    fred = {("RAMP_OVERALL", "2026-10"): 56.79, ("RAMP_VENDOR:ANTHROPIC", "2026-10"): 33.00}
+    warnings = cross_check_fred(covered, fred)
+    assert warnings == ["fred_page_mismatch:RAMP_VENDOR:ANTHROPIC:2026-10:page=34.1000:fred=33.0000"]
+
+
+def test_page_fetch_stores_only_increments_and_records_cross_check(tmp_path):
+    adapter = _page_adapter(fred_values=lambda: {("RAMP_VENDOR:ANTHROPIC", "2026-10"): 33.0})
+    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
+                           query_scope={"payloads": PAGE})
+    found = adapter.discover(request)
+    assert found.status.value == "new_release"
+    assert found.diagnostics["fred_covered_rows"] > 0
+    assert any(item.startswith("fred_page_mismatch:RAMP_VENDOR:ANTHROPIC") for item in found.diagnostics["warnings"])
+    repo = _repo(tmp_path)
+    result = IngestionPipeline(repo).run(adapter, request)
+    assert result["status"] == "succeeded"
+    stored = {row["entity_id"] for row in repo.observations(dataset_id="ramp_ai_adoption", source_id="ramp_ai_index",
+                                                            latest_only=True, accepted_only=True, limit=1000)}
+    assert stored == {"RAMP_VENDOR:MISTRAL_AI", "RAMP_VENDOR:DEEPSEEK", "NAICS:WHOLESALE_TRADE", "NAICS:UTILITIES"}
+    repo.close()
+
+
+# --- discovery: approved regime change vs drift -------------------------------------------------------------
+
+def test_approved_regime_transition_is_not_drift_but_same_regime_change_is(tmp_path, monkeypatch):
+    import ats.data.pipelines.structured.discovery as discovery
+
+    repo = _repo(tmp_path)
+    state = {"adapter": _page_adapter()}
+    monkeypatch.setattr(discovery, "build_ingestion", lambda source_id, **kwargs: (
+        state["adapter"], FetchRequest(source_id=source_id, dataset_id="ramp_ai_adoption",
+                                       query_scope={"payloads": state["payloads"], "scope": "adoption_sector"})))
+    # A v1 probe recorded the same scope with a different fingerprint and regime.
+    repo.save_source_check(
+        source_id="ramp_ai_index", dataset_id="ramp_ai_adoption", status="succeeded",
+        latest_upstream_identity="RAMP:v1", latest_ingested_identity="RAMP:v1", latest_available_period="2026-08-01",
+        candidates=[{"identity": "v1", "period": "2026-08-01", "urls": [], "methodology_fingerprint": "v1-fingerprint",
+                     "metadata": {"scope": "adoption_sector", "methodology_regime": "ramp_ai_index_v1"}}])
+    state["payloads"] = {"adoption_sector": SECTOR}
+    moved = discover_source(repo, "ramp_ai_index", force=True)
+    assert moved["status"] == "new_release"
+    assert moved["diagnostics"]["approved_regime_transition"]["adoption_sector"] == {
+        "previous_regime": "ramp_ai_index_v1", "regime": REGIME}
+    repo.save_source_check(
+        source_id="ramp_ai_index", dataset_id="ramp_ai_adoption", status="succeeded",
+        latest_upstream_identity=moved["latest_upstream_identity"],
+        latest_ingested_identity=moved["latest_upstream_identity"],
+        latest_available_period=moved["latest_available_period"], candidates=moved["candidates"])
+    state["payloads"] = {"adoption_sector": SECTOR.replace("Monthly change (pp)", "Monthly change (pp)\tNew column")
+                         .replace("1.98\n", "1.98\tx\n").replace("0.50\n", "0.50\tx\n")
+                         .replace("0.40\n", "0.40\tx\n").replace("0.30\n", "0.30\tx\n")}
+    drift = discover_source(repo, "ramp_ai_index", force=True)
+    assert drift["status"] == "methodology_drift"
+    repo.close()
+
+
+# --- page part: inbox freshness and failure isolation -------------------------------------------------------
+
+def _write_inbox(inbox, scope, text, *, exported_at):
+    inbox.mkdir(exist_ok=True)
+    (inbox / f"{scope}.tsv").write_text(text, encoding="utf-8")
+    (inbox / f"{scope}.json").write_text(json.dumps({"exported_at": exported_at.isoformat()}), encoding="utf-8")
+
+
+def test_fresh_inbox_is_used_without_a_browser(tmp_path):
+    inbox = tmp_path / "ramp_exports"
+    _write_inbox(inbox, "adoption_sector", SECTOR, exported_at=NOW - timedelta(days=2))
+    adapter = _page_adapter(export_dir=inbox)
+    batch = adapter.fetch(FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
+                                       query_scope={"scope": "adoption_sector"}))
+    assert batch.status.value == "succeeded"
+    assert batch.artifacts[0].metadata["export_method"] == "official_clipboard"
+
+
+def test_stale_inbox_is_never_reported_as_no_change(tmp_path):
+    inbox = tmp_path / "ramp_exports"
+    _write_inbox(inbox, "adoption_sector", SECTOR, exported_at=NOW - timedelta(days=INBOX_MAX_AGE_DAYS + 50))
+    adapter = _page_adapter(export_dir=inbox)
+    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
+                           query_scope={"scope": "adoption_sector"})
+    found = adapter.discover(request)
+    assert found.status.value == "export_unreadable"
+    assert "inbox_stale_60d" in found.diagnostics["scope_failures"]["adoption_sector"]
+    batch = adapter.fetch(request)
+    assert batch.status.value == "export_unreadable"
+
+
+def test_stale_inbox_with_a_runner_asks_the_browser(tmp_path):
+    inbox = tmp_path / "ramp_exports"
+    _write_inbox(inbox, "adoption_sector", "Date\tSector\tAdoption rate (%)\n2026-08-01\tUtilities\t1\n",
+                 exported_at=NOW - timedelta(days=60))
+    calls = []
+    adapter = _page_adapter(export_dir=inbox, browser=RampBrowserAdapter(lambda scope: calls.append(scope) or SECTOR))
+    batch = adapter.fetch(FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
+                                       query_scope={"scope": "adoption_sector"}))
+    assert calls == ["adoption_sector"] and batch.status.value == "succeeded"
+    assert max(row.period for row in batch.records) == "2026-10-01"
+
+
+def test_missing_browser_fails_the_page_part_explicitly():
+    from ats.data.sources.ramp_browser_runner import RampBrowserRunner, playwright_available
+
+    if playwright_available():
+        pytest.skip("playwright installed; covered by the runner fixture test")
+    adapter = _page_adapter(browser=RampBrowserAdapter(RampBrowserRunner("/nonexistent").export))
+    batch = adapter.fetch(FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_spend"))
+    assert batch.status.value == "export_unreadable"
+    assert "browser_not_installed" in batch.failures[0].message
+
+
+def test_one_page_scope_failing_does_not_block_others():
+    adapter = _page_adapter()
+    batch = adapter.fetch(FetchRequest(
+        source_id="ramp_ai_index", dataset_id="ramp_ai_spend",
+        query_scope={"payloads": {"spend_per_employee_overall": SPEND,
+                                  "token_spend_share_by_maker": MAKER_SHARES,
+                                  "token_spend_share_by_model": MODEL_VOLUMES}}))
+    assert batch.status.value == "partial"
+    assert {failure.status.value for failure in batch.failures} == {"methodology_drift"}
+    assert {row.dimensions["scope"] for row in batch.records} == {"spend_per_employee_overall",
+                                                                  "token_spend_share_by_maker"}
 
 
 def test_clipboard_and_browser_fail_closed():
     with pytest.raises(RampExportError, match="export_unreadable"):
-        RampBrowserAdapter(lambda scope: b"").export("adoption_overall")
+        RampBrowserAdapter(lambda scope: b"").export("adoption_sector")
     with pytest.raises(RampExportError, match="permission"):
-        RampBrowserAdapter(lambda scope: (_ for _ in ()).throw(PermissionError())).export("adoption_overall")
+        RampBrowserAdapter(lambda scope: (_ for _ in ()).throw(PermissionError())).export("adoption_sector")
+    assert set(OUT_OF_SCOPE) == {"geographies", "token_volume", "token_prices", "ai_share_of_business_spend"}
 
 
-def test_discovery_identity_is_idempotent_and_methodology_drift_is_explicit(tmp_path, monkeypatch):
-    import ats.data.pipelines.structured.discovery as discovery
-
-    payload = {
-        "adoption_overall": "Date\tSeries\tAdoption rate (%)\nAug 2026\tRamp Overall\t56.13\n",
-        "adoption_overall_models": "Date\tSeries\tAdoption rate (%)\nAug 2026\tAnthropic\t43.8\n",
-        "adoption_sector": "Date\tSector\tAdoption rate (%)\nAug 2026\tTechnology\t61.2\n",
-    }
-    state = {"payload": payload}
-    repo = SQLiteStructuredRepository(tmp_path / "discovery.sqlite", artifact_root=tmp_path / "artifacts")
-    repo.bootstrap_catalog(StructuredCatalog.load())
-
-    def fake_build(source_id, *, catalog=None, query_scope=None, **kwargs):
-        return (RampAIIndexAdapter(clock=lambda: NOW), FetchRequest(
-            source_id=source_id, dataset_id="ramp_ai_adoption",
-            query_scope={"payloads": state["payload"]}))
-
-    monkeypatch.setattr(discovery, "build_ingestion", fake_build)
-    first = discover_source(repo, "ramp_ai_index", force=True)
-    assert first["status"] == "new_release"
-    repo.save_source_check(
-        source_id="ramp_ai_index", dataset_id="ramp_ai_adoption", status="succeeded",
-        latest_upstream_identity=first["latest_upstream_identity"],
-        latest_ingested_identity=first["latest_upstream_identity"],
-        latest_available_period=first["latest_available_period"], candidates=first["candidates"])
-    unchanged = discover_source(repo, "ramp_ai_index", force=True)
-    assert unchanged["status"] == "no_change"
-
-    state["payload"] = {**payload, "adoption_overall":
-        "Date\tSeries\tAdoption rate (%)\tNew source column\nAug 2026\tRamp Overall\t56.13\tkept\n"}
-    drift = discover_source(repo, "ramp_ai_index", force=True)
-    assert drift["status"] == "methodology_drift"
-    assert drift["diagnostics"]["methodology_drift"]
-    repo.close()
+def test_environment_api_key_does_not_activate_a_fallback(monkeypatch):
+    monkeypatch.setenv("RAMP_DATA_API_KEY", "should-not-be-read")
+    batch = _page_adapter().fetch(FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption", query_scope={}))
+    assert batch.status.value == "export_unreadable"
+    assert "official_web_export_required" in batch.failures[0].message
 
 
 def test_release_check_hands_discovered_payloads_to_ingest_once(tmp_path, monkeypatch):
@@ -137,17 +377,14 @@ def test_release_check_hands_discovered_payloads_to_ingest_once(tmp_path, monkey
     import ats.data.pipelines.structured.discovery as discovery
 
     calls = {"exports": 0, "payloads": {}}
-    payload = "Date\tSeries\tAdoption rate (%)\nAug 2026\tRamp Overall\t56.13\n"
 
     def export(scope):
         calls["exports"] += 1
-        return payload
+        return PAGE[scope]
 
-    adapter = RampAIIndexAdapter(browser=RampBrowserAdapter(export), clock=lambda: NOW)
+    adapter = _page_adapter(browser=RampBrowserAdapter(export))
     request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption")
-    repo = SQLiteStructuredRepository(tmp_path / "release-check.sqlite", artifact_root=tmp_path / "artifacts")
-    repo.bootstrap_catalog(StructuredCatalog.load())
-
+    repo = _repo(tmp_path)
     monkeypatch.setattr(discovery, "build_ingestion", lambda *args, **kwargs: (adapter, request))
 
     def fake_ingest(repository, source_id, *, query_scope, **kwargs):
@@ -158,268 +395,180 @@ def test_release_check_hands_discovered_payloads_to_ingest_once(tmp_path, monkey
     result = release_check(repo, source_ids=["ramp_ai_index"], dataset_id="ramp_ai_adoption",
                            ingest_new=True, force=True, catalog=StructuredCatalog.load())
     assert result["status"] == "succeeded"
-    # The five-scope run is split by dataset; this adoption job exports each of
-    # its three registered charts exactly once, then reuses those payloads for
-    # ingestion instead of opening the browser again.
-    assert calls["exports"] == 3
-    assert calls["payloads"]["adoption_overall"] == payload
+    assert calls["exports"] == 2          # the adoption job's two page charts, once each
+    assert calls["payloads"]["adoption_sector"] == SECTOR
     repo.close()
 
 
-def test_partial_discovery_ingests_successful_scopes_only(tmp_path, monkeypatch):
-    import ats.data.pipelines.structured.discovery as discovery
+# --- regimes are separate measurements ---------------------------------------------------------------------
 
-    payloads = {
-        "adoption_overall": "Date\tSeries\tAdoption rate (%)\nAug 2026\tRamp Overall\t56.13\n",
-        "adoption_overall_models": "Date\tSeries\tWRONG\nAug 2026\tOpenAI\t39.8\n",
-        "adoption_sector": "Date\tSeries\tAdoption rate (%)\nAug 2026\tTechnology\t61.2\n",
-    }
-    adapter = RampAIIndexAdapter(browser=RampBrowserAdapter(lambda scope: payloads[scope]), clock=lambda: NOW)
-    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption")
-    repo = SQLiteStructuredRepository(tmp_path / "partial.sqlite", artifact_root=tmp_path / "artifacts")
-    repo.bootstrap_catalog(StructuredCatalog.load())
-    monkeypatch.setattr(discovery, "build_ingestion", lambda *args, **kwargs: (adapter, request))
-    captured = {}
+def _seed_v1_overall(repo, value=56.13):
+    """A v1 page observation as stored before 2026-11 (regime v1, same entity and month)."""
+    from ats.data.sources import ramp_ai_index as page
 
-    def fake_ingest(repository, source_id, *, query_scope, **kwargs):
-        captured.update(query_scope)
-        return {"status": "succeeded", "run_id": "partial-run"}
+    v1 = parse_adoption_tsv(f"Date\tSeries\tAdoption rate (%)\n2026-08-01\tRamp Overall\t{value}\n",
+                            scope="adoption_overall", fetched_at=NOW, slice_key="v1")
+    for record in v1:
+        record.dimensions["methodology_regime"] = "ramp_ai_index_v1"
 
-    monkeypatch.setattr(discovery, "ingest_source", fake_ingest)
-    result = release_check(repo, source_ids=["ramp_ai_index"], dataset_id="ramp_ai_adoption",
-                           ingest_new=True, force=True, catalog=StructuredCatalog.load())
-    assert result["status"] == "partial"
-    assert set(captured["payloads"]) == {"adoption_overall", "adoption_sector"}
-    repo.close()
+    class _V1:
+        def fetch(self, request):
+            from ats.data.core.structured_models import AdapterArtifact, AdapterBatch, IngestionStatus
+            return AdapterBatch(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
+                                status=IngestionStatus.SUCCEEDED, fetched_at=NOW - timedelta(days=60), records=v1,
+                                artifacts=[AdapterArtifact(artifact_key="v1", payload=b"v1", query_scope={},
+                                                           source_url=page.PAGE_URL, source_version="v1",
+                                                           media_type="text/plain", retention="query_slice",
+                                                           storage_mode="full", pointer=page.PAGE_URL)])
+
+    IngestionPipeline(repo).run(_V1(), FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption"))
 
 
-def test_environment_api_key_does_not_activate_a_fallback(monkeypatch):
-    monkeypatch.setenv("RAMP_DATA_API_KEY", "should-not-be-read")
-    adapter = RampAIIndexAdapter(clock=lambda: NOW)
-    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption", query_scope={})
-    batch = adapter.fetch(request)
-    assert batch.status.value == "export_unreadable"
-    assert "official_web_export_required" in batch.failures[0].message
-
-
-def test_headless_probe_reads_governed_export_inbox(tmp_path):
-    inbox = tmp_path / "ramp_exports"
-    inbox.mkdir()
-    (inbox / "adoption_overall.tsv").write_text(
-        "Date\tSeries\tAdoption rate (%)\nAug 2026\tRamp Overall\t56.13\n",
-        encoding="utf-8",
-    )
-    adapter = RampAIIndexAdapter(export_dir=inbox, clock=lambda: NOW)
-    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
-                           query_scope={"scope": "adoption_overall"})
-    batch = adapter.fetch(request)
-    assert batch.status.value == "succeeded"
-    assert batch.artifacts[0].metadata["export_method"] == "official_clipboard"
-
-
-def test_adapter_fetches_independent_scopes_and_persists_lineage(tmp_path):
-    payload = b"Date\tSeries\tAdoption rate (%)\tMonthly change (pp)\nAug 2026\tRamp Overall\t56.13\t1.1\n"
-    adapter = RampAIIndexAdapter(clock=lambda: NOW)
-    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
-                           query_scope={"payloads": {"adoption_overall": payload.decode(),
-                                                    "adoption_overall_models": payload.decode(),
-                                                    "adoption_sector": "Date\tSector\tAdoption rate (%)\nAug 2026\tTechnology\t55\n"}})
-    batch = adapter.fetch(request)
-    assert batch.status.value == "succeeded"
-    assert len(batch.artifacts) == 3 and len({item.artifact_key for item in batch.artifacts}) == 3
-    repo = SQLiteStructuredRepository(tmp_path / "ramp.sqlite", artifact_root=tmp_path / "artifacts")
-    repo.bootstrap_catalog(StructuredCatalog.load())
-    result = IngestionPipeline(repo).run(adapter, request)
-    assert result["accepted"] >= 3
-    product = DataProducts(structured_repository=repo)
-    snapshot = product.ramp_paid_adoption_snapshot(scope="adoption_overall", period="2026-08")
-    assert snapshot["rows"][0]["value"] == 56.13
-    assert snapshot["lineage"]["artifact_ids"]
-    repo.close()
-
-
-def test_ramp_products_pandas_sql_and_exports_share_observation_identity(tmp_path):
-    payloads = {
-        "adoption_overall": "Date\tSeries\tAdoption rate (%)\tMonthly change (pp)\nAug 2026\tRamp Overall\t56.13\t1.2\n",
-        "adoption_overall_models": "Date\tSeries\tAdoption rate (%)\nAug 2026\tAnthropic\t43.8\n",
-        "adoption_sector": "Date\tSector\tAdoption rate (%)\nAug 2026\tTechnology\t61.2\n",
-        "spend_per_employee_overall": "Date\tMedian\tTop 10%\tTop 1%\nAug 2026\t12.50\t675.60\t7205.13\n",
-        "model_market_share_overall": "Date\tProvider\tModel\tSpend type\tAPI spend share (%)\nAug 2026\tOpenAI\tGPT-5.6 Sol\tAPI\t17.9\n",
-    }
-    repo = SQLiteStructuredRepository(tmp_path / "ramp-products.sqlite", artifact_root=tmp_path / "artifacts")
-    repo.bootstrap_catalog(StructuredCatalog.load())
-    pipeline = IngestionPipeline(repo)
-    adoption_request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
-                                    query_scope={"payloads": payloads})
-    spend_request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_spend",
-                                 query_scope={"payloads": payloads})
-    adoption_result = pipeline.run(RampAIIndexAdapter(clock=lambda: NOW), adoption_request)
-    spend_result = pipeline.run(RampAIIndexAdapter(clock=lambda: NOW), spend_request)
-    assert adoption_result["accepted"] >= 3 and spend_result["accepted"] >= 4
+def test_v2_fred_value_is_not_a_conflict_with_v1_and_products_read_v2_only(tmp_path):
+    repo = _repo(tmp_path)
+    _seed_v1_overall(repo)
+    client = _FredClient(values={"2026-08-01": 55.17, "2026-09-01": 55.83, "2026-10-01": 56.80})
+    result = IngestionPipeline(repo).run(RampAIIndexFredAdapter(client=client, clock=lambda: NOW),
+                                         _fred_request())
+    assert result["status"] == "succeeded"
     products = DataProducts(structured_repository=repo)
-    adoption = products.ramp_paid_adoption_snapshot(scope="adoption_overall", period="2026-08")
-    frame = products.ramp_paid_adoption_snapshot(scope="adoption_overall", period="2026-08", as_frame=True)
-    assert set(frame["observation_id"]) == {row["observation_id"] for row in adoption["rows"]}
-    assert 56.13 in set(frame["value"])
-    with products.read_only_sql() as conn:
-        sql_rows = conn.execute(
-            "SELECT o.observation_id,o.value,o.period,s.dimensions_json "
-            "FROM structured_observations o JOIN structured_series s ON s.series_id=o.series_id "
-            "WHERE s.source_id='ramp_ai_index' AND s.dataset_id='ramp_ai_adoption' "
-            "AND o.period='2026-08-01' AND o.quality_status IN ('accepted','warning','conflict')"
-        ).fetchall()
-    assert {row[0] for row in sql_rows} >= {row["observation_id"] for row in adoption["rows"]}
-    spend = products.ramp_spend_per_employee_series(scope="spend_per_employee_overall")
-    models = products.ramp_model_market_share_series(scope="model_market_share_overall")
-    assert spend["rows"] and models["rows"]
-    assert spend["lineage"]["artifact_ids"] and models["lineage"]["artifact_ids"]
+    v2 = products.ramp_paid_adoption_snapshot(scope="adoption_overall")
+    assert [(row["period"], row["value"]) for row in v2["rows"]] == [
+        ("2026-08-01", 55.17), ("2026-09-01", 55.83), ("2026-10-01", 56.8)]
+    assert {row["quality_status"] for row in v2["rows"]} == {"accepted"}       # not "conflict" with v1
+    assert v2["methodology_regime"] == "ramp_ai_index_v2" and v2["source_ids"] == ["ramp_ai_index_fred"]
+    v1 = products.ramp_paid_adoption_snapshot(scope="adoption_overall", methodology_regime="ramp_ai_index_v1")
+    assert [(row["period"], row["value"]) for row in v1["rows"]] == [("2026-08-01", 56.13)]
+    sizes = products.ramp_paid_adoption_snapshot(scope="adoption_business_size")
+    assert {row["entity_id"] for row in sizes["rows"]} == {"RAMP_SIZE:SMALL", "RAMP_SIZE:MEDIUM", "RAMP_SIZE:LARGE"}
     repo.close()
 
 
-def test_current_public_page_fixture_covers_all_five_scopes_and_excludes_out_of_scope():
-    overall = parse_adoption_tsv(
-        b"Date\tSeries\tAdoption rate (%)\tMonthly change (pp)\tYearly change (pp)\n"
-        b"Aug 2026\tRamp Overall\t56.13\t1.20\t8.50\n",
-        scope="adoption_overall", fetched_at=NOW, slice_key="fixture")
-    vendors = parse_adoption_tsv(
-        b"Date\tSeries\tAdoption rate (%)\nAug 2026\tAnthropic\t43.8\nAug 2026\tOpenAI\t39.8\n",
-        scope="adoption_overall_models", fetched_at=NOW, slice_key="fixture")
-    sectors = parse_adoption_tsv(
-        b"Date\tSector\tAdoption rate (%)\nAug 2026\tTechnology and media\t61.2\n",
-        scope="adoption_sector", fetched_at=NOW, slice_key="fixture")
-    spend = parse_spend_tsv(
-        b"Date\tMedian\tTop 10%\tTop 1%\nAug 2026\t12.50\t675.60\t7205.13\n",
-        fetched_at=NOW, slice_key="fixture")
-    models = parse_model_market_share_tsv(
-        b"Date\tProvider\tModel\tSpend type\tAPI spend share (%)\n"
-        b"Aug 2026\tOpenAI\tGPT-5.6 Sol\tAPI\t17.9\n",
-        fetched_at=NOW, slice_key="fixture")
-    assert overall[0].value == 56.13 and overall[0].period == "2026-08-01"
-    assert {row.entity_id for row in vendors} == {"RAMP_VENDOR:ANTHROPIC", "RAMP_VENDOR:OPENAI"}
-    assert sectors[0].entity_id.startswith("NAICS:")
-    assert {row.entity_id for row in spend} == {"QUANTILE:MEDIAN", "QUANTILE:TOP10", "QUANTILE:TOP1"}
-    assert models[0].dimensions["cohort"] == "Token Spend Management connected businesses"
-    assert set(OUT_OF_SCOPE) == {"business_size", "geographies"}
+def test_token_series_and_discontinued_model_share(tmp_path):
+    repo = _repo(tmp_path)
+    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_spend", query_scope={"payloads": PAGE})
+    assert IngestionPipeline(repo).run(_page_adapter(), request)["status"] == "succeeded"
+    products = DataProducts(structured_repository=repo)
+    makers = products.ramp_token_spend_share_series(scope="token_spend_share_by_maker")
+    assert makers["status"] == "ok" and makers["periods"] == ["2026-10-25", "2026-11-01"]
+    assert {row["maker"] for row in makers["rows"]} == {"Anthropic", "OpenAI", "Google"}
+    gone = products.ramp_model_market_share_series(scope="model_market_share_overall")
+    assert gone["status"] == "scope_discontinued" and gone["rows"] == []
+    spend = products.ramp_spend_per_employee_series()
+    assert spend["status"] == "ok" and spend["methodology_regime"] == "ramp_ai_index_v2"
+    repo.close()
 
 
-def test_ramp_renderer_keeps_five_history_charts_tables_and_sidecars_separate(tmp_path):
-    def adoption(scope, segment, value1, value2, metric="ai.ramp.paid_business_adoption_share"):
-        return {
-            "scope": scope, "rows": [
-                {"period": "2026-07-01", "segment": segment, "value": value1,
-                 "metric_id": metric, "observation_id": f"{scope}-1", "artifact_id": "a"},
-                {"period": "2026-08-01", "segment": segment, "value": value2,
-                 "metric_id": metric, "observation_id": f"{scope}-2", "artifact_id": "a"},
-            ], "period": "2026-08-01", "status": "ok",
-            "manifest": {"snapshot_id": "m"},
-        }
+def test_page_part_status_reports_stale_and_failures(tmp_path):
+    repo = _repo(tmp_path)
+    products = DataProducts(structured_repository=repo)
+    assert products.ramp_page_part_status(as_of=NOW)["status"] == "export_stale"     # never succeeded
+    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_spend", query_scope={"payloads": PAGE})
+    IngestionPipeline(repo).run(_page_adapter(), request)
+    assert products.ramp_page_part_status()["status"] == "ok"
+    later = datetime.now(timezone.utc) + timedelta(days=40)
+    assert products.ramp_page_part_status(as_of=later)["status"] == "export_stale"
+    repo.save_source_check(source_id="ramp_ai_index", dataset_id="ramp_ai_spend", status="export_unreadable",
+                           latest_upstream_identity="", latest_ingested_identity="", latest_available_period="",
+                           candidates=[])
+    assert products.ramp_page_part_status()["status"] == "export_unreadable"
+    repo.close()
 
-    signal = {"status": "ok", "scope_count": 5, "available_scope_count": 5, "slices": {
-        "adoption_overall": adoption("adoption_overall", "Ramp Overall", 55, 56),
-        "adoption_overall_models": {"rows": [
-            {"period": "2026-07-01", "segment": "OpenAI", "value": 38, "metric_id": "ai.ramp.vendor_adoption_share"},
-            {"period": "2026-08-01", "segment": "OpenAI", "value": 40, "metric_id": "ai.ramp.vendor_adoption_share"},
-        ], "period": "2026-08-01", "status": "ok"},
-        "adoption_sector": adoption("adoption_sector", "Information", 79, 81),
+
+# --- report charts -----------------------------------------------------------------------------------------
+
+def test_ramp_renderer_draws_v2_scopes_with_weekly_token_axis(tmp_path):
+    def rows(scope, segment, metric="ai.ramp.paid_business_adoption_share", periods=("2026-09-01", "2026-10-01")):
+        return {"rows": [{"period": period, "segment": segment, "value": 50 + index, "metric_id": metric,
+                          "observation_id": f"{scope}-{index}", "artifact_id": "a"}
+                         for index, period in enumerate(periods)], "status": "ok", "manifest": {"snapshot_id": "m"}}
+
+    token_rows = [{"period": week, "maker": maker, "segment": maker, "value": value,
+                   "metric_id": "ai.ramp.token_spend_share_by_maker"}
+                  for week in ("2026-10-25", "2026-11-01") for maker, value in (("Anthropic", 60), ("OpenAI", 40))]
+    signal = {"status": "ok", "slices": {
+        "adoption_overall": rows("adoption_overall", "Ramp Overall"),
+        "adoption_overall_models": rows("adoption_overall_models", "Mistral AI", "ai.ramp.vendor_adoption_share"),
+        "adoption_sector": rows("adoption_sector", "Utilities"),
+        "adoption_business_size": rows("adoption_business_size", "Small businesses"),
         "spend_per_employee_overall": {"rows": [
-            {"period": "2026-07-01", "quantile": "median", "value": 12, "metric_id": "ai.ramp.ai_spend_per_employee"},
-            {"period": "2026-08-01", "quantile": "median", "value": 12.5, "metric_id": "ai.ramp.ai_spend_per_employee"},
-        ], "period": "2026-08-01", "status": "ok"},
-        "model_market_share_overall": {"rows": [
-            {"period": "2026-07-01", "provider": "OpenAI", "model": "GPT", "value": 18, "metric_id": "ai.ramp.api_spend_share"},
-            {"period": "2026-08-01", "provider": "OpenAI", "model": "GPT", "value": 19, "metric_id": "ai.ramp.api_spend_share"},
-        ], "period": "2026-08-01", "status": "ok"},
+            {"period": "2026-10-01", "quantile": "median", "value": 16, "metric_id": "ai.ramp.ai_spend_per_employee"}],
+            "status": "ok"},
+        "token_spend_share_by_maker": {"rows": token_rows, "status": "ok"},
+        "token_spend_share_by_model": {"rows": [dict(row, model=f"{row['maker']} M",
+                                                     metric_id="ai.ramp.token_spend_share_by_model")
+                                                for row in token_rows], "status": "ok"},
     }}
-    result = render_ramp_charts(
-        packet={"supplemental_signals": {"ramp_paid_adoption": signal}},
-        output_dir=tmp_path,
-    )
-    assert len(result["descriptors"]) == 5
-    assert {item["scope"] for item in result["descriptors"]} == {
-        "adoption_overall", "adoption_overall_models", "adoption_sector",
-        "spend_per_employee_overall", "model_market_share_overall",
-    }
-    for item in result["descriptors"]:
-        assert item["sidecar_path"].endswith(".sidecar.json")
-        assert item["sidecar_path"] != item["png_path"].replace(".png", ".json")
-    assert len(result["tables"]) == 5
+    result = render_ramp_charts(packet={"primary_signals": {"ramp_paid_adoption": signal}}, output_dir=tmp_path)
+    assert {item["scope"] for item in result["descriptors"]} == set(signal["slices"])
+    assert len(result["tables"]) == 7
+    weekly = next(item for item in result["descriptors"] if item["scope"] == "token_spend_share_by_maker")
+    assert weekly["display"]["latest_period"] == "2026-11-01"
 
 
-def test_slice_failure_and_methodology_change_are_isolated():
-    adapter = RampAIIndexAdapter(clock=lambda: NOW)
-    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_adoption",
-                           query_scope={"payloads": {
-                               "adoption_overall": "Date\tSeries\tAdoption rate (%)\nAug 2026\tRamp Overall\t56.13\n",
-                               "adoption_overall_models": "Date\tSeries\tAdoption rate (%)\nAug 2026\tOpenAI\t39.8\n",
-                               "adoption_sector": "Date\tSector\tADOPTION_CHANGED\nAug 2026\tTechnology\t61.2\n",
-                           }})
-    batch = adapter.fetch(request)
-    assert batch.status.value == "partial"
-    assert len(batch.records) >= 1 and batch.failures
-    assert batch.failures[0].status.value in {"export_unreadable", "methodology_drift"}
+# --- runner (needs the optional Playwright dependency) ------------------------------------------------------
+
+def test_runner_exports_each_chart_from_a_local_fixture_page(tmp_path):
+    pytest.importorskip("playwright.sync_api")
+    from ats.data.sources.ramp_browser_runner import CHART_CLICKS, RampBrowserRunner
+
+    buttons = sorted({label for labels in CHART_CLICKS.values() for label in labels})
+    page = tmp_path / "ramp.html"
+    page.write_text("""<html><head><title>Ramp AI Index</title></head><body>
+%s<button id='get'>Get the data.</button>
+<script>
+let chart = [];
+const data = %s;
+document.querySelectorAll('button.nav').forEach(b => b.onclick = () => { chart.push(b.textContent); });
+document.getElementById('get').onclick = () => {
+  const key = chart.slice(-3).join('|');
+  const scope = Object.keys(data).find(s => key.endsWith(data[s].path));
+  navigator.clipboard.writeText(data[scope].text);
+};
+</script></body></html>""" % ("".join(f"<button class='nav'>{label}</button>" for label in buttons),
+                               json.dumps({scope: {"path": "|".join(CHART_CLICKS[scope][-2:]), "text": PAGE[scope]}
+                                           for scope in CHART_CLICKS})), encoding="utf-8")
+    runner = RampBrowserRunner(tmp_path / "inbox", page_url=page.as_uri(), chart_timeout=10)
+    for scope in CHART_CLICKS:
+        assert runner.export(scope) == PAGE[scope].encode()
+        assert (tmp_path / "inbox" / f"{scope}.tsv").read_text(encoding="utf-8") == PAGE[scope]
+        assert json.loads((tmp_path / "inbox" / f"{scope}.json").read_text())["payload_sha256"]
 
 
-def test_isolated_acceptance_chain_release_check_ingest_quality_product_lineage_replay(tmp_path, monkeypatch):
-    payloads = {
-        "adoption_overall": "Date\tSeries\tAdoption rate (%)\tMonthly change (pp)\tYearly change (pp)\nAug 2026\tRamp Overall\t56.13\t1.2\t8.5\n",
-        "adoption_overall_models": "Date\tSeries\tAdoption rate (%)\nAug 2026\tAnthropic\t43.8\n",
-        "adoption_sector": "Date\tSector\tAdoption rate (%)\nAug 2026\tTechnology\t61.2\n",
-        "spend_per_employee_overall": "Date\tMedian\tTop 10%\tTop 1%\nAug 2026\t12.50\t675.60\t7205.13\n",
-        "model_market_share_overall": "Date\tProvider\tModel\tSpend type\tAPI spend share (%)\nAug 2026\tOpenAI\tGPT-5.6 Sol\tAPI\t17.9\n",
-    }
-    inbox = tmp_path / "ramp_exports"
-    inbox.mkdir()
-    for scope, text in payloads.items():
-        (inbox / f"{scope}.tsv").write_text(text, encoding="utf-8")
-    monkeypatch.setenv("ATS_RAMP_OFFICIAL_EXPORT_DIR", str(inbox))
-    catalog = StructuredCatalog.load()
-    assert validate_source_registration("ramp_ai_index", catalog=catalog)["valid"]
-    repo = SQLiteStructuredRepository(tmp_path / "acceptance.sqlite", artifact_root=tmp_path / "artifacts")
-    repo.bootstrap_catalog(catalog)
-    check = release_check(repo, group="ai_adoption", source_ids=["ramp_ai_index"], force=True, catalog=catalog)
-    # The governed export inbox is available in this checkout, so discovery is
-    # successful without an API key or a live browser session.
-    assert check["status"] == "succeeded"
-    pipeline = IngestionPipeline(repo)
-    for dataset_id in ("ramp_ai_adoption", "ramp_ai_spend"):
-        run = pipeline.run(RampAIIndexAdapter(clock=lambda: NOW), FetchRequest(
-            source_id="ramp_ai_index", dataset_id=dataset_id, query_scope={"payloads": payloads}))
-        assert run["status"] in {"succeeded", "partial"}
-    quality = build_quality_report(repo)
-    ramp_reports = {row["dataset_id"]: row for row in quality["datasets"] if row["dataset_id"].startswith("ramp_")}
-    assert set(ramp_reports) == {"ramp_ai_adoption", "ramp_ai_spend"}
-    assert all(row["dimensions"]["coverage"]["status"] == "passed" for row in ramp_reports.values())
-    products = DataProducts(structured_repository=repo)
-    availability = products.availability(dataset="ramp_ai_adoption")
-    assert availability["datasets"] and availability["datasets"][0]["status"] == "queryable"
-    adoption = products.ramp_paid_adoption_snapshot(scope="adoption_overall", period="2026-08")
-    assert adoption["status"] == "ok" and adoption["manifest"]["snapshot_id"]
-    assert products.lineage(adoption["rows"][0]["observation_id"])
-    replay = products.replay_snapshot(adoption["manifest"]["snapshot_id"])
-    assert replay and replay["rows"] and replay["artifacts"]
-    # The layer runner is exercised with the same isolated DataProducts object;
-    # absent Anthropic/BTOS/RPS fixtures remain unavailable without blocking the
-    # Ramp supplemental slices or changing the runner scope.
-    cfg = load_sector_config("ai_hardware")
-    layer = cfg.layer_by_key("L1_app")
-    layer_result = run_registered_layer_observers(
-        sector="ai_hardware", sector_label=cfg.label, layer="L1_app",
-        layer_label=layer.label, observer_refs=layer.evidence_observers,
-        products=products)
-    assert layer_result["status"] == "ok"
-    assert layer_result["packets"][0]["supplemental_signals"]["ramp_paid_adoption"]["status"] in {
-        "ok", "partial", "unavailable"
-    }
-    # Publish only after the isolated source/quality checks pass, then roll back
-    # routing without deleting the governed Ramp artifacts or vintages.
-    manager = ReleaseManager(repo, catalog=catalog, path=tmp_path / "releases.yaml")
-    release = manager.check_source("ramp_ai_index", mode="platform")
-    assert release["ready"] is True
-    assert manager.apply(release, actor="ramp-acceptance")["applied"] is True
-    assert load_release_overlay(tmp_path / "releases.yaml")["sources"]["ramp_ai_index"] == "platform"
-    artifact_ids_before = {row["artifact_id"] for row in replay["artifacts"]}
-    assert manager.rollback(kind="source", target_id="ramp_ai_index", mode="legacy")["applied"] is True
-    assert load_release_overlay(tmp_path / "releases.yaml")["sources"]["ramp_ai_index"] == "legacy"
-    replay_after_rollback = products.replay_snapshot(adoption["manifest"]["snapshot_id"])
-    assert artifact_ids_before == {row["artifact_id"] for row in replay_after_rollback["artifacts"]}
+def test_runner_reports_missing_controls_and_blocked_pages(tmp_path):
+    pytest.importorskip("playwright.sync_api")
+    from ats.data.sources.ramp_browser_runner import RampBrowserRunner
+
+    blocked = tmp_path / "blocked.html"
+    blocked.write_text("<html><head><title>Just a moment...</title></head><body></body></html>", encoding="utf-8")
+    with pytest.raises(RampExportError, match="navigation_blocked"):
+        RampBrowserRunner(tmp_path / "inbox", page_url=blocked.as_uri(), chart_timeout=5).export("adoption_sector")
+    empty = tmp_path / "empty.html"
+    empty.write_text("<html><head><title>Ramp AI Index</title></head><body></body></html>", encoding="utf-8")
+    with pytest.raises(RampExportError, match="control_missing"):
+        RampBrowserRunner(tmp_path / "inbox", page_url=empty.as_uri(), chart_timeout=5).export("adoption_sector")
+
+
+# --- L1 observer: only the page part failing ---------------------------------------------------------------
+
+def test_observer_keeps_fred_scopes_when_only_the_page_part_fails(tmp_path):
+    from ats.agents.evidence.work_adoption import RAMP_SCOPES, _ramp_supplement
+
+    repo = _repo(tmp_path)
+    IngestionPipeline(repo).run(RampAIIndexFredAdapter(client=_FredClient(), clock=lambda: NOW), _fred_request())
+    IngestionPipeline(repo).run(_page_adapter(), FetchRequest(
+        source_id="ramp_ai_index", dataset_id="ramp_ai_spend", query_scope={"payloads": PAGE}))
+    repo.save_source_check(source_id="ramp_ai_index", dataset_id="ramp_ai_spend", status="export_unreadable",
+                           latest_upstream_identity="", latest_ingested_identity="", latest_available_period="",
+                           candidates=[])
+    signal = _ramp_supplement(DataProducts(structured_repository=repo), as_of=None)
+    assert set(signal["slices"]) == set(RAMP_SCOPES)
+    assert signal["status"] == "partial"
+    for scope in ("adoption_overall", "adoption_business_size"):
+        assert signal["slices"][scope]["status"] == "ok"
+    for scope in ("spend_per_employee_overall", "token_spend_share_by_maker", "token_spend_share_by_model"):
+        assert signal["slices"][scope]["status"] == "export_unreadable"
+        assert signal["slices"][scope]["reason"]
+    assert signal["page_part"]["status"] == "export_unreadable"
+    assert any(item.startswith("ramp_page_part_export_unreadable") for item in signal["warnings"])
     repo.close()

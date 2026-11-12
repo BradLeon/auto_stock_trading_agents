@@ -44,6 +44,23 @@ def _candidate_methodology_by_scope(row: dict) -> dict[str, str]:
     }
 
 
+def _candidate_regime_by_scope(row: dict) -> dict[str, str]:
+    try:
+        candidates = json.loads(row.get("candidate_identities_json") or "[]")
+    except (TypeError, ValueError):
+        return {}
+    return {
+        str(item.get("metadata", {}).get("scope")): str(item.get("metadata", {}).get("methodology_regime") or "")
+        for item in candidates
+        if isinstance(item, dict) and item.get("metadata", {}).get("scope")
+    }
+
+
+def _approved_regimes(catalog: StructuredCatalog, source_id: str) -> set[str]:
+    row = (catalog.raw.get("sources") or {}).get(source_id) or {}
+    return {str(item) for item in (row.get("approved_methodology_regimes") or [])}
+
+
 def _is_due(repository, source_id: str, dataset_id: str, *, force: bool) -> bool:
     if force:
         return True
@@ -89,6 +106,23 @@ def discover_source(repository, source_id: str, *, catalog: StructuredCatalog | 
             for scope, fingerprint in current_methodology.items()
             if scope in previous_methodology and previous_methodology[scope] != fingerprint
         }
+        # A change of methodology regime that the catalog explicitly approves (e.g. Ramp v1 -> v2) is a new
+        # measurement, not drift. A fingerprint change inside one regime still blocks.
+        previous_regime = _candidate_regime_by_scope(previous[0])
+        current_regime = {str(item.metadata.get("scope")): str(item.metadata.get("methodology_regime") or "")
+                          for item in result.candidates if item.metadata.get("scope")}
+        approved = _approved_regimes(catalog, source_id)
+        transitions = {
+            scope: {"previous_regime": previous_regime.get(scope, ""), "regime": current_regime.get(scope, "")}
+            for scope in drift
+            if current_regime.get(scope) in approved
+            and current_regime.get(scope) != previous_regime.get(scope, "")
+        }
+        drift = {scope: value for scope, value in drift.items() if scope not in transitions}
+        if transitions:
+            result = result.model_copy(update={
+                "diagnostics": {**result.diagnostics, "approved_regime_transition": transitions},
+            })
         if drift:
             result = result.model_copy(update={
                 "status": DiscoveryStatus.METHODOLOGY_DRIFT,

@@ -597,13 +597,16 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
         "statistical_unit": "Ramp 网络中相关付款企业 cohort",
         "adoption_definition": "当月通过 Ramp corporate card、invoice 或 ACH 等渠道，对 AI 产品/服务发生正向交易的企业占比。",
         "denominator": "Ramp 相关企业 cohort；不是全美企业、员工或席位总数。",
-        "scopes": ["adoption_overall", "adoption_overall_models", "adoption_sector",
-                   "spend_per_employee_overall", "model_market_share_overall"],
-        "sector_definition": "Ramp 页面行业下钻使用 NAICS 分组；不将其与 Anthropic SOC 职业大类混同。",
-        "model_share_cohort": "model_market_share_overall 仅覆盖 Token Spend Management 连接企业的模型归因 API spend。",
+        "scopes": list(RAMP_SCOPES),
+        "methodology_regime": "ramp_ai_index_v2",
+        "sources": "总体、3 家供应商、7 个行业、3 档企业规模来自 FRED 的 Ramp 序列；其余供应商与行业、人均支出、"
+                   "token 花费份额来自 Ramp 页面官方导出。两部分独立更新，一部分失败不影响另一部分。",
+        "sector_definition": "Ramp 行业下钻使用 NAICS 分组；不将其与 Anthropic SOC 职业大类混同。",
+        "business_size_definition": "企业规模分档（小型、中型、大型）由 Ramp 按收入与员工数模型划分。",
+        "token_share_cohort": "token 花费份额仅覆盖 Token Spend Management 连接企业，按周统计；不是企业采用率。",
         "coverage_bias": ["免费工具/个人账户、非 Ramp 付款不会被观察，可能低估。",
                           "Ramp 客户偏向使用企业支付平台的成长型/技术型公司，存在选择偏差。"],
-        "out_of_scope": ["business_size", "geographies"],
+        "out_of_scope": ["geographies", "token_volume", "token_prices", "ai_share_of_business_spend"],
         "interpretation_boundary": "Ramp 与 BTOS/RPS/Anthropic 同为主证据轴，但因主体与分母不同，不跨源平均、相减或补值。",
         "lineage_pointer": "supplemental_signals.ramp_paid_adoption.slices.<scope>.lineage",
     }
@@ -631,8 +634,15 @@ def _observe_ai_production_diffusion_v2(*, as_of, top_n: int, chart_dir: str,
     return packet
 
 
+RAMP_SCOPES = ("adoption_overall", "adoption_overall_models", "adoption_sector", "adoption_business_size",
+               "spend_per_employee_overall", "token_spend_share_by_maker", "token_spend_share_by_model")
+# Scopes served only by the page runner; when that part is failing or stale they are flagged, never shown
+# as current.
+RAMP_PAGE_ONLY_SCOPES = ("spend_per_employee_overall", "token_spend_share_by_maker", "token_spend_share_by_model")
+
+
 def _ramp_supplement(products, *, as_of) -> dict[str, Any]:
-    """Load Ramp slices through DataProducts, preserving each native scope.
+    """Load Ramp v2 slices through DataProducts, preserving each native scope.
 
     This helper is intentionally defensive: older fixtures and deployments may
     not yet contain Ramp rows or methods.  The L1 packet remains valid and the
@@ -640,13 +650,13 @@ def _ramp_supplement(products, *, as_of) -> dict[str, Any]:
     """
     methods = (
         "ramp_paid_adoption_snapshot", "ramp_spend_per_employee_series",
-        "ramp_model_market_share_series",
+        "ramp_token_spend_share_series",
     )
     if not all(hasattr(products, name) for name in methods):
         return {"status": "unavailable", "reason": "ramp_data_product_not_registered", "slices": {}}
     slices: dict[str, dict[str, Any]] = {}
     warnings: list[str] = []
-    for scope in ("adoption_overall", "adoption_overall_models", "adoption_sector"):
+    for scope in ("adoption_overall", "adoption_overall_models", "adoption_sector", "adoption_business_size"):
         try:
             slices[scope] = products.ramp_paid_adoption_snapshot(scope=scope, as_of=as_of)
         except Exception as exc:  # noqa: BLE001 - one scope must not block others
@@ -661,14 +671,22 @@ def _ramp_supplement(products, *, as_of) -> dict[str, Any]:
                                                  "scope": "spend_per_employee_overall",
                                                  "reason": f"{type(exc).__name__}: {exc}", "rows": []}
         warnings.append(f"Ramp spend_per_employee_overall unavailable: {type(exc).__name__}")
-    try:
-        slices["model_market_share_overall"] = products.ramp_model_market_share_series(
-            scope="model_market_share_overall", as_of=as_of)
-    except Exception as exc:  # noqa: BLE001
-        slices["model_market_share_overall"] = {"status": "unavailable",
-                                                 "scope": "model_market_share_overall",
-                                                 "reason": f"{type(exc).__name__}: {exc}", "rows": []}
-        warnings.append(f"Ramp model_market_share_overall unavailable: {type(exc).__name__}")
+    for scope in ("token_spend_share_by_maker", "token_spend_share_by_model"):
+        try:
+            slices[scope] = products.ramp_token_spend_share_series(scope=scope, as_of=as_of)
+        except Exception as exc:  # noqa: BLE001
+            slices[scope] = {"status": "unavailable", "scope": scope,
+                             "reason": f"{type(exc).__name__}: {exc}", "rows": []}
+            warnings.append(f"Ramp {scope} unavailable: {type(exc).__name__}")
+    page = _ramp_page_part(products, as_of=as_of)
+    if page["status"] != "ok":
+        # The FRED part (overall, vendors, sectors, sizes) stays current; page-only scopes keep their real
+        # periods but are marked with the page part's failure instead of being presented as the latest.
+        for scope in RAMP_PAGE_ONLY_SCOPES:
+            item = slices.get(scope) or {}
+            if item.get("status") == "ok":
+                slices[scope] = {**item, "status": page["status"], "reason": page["reason"]}
+        warnings.append(f"ramp_page_part_{page['status']}: {page['reason']}")
     available = [item for item in slices.values() if item.get("status") == "ok"]
     status = "ok" if len(available) == len(slices) else ("partial" if available else "unavailable")
     return {
@@ -676,13 +694,24 @@ def _ramp_supplement(products, *, as_of) -> dict[str, Any]:
         "claim": {"claim_id": RAMP_CLAIM_ID, "claim_text": RAMP_CLAIM_TEXT,
                    "role": "L1 第四个主证据轴；与 BTOS、RPS、Anthropic Economic Index 同等呈现"},
         "slices": slices, "scope_count": len(slices), "available_scope_count": len(available),
+        "page_part": page, "methodology_regime": "ramp_ai_index_v2",
         "warnings": warnings,
         "limitations": [
             "Ramp 数值代表 Ramp 网络中有相关付款的企业 cohort，不是全美企业或员工采用率。",
             "免费工具、个人账户、非 Ramp 付款和客户选择偏差可能造成低估或偏差。",
-            "企业规模与地理图表未纳入首版；不同 slice 不共享分母。",
+            "地理图表未纳入；不同 slice 不共享分母；v1（2026-09 以前采集）与 v2 口径不拼接。",
         ],
     }
+
+
+def _ramp_page_part(products, *, as_of) -> dict[str, Any]:
+    """State of the page runner part, through DataProducts only."""
+    if not hasattr(products, "ramp_page_part_status"):
+        return {"status": "ok", "reason": ""}
+    try:
+        return products.ramp_page_part_status(as_of=as_of)
+    except Exception as exc:  # noqa: BLE001 - diagnostics only
+        return {"status": "ok", "reason": f"page_state_unknown:{type(exc).__name__}"}
 
 
 def _build_v2_context(packet: dict[str, Any]) -> dict[str, Any]:
@@ -722,7 +751,7 @@ def _ramp_context(signal: dict[str, Any], *, compact: bool) -> dict[str, Any]:
         for row in selected:
             safe_rows.append({key: row.get(key) for key in (
                 "observation_id", "artifact_id", "period", "entity_id", "entity_name", "metric_id",
-                "value", "unit", "segment", "quantile", "provider", "model", "spend_type",
+                "value", "unit", "segment", "quantile", "provider", "model", "spend_type", "maker",
                 "provider_monthly_change_pp", "provider_yearly_change_pp", "statistical_unit",
                 "denominator_scope", "technology_scope", "quality_status")})
         out["slices"][scope] = {"status": item.get("status"), "period": item.get("period"),
@@ -740,6 +769,7 @@ def _ramp_level_rows(item: dict[str, Any]) -> list[dict[str, Any]]:
         str(row.get("metric_id", "")).endswith("adoption_share")
         or str(row.get("metric_id", "")).endswith("spend_per_employee")
         or str(row.get("metric_id", "")).endswith("api_spend_share")
+        or ".token_spend_share_by_" in str(row.get("metric_id", ""))
         or not row.get("metric_id")
     )]
 
@@ -748,11 +778,12 @@ def _ramp_series_summary(signal: dict[str, Any], scope: str) -> dict[str, Any]:
     """Summarise one Ramp level series without cross-source arithmetic."""
     item = (signal.get("slices") or {}).get(scope, {})
     rows = _ramp_level_rows(item)
-    periods = sorted({str(row.get("period", ""))[:7] for row in rows if row.get("period")})
+    width = 10 if scope.startswith("token_spend_share") else 7   # weekly scopes keep the exact week
+    periods = sorted({str(row.get("period", ""))[:width] for row in rows if row.get("period")})
     latest = periods[-1] if periods else ""
     prior = periods[-2] if len(periods) >= 2 else ""
-    latest_rows = [row for row in rows if str(row.get("period", ""))[:7] == latest]
-    prior_rows = [row for row in rows if str(row.get("period", ""))[:7] == prior]
+    latest_rows = [row for row in rows if str(row.get("period", ""))[:width] == latest]
+    prior_rows = [row for row in rows if str(row.get("period", ""))[:width] == prior]
     latest_value = latest_rows[0].get("value") if scope == "adoption_overall" and latest_rows else None
     prior_value = prior_rows[0].get("value") if scope == "adoption_overall" and prior_rows else None
     change = (latest_value - prior_value) if latest_value is not None and prior_value is not None else None
@@ -1075,11 +1106,13 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
               "### 第四个主证据轴", "",
               f"> {RAMP_CLAIM_TEXT}", "",
               "Ramp 与 BTOS、RPS、Anthropic Economic Index 同为生产化与应用扩散命题的主证据。它观察企业是否已经发生真实 AI 付款；四个来源主体、分母和技术范围不同，因此同等呈现、分别判断，但不做平均或统一渗透率。", "",
-              f"- 当前状态：`{ramp.get('status', 'unavailable')}`；可用 scope {ramp.get('available_scope_count', 0)}/{ramp.get('scope_count', 5)}。"
+              f"- 当前状态：`{ramp.get('status', 'unavailable')}`；可用 scope {ramp.get('available_scope_count', 0)}/{ramp.get('scope_count', len(RAMP_SCOPES))}；口径 v2。"
               ]
-    ramp_summaries = [_ramp_series_summary(ramp, scope_name) for scope_name in (
-        "adoption_overall", "adoption_overall_models", "adoption_sector",
-        "spend_per_employee_overall", "model_market_share_overall")]
+    page_part = ramp.get("page_part") or {}
+    if page_part.get("status") not in (None, "ok"):
+        lines.append(f"- 网页部分（人均支出、token 花费份额、其余供应商与行业）当前不可用：`{page_part.get('status')}`，"
+                     f"{page_part.get('reason', '')}。总体、供应商、行业与规模采用率来自 FRED，不受影响。")
+    ramp_summaries = [_ramp_series_summary(ramp, scope_name) for scope_name in RAMP_SCOPES]
     overall_summary = next(item for item in ramp_summaries if item["scope"] == "adoption_overall")
     ramp_slices = ramp.get("slices") or {}
     overall_rows = _ramp_level_rows(ramp_slices.get("adoption_overall") or {})
@@ -1119,15 +1152,24 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
             spend_sentence += f"，Top 10% 企业中位数为 ${float(top10):,.2f}"
         spend_sentence += "；这反映采购强度和集中度，不等于员工使用率。"
         lines.append(f"- {spend_sentence}")
-    model_rows = (ramp_slices.get("model_market_share_overall") or {}).get("rows") or []
-    model_period = (ramp_slices.get("model_market_share_overall") or {}).get("period") or ""
-    model_latest = [row for row in model_rows if str(row.get("period", ""))[:7] == str(model_period)[:7]]
-    model_latest.sort(key=lambda row: float(row.get("value") or 0), reverse=True)
-    if model_latest:
-        model_text = "、".join(f"{row.get('provider', '—')}/{row.get('model', '—')} {_pct(row.get('value'))}" for row in model_latest[:3])
-        lines.append(f"- 模型市场份额使用 Token Spend Management cohort 的 API 支出归因，最新期靠前的模型为 {model_text}；它描述支出流向，不是企业采用率。")
+    size_rows = (ramp_slices.get("adoption_business_size") or {}).get("rows") or []
+    size_period = (ramp_slices.get("adoption_business_size") or {}).get("period") or ""
+    size_latest = [row for row in size_rows if str(row.get("period", ""))[:7] == str(size_period)[:7]]
+    if size_latest:
+        size_text = "、".join(f"{row.get('segment', '—')} {_pct(row.get('value'))}"
+                              for row in sorted(size_latest, key=lambda row: float(row.get("value") or 0), reverse=True))
+        lines.append(f"- 按企业规模：{size_text}（{str(size_period)[:7]}）；各档分母不同，不能相加。")
+    maker_item = ramp_slices.get("token_spend_share_by_maker") or {}
+    maker_rows = maker_item.get("rows") or []
+    maker_period = maker_item.get("period") or ""
+    maker_latest = [row for row in maker_rows if str(row.get("period", "")) == str(maker_period)]
+    maker_latest.sort(key=lambda row: float(row.get("value") or 0), reverse=True)
+    if maker_latest and maker_item.get("status") == "ok":
+        maker_text = "、".join(f"{row.get('maker') or row.get('segment', '—')} {_pct(row.get('value'))}" for row in maker_latest[:3])
+        lines.append(f"- token 花费份额（Token Spend Management 连接企业，{maker_period} 当周）靠前的厂商为 {maker_text}；"
+                     f"它描述支出流向，不是企业采用率。")
     lines += ["", "### Ramp 图表", "",
-              "下列五张图分别对应五个固定 scope；只展示源数据实际提供的序列，不把不同主体拼成一个总指标。"]
+              "下列图表与 v2 的七个 scope 一一对应；只展示源数据实际提供的序列，不把不同主体拼成一个总指标。token 花费份额按周绘制，不与月度采用率共轴。"]
     lines += chart_lines("Ramp ")
     lines += ["", "### 与其他来源的使用边界", "",
               "- 若 Ramp adoption 与 BTOS 当前采用广度同向上升，只写‘方向性印证’，不计算 Ramp−BTOS 差值、平均值或加权统一采用率。",
@@ -1149,15 +1191,17 @@ def _render_ai_production_diffusion_v2(packet: dict[str, Any]) -> str:
               "- 条件生产化流量份额 = 达标单元 Usage Share ÷ 已发布单元 Usage Share。",
               "- Anthropic 达标标准：Work Use Share ≥80%、Automation Share ≥80%、Directive Share ≥50%，且 Usage Share >0。",
               "- BTOS、RPS 和 Anthropic 的主体、分母、地区与频率不同，只作方向性印证。",
-              "", "### Ramp 五个固定观测量：指标与数据注释", "",
-              "Ramp 来源：[Ramp AI Index](https://ramp.com/data/ai-index#adoption#overall)。以下 scope 保持独立统计，不与 BTOS、RPS 或 Anthropic 做加权融合。",
+              "", "### Ramp v2 七个观测量：指标与数据注释", "",
+              "Ramp 来源：[FRED 上的 Ramp AI Index 序列](https://fred.stlouisfed.org/release?rid=23) 与 [Ramp AI Index 页面](https://ramp.com/data/ai-index) 官方导出。以下 scope 保持独立统计，不与 BTOS、RPS 或 Anthropic 做加权融合。",
               "", "|scope|指标说明与公式|参与统计维度/数量|最新期间|", "|---|---|---|---|"]
     scope_questions = {
         "adoption_overall": "付费企业采用广度 = 当月对 AI 产品/服务发生正向 Ramp 付款的企业数 ÷ Ramp 相关企业 cohort 企业数 ×100%。",
         "adoption_overall_models": "模型供应商采用率 = 对相应 vendor 发生正向付款的 Ramp 企业数 ÷ 该 cohort 企业数 ×100%；一家企业可同时采用多个 vendor，不能相加为 100%。",
         "adoption_sector": "行业采用率 = 各 NAICS 行业中发生正向 AI 付款的企业数 ÷ 该行业 Ramp 企业 cohort 企业数 ×100%；行业曲线不是总体的加总分解。",
         "spend_per_employee_overall": "AI 支出/员工 = Ramp 企业 AI 月支出 ÷ 员工数的 source-native 分位数（Median、Top 10%、Top 1%）；不是平均值。当前公开导出未提供 Top 30%，不插值。",
-        "model_market_share_overall": "模型 API 支出份额 = Token Spend Management 连接企业中归因到 provider/model 的 API spend ÷ 该 cohort API spend ×100%；不是全 Ramp 企业采用率。",
+        "adoption_business_size": "企业规模采用率 = 各规模档中发生正向 AI 付款的企业数 ÷ 该档 Ramp 企业数 ×100%（来自 FRED）。",
+        "token_spend_share_by_maker": "按厂商的 token 花费份额 = 当周归因到该厂商模型的 token 花费 ÷ Token Spend Management 连接企业当周 token 总花费 ×100%。",
+        "token_spend_share_by_model": "按模型的 token 花费份额 = 当周归因到该模型的 token 花费 ÷ 同一 cohort 当周 token 总花费 ×100%。",
     }
     for item in ramp_summaries:
         scope_name = item["scope"]

@@ -141,38 +141,58 @@ class DataProducts:
         self, *, scope: str = "adoption_overall", period: str = "",
         periods: list[str] | None = None, as_of: datetime | None = None,
         include_vintages: bool = False, as_frame: bool = False,
+        methodology_regime: str = "ramp_ai_index_v2",
     ) -> dict:
-        """Ramp paid-business adoption, kept separate from survey and traffic axes."""
+        """Ramp paid-business adoption, kept separate from survey and traffic axes (v2 unless asked)."""
         from .ramp_ai_index import ramp_paid_adoption_snapshot
 
         return ramp_paid_adoption_snapshot(self, scope=scope, period=period,
                                            periods=periods, as_of=as_of,
                                            include_vintages=include_vintages,
-                                           as_frame=as_frame)
+                                           as_frame=as_frame, methodology_regime=methodology_regime)
 
     def ramp_spend_per_employee_series(
         self, *, scope: str = "spend_per_employee_overall", quantiles: list[str] | None = None,
         period: str = "", as_of: datetime | None = None, include_vintages: bool = False,
-        as_frame: bool = False,
+        as_frame: bool = False, methodology_regime: str = "ramp_ai_index_v2",
     ) -> dict:
         from .ramp_ai_index import ramp_spend_per_employee_series
 
         return ramp_spend_per_employee_series(self, scope=scope, quantiles=quantiles,
                                               period=period, as_of=as_of,
                                               include_vintages=include_vintages,
-                                              as_frame=as_frame)
+                                              as_frame=as_frame, methodology_regime=methodology_regime)
 
     def ramp_model_market_share_series(
         self, *, scope: str = "model_market_share_overall", period: str = "",
         provider: str = "", model: str = "", as_of: datetime | None = None,
         include_vintages: bool = False, as_frame: bool = False,
+        methodology_regime: str = "ramp_ai_index_v2",
     ) -> dict:
+        """v1 only; under v2 it returns `scope_discontinued` (replaced by ramp_token_spend_share_series)."""
         from .ramp_ai_index import ramp_model_market_share_series
 
         return ramp_model_market_share_series(self, scope=scope, period=period,
                                               provider=provider, model=model, as_of=as_of,
                                               include_vintages=include_vintages,
-                                              as_frame=as_frame)
+                                              as_frame=as_frame, methodology_regime=methodology_regime)
+
+    def ramp_token_spend_share_series(
+        self, *, scope: str = "token_spend_share_by_maker", period: str = "", maker: str = "",
+        as_of: datetime | None = None, include_vintages: bool = False, as_frame: bool = False,
+        methodology_regime: str = "ramp_ai_index_v2",
+    ) -> dict:
+        from .ramp_ai_index import ramp_token_spend_share_series
+
+        return ramp_token_spend_share_series(self, scope=scope, period=period, maker=maker, as_of=as_of,
+                                             include_vintages=include_vintages, as_frame=as_frame,
+                                             methodology_regime=methodology_regime)
+
+    def ramp_page_part_status(self, *, as_of: datetime | None = None) -> dict:
+        """Whether the Ramp page runner part is current; the FRED part is reported separately."""
+        from .ramp_ai_index import ramp_page_part_status
+
+        return ramp_page_part_status(self, as_of=as_of)
 
     def ramp_comparability(self, *, as_of: datetime | None = None) -> dict:
         from .ramp_ai_index import ramp_comparability

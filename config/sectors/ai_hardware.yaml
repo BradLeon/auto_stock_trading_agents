@@ -108,7 +108,7 @@ layers:
     # 它们是"理想情况下该问什么"，写的时候没有让取数可行性参与，证人与数据都对不上。
     # L1 现在问的，就是下面三个证据观察器（`evidence_observers`）本来就在回答的三个问题，用的是它们已经在读的
     # 受治理数据集——没有新取数：
-    #   生产化扩散  BTOS（ai_enterprise_adoption_us）· RPS（ai_worker_adoption_us）· Ramp（ramp_ai_adoption）·
+    #   生产化扩散  BTOS（ai_enterprise_adoption_us）· RPS（ai_worker_adoption_us）· Ramp（ramp_ai_adoption，v2：FRED 为主、网页补增量）·
     #               Anthropic Economic Index（ai_work_adoption）
     #   商业化      frontier_ai_labs_revenue（Sacra / TickerTrends）· OpenRouter 路由用量
     #   原始能力    frontier_ai_capability_benchmarks · frontier_ai_public_model_cards

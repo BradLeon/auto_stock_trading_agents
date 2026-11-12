@@ -125,7 +125,10 @@ class CentralAdmission:
             if row["source_id"] != batch.source_id and row["period"] == record.period
             and row["unit"] == record.unit and row["currency"] == record.currency
             and row["period_basis"] == record.period_basis
-            and row["adjustment"] == record.adjustment]
+            and row["adjustment"] == record.adjustment
+            # Two methodology regimes of one provider (e.g. Ramp v1 page exports vs the v2 restatement)
+            # are different measurements, not disagreeing sources of the same one.
+            and _same_regime(row, record)]
         dataset_quality = json.loads(dataset.get("quality_json", "{}")) if dataset else {}
         reconciliation_tolerance = float(
             dataset_quality.get("reconciliation_relative_tolerance", 1e-9))
@@ -172,6 +175,24 @@ class CentralAdmission:
         return AdmissionResult(candidate_id=candidate_id, status="accepted",
                                observation_id=vintage.id, metric_id=metric_id,
                                created=vintage.created)
+
+
+def _row_dimensions(row: dict) -> dict:
+    value = row.get("dimensions")
+    if isinstance(value, dict):
+        return value
+    try:
+        value = json.loads(row.get("dimensions_json") or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _same_regime(row: dict, record: NativeRecord) -> bool:
+    """False only when both sides declare a methodology regime and the regimes differ."""
+    left = str(_row_dimensions(row).get("methodology_regime") or "")
+    right = str((record.dimensions or {}).get("methodology_regime") or "")
+    return not (left and right and left != right)
 
 
 def _is_transport_error(exc: BaseException) -> bool:

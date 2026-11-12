@@ -22,6 +22,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Headless browser for the Ramp AI Index page runner (upgrade-ramp-ai-index-v2). After installing, run
+# `playwright install chromium` once. Without it only the page part of Ramp fails (browser_not_installed);
+# the FRED part does not need it.
+ramp-browser = [
+    "playwright>=1.47",
+]
 # Installed as phases land; kept optional so Phase 1/2 stay lightweight.
 data = [
     "yfinance>=0.2.40",

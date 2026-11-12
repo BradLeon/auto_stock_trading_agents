@@ -71,7 +71,7 @@
 ## 3. 浏览器 runner
 
 - [x] 3.1 在 `pyproject.toml` 增加可选依赖组 `ramp-browser`（`playwright`）；代码在未安装时能正常导入，并报 `browser_not_installed`。验证：未安装环境下 Ramp 来源的 release-check 返回 `export_unreadable` 和该原因码，FRED 来源测试不受影响。
-- [ ] 3.2 实现 runner（design.md D2）：
+- [x] 3.2 实现 runner（design.md D2）：
   - 注入 `writeText` 截获脚本；
   - 按可见按钮切换 5 个图表，Token spend 切到 Shares；
   - 逐个点击 “Get the data”；
@@ -104,7 +104,7 @@
 
 ## 5. 安装与生产首采（每步需你确认）
 
-- [ ] 5.1 经你确认后安装 `playwright` 与 Chromium（约 150 MB）。验证：`playwright --version` 正常，`.venv` 中可导入。
+- [x] 5.1 经你确认后安装 `playwright` 与 Chromium（约 150 MB）。验证：`playwright --version` 正常，`.venv` 中可导入。
 - [ ] 5.2 生产执行一次 `ats data release-check --source ramp_ai_index_fred --ingest-new --force-check`。验证：14 条序列入库，`RAMPAIALL` 最新期间为 2026-10，值与网页一致；记录写入本 change 的 `verification.md`。
 - [ ] 5.3 生产执行一次 `ats data release-check --source ramp_ai_index --ingest-new --force-check`（无头 runner）。验证：
   - 5 个图表导出成功或给出明确原因码；
@@ -124,4 +124,5 @@
 - 设计外的一处必要改动：入库时的跨源冲突比对（`pipelines/structured/ingestion.py`）改为只比同一 `methodology_regime`。否则 FRED 的 v2 值会与库里 v1 的同月值比对，被标成 `conflict`。这与规格中 “v1 与 v2 不拼接” 一致。
 - 实测发现：Volumes 模式下单个模型的指数最高就是 100（领先模型被定为 100），所以 Volumes 的判据改为 “某周各列合计超过 101”，而不是 “单值超过 100”。
 - `test_evidence_ai_production_workflow` 的假数据产品按 v2 接口更新：`ramp_model_market_share_series` 换为 `ramp_token_spend_share_series`。
+- 2026-11-12 合入 feat/rebuild_workflow_dataflow（c0c5ce1），dispatcher、serve 已重启。用户确认后安装：`uv pip install playwright`（1.65.1，附带 greenlet）并 `playwright install chromium`；uv.lock 已用 `uv lock` 更新（只新增 playwright、greenlet 与 ramp-browser 组）。实际占用约 610 MB（完整 Chromium 387 MB + headless shell 219 MB），比 proposal 估计的 150 MB 大。`tests/test_ramp_ai_index.py` 26 passed、1 skipped（跳过的是“未安装浏览器”场景），两个本地夹具页面 runner 测试通过，据此勾 3.2、5.1。
 

@@ -72,9 +72,9 @@
 
 | 来源 | 提供方与入口 | 取数机制 | 鉴权/成本 | 更新节奏 | 调度任务 |
 |---|---|---|---|---|---|
-| `us_census_btos` | 美国普查局 BTOS Core API 与历史下载<br>`census.gov/hfp/btos/api`、`/data_downloads` | HTTP 拉取官方 API 与历史文件；只接受 2025-11-17 起「any business function」新口径 | 免费、免鉴权 | 双周（调查波次） | `ai_adoption_weekly_release_check`（每周，组 `ai_adoption`） |
-| `rps_genai_adoption` | Real-Time Population Survey via FRED<br>`fredgraph.csv?id=`、`graph/api/series/` | 5 条白名单 FRED 系列的公开 CSV + 系列元数据交叉校验 | 免费、免鉴权 | 季度 | 同上 |
-| `anthropic_economic_index` | Anthropic Economic Index<br>`huggingface.co/datasets/Anthropic/EconomicIndex` | 先解析 HF 仓库解析到 commit SHA，再**按 commit 固定**下载；只持久化确定性 Global SOC/O*NET 查询切片 | 免费、免鉴权 | release_event（不定期发布） | 同上 |
+| `us_census_btos` | 美国普查局 BTOS Core API 与历史下载<br>`census.gov/hfp/btos/api`、`/data_downloads` | HTTP 拉取官方 API 与历史文件；只接受 2025-11-17 起「any business function」新口径 | 免费、免鉴权 | 双周（调查波次） | `us_census_btos_weekly`（每周五） |
+| `rps_genai_adoption` | Real-Time Population Survey via FRED<br>`fredgraph.csv?id=`、`graph/api/series/` | 5 条白名单 FRED 系列的公开 CSV + 系列元数据交叉校验 | 免费、免鉴权 | 季度 | `rps_genai_adoption_weekly`（每周五） |
+| `anthropic_economic_index` | Anthropic Economic Index<br>`huggingface.co/datasets/Anthropic/EconomicIndex` | 先解析 HF 仓库解析到 commit SHA，再**按 commit 固定**下载；只持久化确定性 Global SOC/O*NET 查询切片 | 免费、免鉴权 | release_event（不定期发布） | `anthropic_economic_index_weekly`（每周五） |
 | `ramp_ai_index` | Ramp AI Index 公共图表<br>`ramp.com/data/ai-index` | 官方 `Get the data` 导出的 TSV（浏览器落盘到 `var/data/ramp_exports/<scope>.tsv`）；**不用截图/OCR/猜隐藏 URL** | 免费、免账户 | 月度 | `ramp_ai_index_p10d_probe`（每 10 天） |
 | `sacra_public_company_profiles` | Sacra 公开公司页<br>`sacra.com/c/openai/`、`sacra.com/c/anthropic/` | 每轮每页**只探测一次**，原始 HTML 存为 constrained snapshot；后续解析/入库/报告离线复用该 artifact。静态 HTML 缺 Revenue 段时允许单次受控 browser snapshot 回退 | 免费、免登录；**明令禁止**付费 API 与 MCP | 每 7 天 | `frontier_ai_labs_revenue_p7d_refresh` |
 | `tickertrends_public_research` | TickerTrends 公开研究文<br>`blog.tickertrends.io/api/v1/posts/anthropic-vs-openai-arr-tracking` | 每周期一次公开 Substack post API；判变依据是准入数值的**语义指纹**而非页面字节（`body_html` 每次重新序列化）。离线路线仍保留冻结 seed `tests/fixtures/.../tickertrends_anthropic_vs_openai_arr_tracking.json` | 免费、免鉴权；**禁止**付费 API 与 MCP | 每 7 天（与 Sacra 同一研究对象，共用发现组） | `frontier_ai_labs_revenue_p7d_refresh`（每 7 天，组 `frontier_ai_labs_revenue`） |
@@ -110,10 +110,12 @@
 | `frontier_ai_capability` | 事件驱动（新模型/新成绩） | 每 7 天；4 个 job 分别 07:20 / 07:25 / 07:27 / 07:35 UTC；**热度分级已取消** | — | 2026-09-18 |
 | `sacra_public_company_profiles` | 不定期更新页面 | 每 7 天 07:50 UTC | `freshness_hours_max: 336`（14 天） | 2026-07（月）+ 2026-Q2 |
 | `ramp_ai_index` | 月 | 每 10 天 07:30 UTC | — | 2026-08 |
-| `us_census_btos` | 双周 | 周 07:30 UTC（组内） | — | 参考窗至 2026-08-23 |
-| `anthropic_economic_index` | 不定期发布 | 周 07:30 UTC（组内） | — | 2026-06-26 |
-| `rps_genai_adoption` | 季度 | 周 07:30 UTC（组内） | — | 2026-Q2 |
+| `us_census_btos` | 双周 | 每周五 08:10 UTC（`us_census_btos_weekly`） | `freshness_slo_days: 10` | 参考窗至 2026-08-23 |
+| `anthropic_economic_index` | 不定期发布 | 每周五 08:20 UTC（`anthropic_economic_index_weekly`） | `freshness_slo_days: 10` | 2026-06-26 |
+| `rps_genai_adoption` | 季度 | 每周五 08:15 UTC（`rps_genai_adoption_weekly`） | `freshness_slo_days: 10` | 2026-Q2 |
 | `tickertrends_public_research` | 不定期更新文章 | 每 7 天 07:50 UTC（与 Sacra 同组） | — | 2026-06 |
+
+> 2026-11-12：组任务 `ai_adoption_weekly_release_check` 在 2026-10-03 改用 launchd 控制器时未迁移（新格式要求逐源声明），BTOS/RPS/AEI 自 2026-09-10 起再无定时采集；现按来源拆为三个周任务补回。
 
 时效跨度极大：最高频（OpenRouter 与 frontier 能力均为 7 天）与最低频（RPS 季度）相差约 13 倍。**证据层不做跨频率插值或前向填充**，期间不足即返回 `insufficient_history`，因此低频率来源天然只能支撑较弱的趋势结论。
 

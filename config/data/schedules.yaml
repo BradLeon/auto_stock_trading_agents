@@ -30,6 +30,56 @@ structured:
         attempts: 3
         backoff_seconds: [60, 300, 900]
       semantics: compare reference_period/methodology_fingerprint/payload_sha256; append new periods or revisions, never overwrite
+    # 2026-11-12 (user): the other three L1 production-adoption sources had no job at all, so the L1 observer kept
+    # reading the one manual load of 2026-09-10. All three discover the newest upstream release over the network
+    # (Census BTOS API, FRED series metadata, the Hugging Face repository listing) and only download on a new
+    # release, so a weekly check is cheap even for the quarterly / irregular ones. Friday mornings UTC: BTOS
+    # publishes every other Thursday; all three land before the 09:00 L1 observer run.
+    us_census_btos_weekly:
+      enabled: true
+      source: us_census_btos
+      datasets: [ai_enterprise_adoption_us]
+      schedule: weekly
+      weekday: friday
+      at: "08:10"
+      timezone: UTC
+      command: ats data release-check --source us_census_btos --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: biweekly survey release; a new release appends its periods, an unchanged release is no_change
+    rps_genai_adoption_weekly:
+      enabled: true
+      source: rps_genai_adoption
+      datasets: [ai_worker_adoption_us]
+      schedule: weekly
+      weekday: friday
+      at: "08:15"
+      timezone: UTC
+      command: ats data release-check --source rps_genai_adoption --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: quarterly FRED series; weekly check catches the release within a week, revisions become new vintages
+    anthropic_economic_index_weekly:
+      enabled: true
+      source: anthropic_economic_index
+      datasets: [ai_work_adoption]
+      schedule: weekly
+      weekday: friday
+      at: "08:20"
+      timezone: UTC
+      command: ats data release-check --source anthropic_economic_index --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: irregular commit-pinned releases; discovery reads repository metadata only, CSVs are downloaded once per new complete release
     openrouter_rankings_p7d_ingest:
       enabled: true
       source: openrouter_rankings

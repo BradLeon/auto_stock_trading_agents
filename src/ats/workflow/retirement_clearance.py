@@ -120,19 +120,24 @@ class TombstoneVerdict:
 
 _CHANGES = Path(__file__).resolve().parents[3] / "openspec" / "changes"
 _G0_CHANGE = "retire-legacy-and-migration-tooling"
+_TRADE_PATH_CHANGE = "switch-trade-path-and-retire-r5"
+
+
+def _change_record_path(change: str, filename: str, changes: Path = _CHANGES) -> Path:
+    """A gate record inside an OpenSpec change: its active folder, or its dated archive folder once archived.
+
+    Both gate changes were archived on 2026-11-12 (`archive/2026-11-12-<change>`); the signed records moved with
+    them and are still the gates' evidence.
+    """
+    active = changes / change / filename
+    if active.exists():
+        return active
+    archived = sorted((changes / "archive").glob(f"????-??-??-{change}/{filename}"))
+    return archived[-1] if archived else active
 
 
 def _g0_verification_path(changes: Path = _CHANGES) -> Path:
-    """The G0 record of the retirement change: its active folder, or its dated archive folder once archived.
-
-    The change was archived on 2026-11-12 (`archive/2026-11-12-retire-legacy-and-migration-tooling`); the signed
-    record moved with it and is still the gate's evidence.
-    """
-    active = changes / _G0_CHANGE / "verification.md"
-    if active.exists():
-        return active
-    archived = sorted((changes / "archive").glob(f"????-??-??-{_G0_CHANGE}/verification.md"))
-    return archived[-1] if archived else active
+    return _change_record_path(_G0_CHANGE, "verification.md", changes)
 
 
 G0_VERIFICATION = _g0_verification_path()
@@ -185,8 +190,7 @@ def read_g0_gate(path: Path | str | None = None) -> GateStatus:
     return GateStatus("G0", True, "all items verified and the G0 conclusion is signed", len(rows), counts, (), True)
 
 
-TRADE_PATH_OBSERVATION = Path(__file__).resolve().parents[3] / "openspec" / "changes" / \
-    "switch-trade-path-and-retire-r5" / "observation.md"
+TRADE_PATH_OBSERVATION = _change_record_path(_TRADE_PATH_CHANGE, "observation.md")
 
 
 def read_trade_path_gate(path: Path | str | None = None) -> GateStatus:

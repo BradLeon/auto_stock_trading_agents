@@ -403,3 +403,15 @@ def test_g0_default_path_points_at_an_existing_record():
     from ats.workflow import retirement_clearance as rc
 
     assert rc.G0_VERIFICATION.exists()
+
+
+def test_trade_path_record_is_found_in_the_dated_archive_folder(tmp_path):
+    from ats.workflow import retirement_clearance as rc
+
+    changes = tmp_path / "changes"
+    archived = changes / "archive" / "2026-11-12-switch-trade-path-and-retire-r5" / "observation.md"
+    archived.parent.mkdir(parents=True)
+    archived.write_text("**窗口结论签字：** 通过\n", encoding="utf-8")
+    path = rc._change_record_path(rc._TRADE_PATH_CHANGE, "observation.md", changes)
+    assert path == archived
+    assert rc.read_trade_path_gate(path).is_open is True

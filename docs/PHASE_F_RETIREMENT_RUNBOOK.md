@@ -40,7 +40,7 @@ G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/c
 
 ### 〇·二、R5 的接续方式（任务 9.2）
 
-R5 的 20 条由 `openspec/changes/switch-trade-path-and-retire-r5` 接手。门 `trade_path_cutover` 在那个 change 的 5.4（观察窗口结论由你签字）时才记为已满足，之后才按下表逐条退役；本 change 不替它开门。
+R5 的 20 条由 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5` 接手。门 `trade_path_cutover` 在那个 change 的 5.4（观察窗口结论由你签字）时才记为已满足，之后才按下表逐条退役；本 change 不替它开门。
 
 | R5 条目 | 接手任务（switch-trade-path-and-retire-r5） |
 |---|---|

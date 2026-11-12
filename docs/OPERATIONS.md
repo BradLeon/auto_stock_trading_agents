@@ -196,7 +196,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 
 ## 7. 交易路径（已切换 S1–S5；实盘锁定）
 
-- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 改读新路径（S1；读路由表本身已于 2026-11-11 随 R5d 删除，读取只按声明与业务 scope），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 18:00 纽约；11-02 起由 16:30 改为 18:00）。**`chief-daily` 已启用**（S5，2026-11-02；11-03 由 09:00 改为 09:45 纽约，台北冬令时 22:45，因为订单规范化只接受常规时段内的实时买卖价，开盘前的周期过不了，见 blockers B9）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
+- 切换进度（2026-11-01）：Chief、风控、Trader、Clerk 改读新路径（S1；读路由表本身已于 2026-11-11 随 R5d 删除，读取只按声明与业务 scope），决策记录读取方读审计表（S2），命令行审批与账本成对切换的代码已生效（S3），**`clerk-daily` 已启用**（S4，交易日 18:00 纽约；11-02 起由 16:30 改为 18:00）。**`chief-daily` 已启用**（S5，2026-11-02；11-03 由 09:00 改为 09:45 纽约，台北冬令时 22:45，因为订单规范化只接受常规时段内的实时买卖价，开盘前的周期过不了，见 blockers B9）。批准时重审存下来的报价只验绑定，不再按 30 秒判过期（B1，`5f38b8b`）；Clerk 的账本读取各限时 30 秒、对账读失败的窗口记 `failed` 可重跑（B4，`d0da96a`）。记录见 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5/blockers-2026-11-01.md`。
 - Chief 每个交易日由 `chief-daily` 自动跑一次；也可手动运行：
 
   ```bash
@@ -212,7 +212,7 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 ### 7.1 切换后的操作
 
 > **状态：** S1–S5 已生效；`clerk-daily` 第一次定时运行已观察到（11-03 18:00 纽约 = 台北 11-04 07:00，completed，日报已生成）；`chief-daily` 第一次定时运行（11-03 09:45 纽约）因模型输出被截断以 `manual_review` 结束（B10，已修），修复后由手动运行验证了完整链路（建周期、风控驳回一次后修订、停在 `pending_approval`），定时路径的第二次运行见 11-04 09:45 纽约。
-> 各步见 `openspec/changes/switch-trade-path-and-retire-r5/design.md` D3。
+> 各步见 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5/design.md` D3。
 
 **现状事实（切换后）**
 
@@ -267,7 +267,7 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 
 **切换期的边界开关已不再可查。** `ats cutover` 已随 r5 8.4 退役（只剩提示桩）；它显示的六个边界开关从未接线，本就不是权威状态，
 读路由与切换控制库已在 R5d（2026-11-11）停用，库文件留作历史只读。真实的状态看：数据产品用 `ats data health`，
-调度负责人用 `ats dispatch owner-log`，切换发生在哪个提交见 `openspec/changes/switch-trade-path-and-retire-r5/verification.md`。
+调度负责人用 `ats dispatch owner-log`，切换发生在哪个提交见 `openspec/changes/archive/2026-11-12-switch-trade-path-and-retire-r5/verification.md`。
 
 **怎么读 `ats dispatch owner-log`。** 它是"每个工作流的定时触发由谁负责"的审计日志：负责人要么是 `legacy`（旧的 launchd 触发），要么是 `dispatcher`。
 每一条是一次切换或回退，看这几个字段就够了：`workflow`（哪个工作流）、`action`（`switch` 切过去 / `rollback` 切回）、`from_owner → to_owner`、`at`（时间）。

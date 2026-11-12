@@ -122,7 +122,7 @@ ats dispatch owner-log [--workflow <workflow_id>]
 
 > 已知技术债：库里「已停用」仍存成内部值 `legacy`（只改了对外的命令与文档用语）。长期做法是取消这个开关，
 > 由 `research_schedules.yaml` 的 `enabled: false` / `event_triggers` 决定是否运行；见
-> `openspec/changes/retire-legacy-and-migration-tooling/verification.md` 的「上线后待办」。
+> `openspec/changes/archive/2026-11-12-retire-legacy-and-migration-tooling/verification.md` 的「上线后待办」。
 
 - 一次事务同时改该工作流的模板行与所有标的行，不会出现一半新一半旧。
 - 有 `running` 认领时拒绝切换；`failed/pending` 认领须带理由作废；`owner-log` 只增不改。

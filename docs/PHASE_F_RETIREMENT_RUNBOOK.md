@@ -10,7 +10,7 @@
 
 ## 〇、2026-10-27 更新：分组、依赖与门（退役变更 retire-legacy-and-migration-tooling）
 
-G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/changes/retire-legacy-and-migration-tooling/verification.md`，78 项全部通过）。从这一天起，登记处不再只是一张平铺的清单，而是带批次、依赖与门的退役计划。**下面第一至第九节保留 2026-10-17 的原文与快照，数字以本节为准。**
+G0（新路径人工核验）已于 **2026-10-27 通过并签字**（`openspec/changes/archive/2026-11-12-retire-legacy-and-migration-tooling/verification.md`，78 项全部通过）。从这一天起，登记处不再只是一张平铺的清单，而是带批次、依赖与门的退役计划。**下面第一至第九节保留 2026-10-17 的原文与快照，数字以本节为准。**
 
 **登记处现在是 41 条**（10-27 起 `task_projections.legacy_columns`、`evidence_fact_projections.legacy_observation_id` 移出待退项：前者是信息分析师的抽取缓存，后者是事实投影的血缘键，都在用）（`ats retirement decide` 会逐条列出）：
 

@@ -40,9 +40,24 @@ def load_fred_series(catalog=None) -> dict[str, dict[str, str]]:
             for series_id, spec in (row.get("fred_series") or {}).items()}
 
 
+def _page_entity(spec: dict[str, str]) -> str:
+    """The entity id the page parser gives the same series when the page uses another name."""
+    from .ramp_ai_index import _adoption_entity
+
+    return _adoption_entity(spec["scope"], spec["page_segment"])[0]
+
+
+def fred_page_aliases(catalog=None) -> dict[tuple[str, str], str]:
+    """(scope, page entity id) -> FRED entity id, for series the page names differently (`page_segment`)."""
+    return {(spec["scope"], _page_entity(spec)): spec["entity_id"]
+            for spec in load_fred_series(catalog).values() if spec.get("page_segment")}
+
+
 def fred_coverage(catalog=None) -> set[tuple[str, str]]:
-    """(scope, entity_id) pairs FRED publishes; the page runner must not store these."""
-    return {(spec["scope"], spec["entity_id"]) for spec in load_fred_series(catalog).values()}
+    """(scope, entity_id) pairs FRED publishes, under FRED's and the page's names; the page must not store these."""
+    series = load_fred_series(catalog).values()
+    return ({(spec["scope"], spec["entity_id"]) for spec in series}
+            | set(fred_page_aliases(catalog)))
 
 
 def _dimensions(spec: dict[str, str], *, period: str, series_id: str) -> dict[str, Any]:

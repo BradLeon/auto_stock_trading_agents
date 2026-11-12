@@ -389,6 +389,8 @@ sources:
     discovery_group: ai_adoption
     approved_methodology_regimes: [ramp_ai_index_v2]
     internal_request_budget: {concurrency: 1, requests_per_run: 28, timeout_seconds: 60, max_file_bytes: 10485760, retry_attempts: 3}
+    # `page_segment`: the same series under the page's own name (values identical over 40 months, checked
+    # 2026-11-12), so the page runner recognises it as covered and only cross-checks it.
     fred_series:
       RAMPAIALL: {scope: adoption_overall, entity_id: RAMP_OVERALL, segment: Ramp Overall}
       RAMPAIANTHROPIC: {scope: adoption_overall_models, entity_id: "RAMP_VENDOR:ANTHROPIC", segment: Anthropic}
@@ -396,11 +398,11 @@ sources:
       RAMPAIXAI: {scope: adoption_overall_models, entity_id: "RAMP_VENDOR:XAI", segment: xAI}
       RAMPAICONSTRUCTION: {scope: adoption_sector, entity_id: "NAICS:CONSTRUCTION", segment: Construction}
       RAMPAIFINANCE: {scope: adoption_sector, entity_id: "NAICS:FINANCE_AND_INSURANCE", segment: Finance and insurance}
-      RAMPAIHEALTHCARE: {scope: adoption_sector, entity_id: "NAICS:HEALTH_CARE_AND_SOCIAL_ASSISTANCE", segment: Health care and social assistance}
+      RAMPAIHEALTHCARE: {scope: adoption_sector, entity_id: "NAICS:HEALTH_CARE_AND_SOCIAL_ASSISTANCE", segment: Health care and social assistance, page_segment: Health care}
       RAMPAIHOSPITALITY: {scope: adoption_sector, entity_id: "NAICS:ACCOMMODATION_AND_FOOD_SERVICES", segment: Accommodation and food services}
       RAMPAIMANUFACTURING: {scope: adoption_sector, entity_id: "NAICS:MANUFACTURING", segment: Manufacturing}
-      RAMPAIRETAIL: {scope: adoption_sector, entity_id: "NAICS:RETAIL_TRADE", segment: Retail trade}
-      RAMPAITECH: {scope: adoption_sector, entity_id: "NAICS:INFORMATION", segment: Information}
+      RAMPAIRETAIL: {scope: adoption_sector, entity_id: "NAICS:RETAIL_TRADE", segment: Retail trade, page_segment: Retail}
+      RAMPAITECH: {scope: adoption_sector, entity_id: "NAICS:INFORMATION", segment: Information, page_segment: Technology and media}
       RAMPAISMB: {scope: adoption_business_size, entity_id: "RAMP_SIZE:SMALL", segment: Small businesses}
       RAMPAIMIDMARKET: {scope: adoption_business_size, entity_id: "RAMP_SIZE:MEDIUM", segment: Medium-sized businesses}
       RAMPAIENTERPRISE: {scope: adoption_business_size, entity_id: "RAMP_SIZE:LARGE", segment: Large businesses}

@@ -50,12 +50,13 @@ SECTOR = ("Date\tSector\tAdoption rate (%)\tMonthly change (pp)\n"
 SPEND = ("Date\tMedian (USD / employee / month)\tTop 10% (USD / employee / month)\tTop 1% (USD / employee / month)\n"
          "2026-10-01\t16.32\t800.84\t10199.20\n"
          "2026-09-01\t15.38\t793.25\t9346.50\n")
+# The official Shares export is fractions: each week sums to 1.0 (2026-11-12 real export).
 MAKER_SHARES = ("Date\tAnthropic\tOpenAI\tGoogle\n"
-                "2026-10-25\t55.0\t40.0\t5.0\n"
-                "2026-11-01\t56.0\t39.0\t5.0\n")
+                "2026-10-25\t0.55\t0.40\t0.05\n"
+                "2026-11-01\t0.56\t0.39\t0.05\n")
 MODEL_SHARES = ("Date\tClaude Opus 5.5 (Anthropic)\tGPT-6 Astra (OpenAI)\tGPT 5.6 TERRA (AUTO) (OpenAI)\n"
-                "2026-10-25\t60.0\t30.0\t10.0\n"
-                "2026-11-01\t61.0\t\t39.0\n")
+                "2026-10-25\t0.60\t0.30\t0.10\n"
+                "2026-11-01\t0.61\t\t0.39\n")
 MODEL_VOLUMES = ("Date\tClaude Opus 5.5 (Anthropic)\tGPT-6 Astra (OpenAI)\n"
                  "2026-10-25\t95.0\t55.0\n"
                  "2026-11-01\t100.0\t55.9\n")
@@ -207,14 +208,16 @@ def test_token_shares_become_weekly_long_rows_and_volumes_are_refused():
     assert "TOKEN_MODEL:ANTHROPIC:CLAUDE_OPUS_5_5" in entities
     assert "TOKEN_MODEL:OPENAI:GPT_5_6_TERRA_AUTO" in entities                    # maker = last parenthetical
     assert len([row for row in models if row.period == "2026-11-01"]) == 2       # an empty cell is skipped
-    with pytest.raises(RampExportError, match="methodology_drift:token_volume_index_not_share"):
+    assert {row.value for row in makers if row.period == "2026-11-01"} == {56.0, 39.0, 5.0}   # stored as percent
+    assert makers[0].raw["provider_value"] == "0.55" and makers[0].raw["provider_value_unit"] == "fraction"
+    with pytest.raises(RampExportError, match="methodology_drift:token_export_not_share"):
         parse_token_share_tsv(MODEL_VOLUMES, scope="token_spend_share_by_model", fetched_at=NOW)
 
 
 def test_token_share_total_off_100_is_a_warning_not_a_block():
-    rows, warnings = parse_token_share_tsv("Date\tAnthropic\tOpenAI\n2026-11-01\t50\t40\n",
+    rows, warnings = parse_token_share_tsv("Date\tAnthropic\tOpenAI\n2026-10-25\t60\t40\n2026-11-01\t50\t48\n",
                                            scope="token_spend_share_by_maker", fetched_at=NOW)
-    assert rows and warnings == ["token_share_total_off_100:2026-11-01:90.00"]
+    assert rows and warnings == ["token_share_total_off_100:2026-11-01:98.00"]
 
 
 # --- page part: increments only ----------------------------------------------------------------------------
@@ -572,3 +575,37 @@ def test_observer_keeps_fred_scopes_when_only_the_page_part_fails(tmp_path):
     assert signal["page_part"]["status"] == "export_unreadable"
     assert any(item.startswith("ramp_page_part_export_unreadable") for item in signal["warnings"])
     repo.close()
+
+
+def test_one_chart_the_runner_cannot_export_does_not_cost_the_others():
+    def export(scope):
+        if scope == "token_spend_share_by_model":
+            raise RampExportError("export_unreadable:control_missing:Shares")
+        return PAGE[scope]
+
+    adapter = _page_adapter(browser=RampBrowserAdapter(export))
+    request = FetchRequest(source_id="ramp_ai_index", dataset_id="ramp_ai_spend")
+    found = adapter.discover(request)
+    assert found.status.value == "partial"
+    assert set(found.diagnostics["scope_failures"]) == {"token_spend_share_by_model"}
+    batch = adapter.fetch(request)
+    assert batch.status.value == "partial"
+    assert {row.dimensions["scope"] for row in batch.records} == {"spend_per_employee_overall",
+                                                                  "token_spend_share_by_maker"}
+    assert [failure.slice_key for failure in batch.failures] == ["ramp:token_spend_share_by_model"]
+
+
+def test_sectors_the_page_names_differently_are_still_recognised_as_fred_series():
+    from ats.data.sources.ramp_ai_index_fred import fred_page_aliases
+
+    aliases = fred_page_aliases(StructuredCatalog.load())
+    assert aliases == {("adoption_sector", "NAICS:HEALTH_CARE"): "NAICS:HEALTH_CARE_AND_SOCIAL_ASSISTANCE",
+                       ("adoption_sector", "NAICS:RETAIL"): "NAICS:RETAIL_TRADE",
+                       ("adoption_sector", "NAICS:TECHNOLOGY_AND_MEDIA"): "NAICS:INFORMATION"}
+    page = parse_adoption_tsv("Date\tSector\tAdoption rate (%)\n2026-10-01\tTechnology and media\t80.1\n"
+                              "2026-10-01\tUtilities\t41.0\n", scope="adoption_sector", fetched_at=NOW, slice_key="s")
+    kept, covered = split_fred_covered(page, COVERAGE)
+    assert [row.entity_id for row in kept] == ["NAICS:UTILITIES"]
+    assert cross_check_fred(covered, {("NAICS:INFORMATION", "2026-10"): 79.0}, aliases=aliases) == [
+        "fred_page_mismatch:NAICS:TECHNOLOGY_AND_MEDIA:2026-10:page=80.1000:fred=79.0000"]
+

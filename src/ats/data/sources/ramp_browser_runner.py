@@ -37,6 +37,8 @@ CHART_CLICKS: dict[str, tuple[str, ...]] = {
 EXPECTED_TITLE = "Ramp AI Index"
 TOTAL_TIMEOUT_SECONDS = 300
 CHART_TIMEOUT_SECONDS = 45
+# The page keeps background requests open, so "network idle" never arrives; wait for a control instead.
+CONTROL_WAIT_SECONDS = 15
 
 CAPTURE_SCRIPT = """
 (() => {
@@ -124,9 +126,9 @@ class RampBrowserRunner:
                                          timeout=self.chart_timeout * 1000)
                     if response is not None and response.status >= 400:
                         raise RampRunnerError("navigation_blocked", f"http_{response.status}")
-                    page.wait_for_load_state("networkidle", timeout=self.chart_timeout * 1000)
                     if self.expected_title not in (page.title() or ""):
                         raise RampRunnerError("navigation_blocked", "unexpected_title")
+                    self._visible_button(page, "Get the data", exact=False)
                     for scope in SCOPES:
                         if time.monotonic() > deadline:
                             self._errors[scope] = RampRunnerError("timeout", "total")
@@ -137,6 +139,11 @@ class RampBrowserRunner:
                         except RampRunnerError as exc:
                             self._errors[scope] = exc
                             self._screenshot(page, scope)
+                        except PlaywrightError as exc:
+                            # One chart's click or wait failing must not cost the other charts.
+                            reason = "timeout" if "timeout" in str(exc).casefold() else "control_missing"
+                            self._errors[scope] = RampRunnerError(reason, type(exc).__name__)
+                            self._screenshot(page, scope)
                 finally:
                     browser.close()
         except RampRunnerError as exc:
@@ -146,23 +153,34 @@ class RampBrowserRunner:
             error = RampRunnerError(reason, type(exc).__name__)
             self._errors.update({scope: error for scope in SCOPES if scope not in self._results})
 
-    def _click_visible(self, page, label: str) -> None:
-        for locator in (page.get_by_role("button", name=label, exact=True),
-                        page.get_by_text(label, exact=True)):
-            if locator.count():
-                locator.first.click(timeout=self.chart_timeout * 1000)
-                return
+    def _visible_button(self, page, label: str, *, exact: bool = True):
+        """The first visible button with this label, waiting for the page to render it.
+
+        Sub-controls (e.g. "By model maker", "Shares") only appear after the parent control is clicked, and
+        some labels also exist as hidden duplicates, so a plain count() right after a click is not enough.
+        """
+        from playwright.sync_api import Error as PlaywrightError
+
+        for locator in (page.get_by_role("button", name=label, exact=exact),
+                        page.get_by_text(label, exact=exact)):
+            visible = locator.locator("visible=true")
+            try:
+                visible.first.wait_for(state="visible", timeout=CONTROL_WAIT_SECONDS * 1000)
+            except PlaywrightError:
+                continue
+            return visible.first
         raise RampRunnerError("control_missing", label)
+
+    def _click_visible(self, page, label: str) -> None:
+        self._visible_button(page, label).click(timeout=self.chart_timeout * 1000)
+        page.wait_for_timeout(800)
 
     def _export_chart(self, page, scope: str) -> bytes:
         for label in CHART_CLICKS[scope]:
             self._click_visible(page, label)
         page.wait_for_timeout(1500)
         before = page.evaluate("window.__atsRampCopies.length")
-        button = page.get_by_role("button", name="Get the data", exact=False)
-        if not button.count():
-            raise RampRunnerError("control_missing", "Get the data")
-        button.first.click(timeout=self.chart_timeout * 1000)
+        self._visible_button(page, "Get the data", exact=False).click(timeout=self.chart_timeout * 1000)
         waited = 0.0
         while page.evaluate("window.__atsRampCopies.length") <= before:
             if waited >= self.chart_timeout:

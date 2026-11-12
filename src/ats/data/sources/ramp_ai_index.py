@@ -329,16 +329,17 @@ def parse_token_share_tsv(payload: bytes | str, *, scope: str, fetched_at: datet
                           slice_key: str = "", source_method: str = "official_clipboard") -> tuple[list[NativeRecord], list[str]]:
     """Parse a weekly Token spend export in Shares mode (one column per maker or per model).
 
-    Returns the records and non-blocking warnings. A Volumes-mode export (an index, not a share) is refused:
-    its weekly column total runs well above 100, which a share cannot.
+    The official Shares export gives fractions (each week sums to 1.0; the page shows them as percent), so
+    values are stored as percent (x100) with the provider's cell kept in `raw`. An export already in percent
+    (weeks sum to ~100) is kept as is. Anything else, e.g. the Volumes index, is not a share and is refused.
+    Returns the records and non-blocking warnings (a week whose total is off by more than 1 pp).
     """
     if scope not in TOKEN_SCOPES:
         raise ValueError(f"ramp_token_scope_invalid:{scope}")
     raw, rows = read_clipboard_tsv(payload, required_headers=("Date",))
     del raw
-    output: list[NativeRecord] = []
+    cells: list[tuple[str, str, str, float]] = []
     totals: dict[str, float] = {}
-    by_model = scope == "token_spend_share_by_model"
     for row in rows:
         date_key = next((key for key in row if _header_key(key) == "date"), "")
         period = _day(row.get(date_key))
@@ -348,37 +349,50 @@ def parse_token_share_tsv(payload: bytes | str, *, scope: str, fetched_at: datet
             value = _number(cell)
             if value is None:
                 continue
-            if not 0 <= value <= 100:
+            if value < 0:
                 raise RampExportError(f"token_share_out_of_range:{scope}:{period}:{header}:{value}")
+            cells.append((period, header, cell, value))
             totals[period] = totals.get(period, 0.0) + value
-            if by_model:
-                maker, model = _maker_and_model(header)
-                if not maker:
-                    raise RampExportError(f"export_unreadable:token_model_without_maker:{header}")
-                entity_id, segment = f"TOKEN_MODEL:{_slug(maker)}:{_slug(model)}", model
-            else:
-                maker, model = str(header).strip(), ""
-                entity_id, segment = f"TOKEN_MAKER:{_slug(maker)}", maker
-            dims = _base_dimensions(scope=scope, period=period, segment=segment, source_method=source_method)
-            dims.update({"maker": maker, "model": model,
-                         "cohort": "Token Spend Management connected businesses",
-                         "statistical_unit": "Token spend attributed to models",
-                         "denominator_scope": "Total weekly token spend of connected businesses",
-                         "technology_scope": "model-attributed token spend via Token Spend Management",
-                         "release_label": period})
-            output.append(NativeRecord(
-                entity_id=entity_id,
-                provider_field=f"{scope}_pct", period=period, value=value, unit="percent",
-                period_basis="calendar_week", period_start=period, period_end=period, published_at=None,
-                dimensions=dims, raw={"provider_column": header, "provider_value": cell, "scope": scope},
-                slice_key=slice_key))
-    if not output:
+    if not cells:
         raise RampExportError(f"export_unreadable:no_token_share_rows:{scope}")
-    if max(totals.values()) > 100 + TOKEN_SHARE_TOLERANCE_PP:
-        raise RampExportError(f"methodology_drift:token_volume_index_not_share:{scope}:max_week_total="
-                              f"{max(totals.values()):.2f}")
-    warnings = [f"token_share_total_off_100:{period}:{total:.2f}" for period, total in sorted(totals.items())
-                if abs(total - 100) > TOKEN_SHARE_TOLERANCE_PP]
+    typical = sorted(totals.values())[len(totals) // 2]
+    if abs(typical - 1.0) <= 0.02:
+        scale, unit_seen = 100.0, "fraction"
+    elif abs(typical - 100.0) <= 2 * TOKEN_SHARE_TOLERANCE_PP:
+        scale, unit_seen = 1.0, "percent"
+    else:
+        raise RampExportError(f"methodology_drift:token_export_not_share:{scope}:median_week_total={typical:.4f}")
+    by_model = scope == "token_spend_share_by_model"
+    output: list[NativeRecord] = []
+    for period, header, cell, value in cells:
+        percent = value * scale
+        if percent > 100 + TOKEN_SHARE_TOLERANCE_PP:
+            raise RampExportError(f"token_share_out_of_range:{scope}:{period}:{header}:{percent}")
+        if by_model:
+            maker, model = _maker_and_model(header)
+            if not maker:
+                raise RampExportError(f"export_unreadable:token_model_without_maker:{header}")
+            entity_id, segment = f"TOKEN_MODEL:{_slug(maker)}:{_slug(model)}", model
+        else:
+            maker, model = str(header).strip(), ""
+            entity_id, segment = f"TOKEN_MAKER:{_slug(maker)}", maker
+        dims = _base_dimensions(scope=scope, period=period, segment=segment, source_method=source_method)
+        dims.update({"maker": maker, "model": model,
+                     "cohort": "Token Spend Management connected businesses",
+                     "statistical_unit": "Token spend attributed to models",
+                     "denominator_scope": "Total weekly token spend of connected businesses",
+                     "technology_scope": "model-attributed token spend via Token Spend Management",
+                     "provider_value_unit": unit_seen,
+                     "release_label": period})
+        output.append(NativeRecord(
+            entity_id=entity_id,
+            provider_field=f"{scope}_pct", period=period, value=round(percent, 10), unit="percent",
+            period_basis="calendar_week", period_start=period, period_end=period, published_at=None,
+            dimensions=dims, raw={"provider_column": header, "provider_value": cell,
+                                  "provider_value_unit": unit_seen, "scope": scope},
+            slice_key=slice_key))
+    warnings = [f"token_share_total_off_100:{period}:{total * scale:.2f}" for period, total in sorted(totals.items())
+                if abs(total * scale - 100) > TOKEN_SHARE_TOLERANCE_PP]
     return output, warnings
 
 
@@ -438,13 +452,16 @@ def split_fred_covered(records: list[NativeRecord], coverage: set[tuple[str, str
 
 
 def cross_check_fred(covered: list[NativeRecord], fred_values: dict[tuple[str, str], float],
-                     *, tolerance_pp: float = 0.01) -> list[str]:
+                     *, tolerance_pp: float = 0.01,
+                     aliases: dict[tuple[str, str], str] | None = None) -> list[str]:
     """`fred_page_mismatch` warnings for covered page rows whose value differs from FRED's same month."""
     warnings = []
     for record in covered:
         if record.provider_field not in {"adoption_rate_pct", "vendor_adoption_pct"}:
             continue
-        reference = fred_values.get((record.entity_id, record.period[:7]))
+        scope = str((record.dimensions or {}).get("scope") or "")
+        entity = (aliases or {}).get((scope, record.entity_id), record.entity_id)
+        reference = fred_values.get((entity, record.period[:7]))
         if reference is not None and abs(float(record.value) - reference) > tolerance_pp:
             warnings.append(f"fred_page_mismatch:{record.entity_id}:{record.period[:7]}:"
                             f"page={float(record.value):.4f}:fred={reference:.4f}")
@@ -500,12 +517,14 @@ class RampAIIndexAdapter:
         self.clock = clock or _now
         self._fred_coverage = fred_coverage
         self._fred_values = fred_values
+        self._fred_aliases: dict[tuple[str, str], str] | None = None
         # Discovery and ingestion are one controlled probe.  Keep the exact
         # export payloads in memory so release_check can hand them to the
         # ingestion run without opening the browser a second time.  This is a
         # transient runtime cache; raw bytes remain persisted as artifacts by
         # fetch(), not in the source-check metadata table.
         self.discovered_payloads: dict[str, str] = {}
+        self.payload_errors: dict[str, str] = {}
 
     @property
     def fred_coverage(self) -> set[tuple[str, str]]:
@@ -513,6 +532,13 @@ class RampAIIndexAdapter:
             from .ramp_ai_index_fred import fred_coverage
             self._fred_coverage = fred_coverage()
         return self._fred_coverage
+
+    @property
+    def fred_aliases(self) -> dict[tuple[str, str], str]:
+        if self._fred_aliases is None:
+            from .ramp_ai_index_fred import fred_page_aliases
+            self._fred_aliases = fred_page_aliases()
+        return self._fred_aliases
 
     def _fred_reference(self) -> dict[tuple[str, str], float]:
         if self._fred_values is None:
@@ -527,6 +553,8 @@ class RampAIIndexAdapter:
         requested = [scope_filter] if scope_filter else [scope for scope in SCOPES if SCOPE_DATASET[scope] == request.dataset_id]
         values = (request.query_scope or {}).get("payloads") or (request.query_scope or {}).get("browser_exports") or {}
         output: dict[str, tuple[bytes, str]] = {}
+        # Per-chart failures: one chart the runner could not export must not cost the others.
+        self.payload_errors: dict[str, str] = {}
         now = self.clock().astimezone(timezone.utc)
         for scope in requested:
             if scope not in SCOPES:
@@ -548,9 +576,14 @@ class RampAIIndexAdapter:
                         continue
                     stale = f":inbox_stale_{age_days:.0f}d"
             if self.browser is not None:
-                output[scope] = (self.browser.export(scope), "official_clipboard")
+                try:
+                    output[scope] = (self.browser.export(scope), "official_clipboard")
+                except Exception as exc:  # noqa: BLE001 - recorded per chart, reported by discover/fetch
+                    self.payload_errors[scope] = f"{type(exc).__name__}:{exc}"
                 continue
-            raise PermissionError(f"export_unreadable:official_web_export_required:{scope}{stale}")
+            self.payload_errors[scope] = f"export_unreadable:official_web_export_required:{scope}{stale}"
+        if not output and self.payload_errors:
+            raise PermissionError("; ".join(self.payload_errors.values()))
         return output
 
     def _parse(self, scope: str, payload: bytes, *, fetched_at: datetime, slice_key: str,
@@ -576,6 +609,7 @@ class RampAIIndexAdapter:
             status = DiscoveryStatus.EXPORT_UNREADABLE
             return DiscoveryResult(source_id=request.source_id, dataset_id=request.dataset_id, checked_at=checked,
                                    status=status, diagnostics={"scope_failures": failures, "out_of_scope": OUT_OF_SCOPE})
+        failures.update(self.payload_errors)
         fred_values: dict[tuple[str, str], float] | None = None
         for scope, (payload, method) in payloads.items():
             digest = hashlib.sha256(payload).hexdigest()
@@ -586,7 +620,7 @@ class RampAIIndexAdapter:
                 covered_rows += len(covered)
                 if covered:
                     fred_values = self._fred_reference() if fred_values is None else fred_values
-                    warnings.extend(cross_check_fred(covered, fred_values))
+                    warnings.extend(cross_check_fred(covered, fred_values, aliases=self.fred_aliases))
                 if not rows:
                     continue
                 latest = max((row.period for row in rows), default="")
@@ -642,6 +676,9 @@ class RampAIIndexAdapter:
                                 failures=[AdapterFailure(status=IngestionStatus.EXPORT_UNREADABLE,
                                                          message=f"{type(exc).__name__}:{exc}", slice_key="ramp")])
         covered_rows = 0
+        failures.extend(AdapterFailure(status=IngestionStatus.EXPORT_UNREADABLE, message=message,
+                                       slice_key=f"ramp:{scope}")
+                        for scope, message in self.payload_errors.items())
         for scope, (payload, method) in payloads.items():
             digest = hashlib.sha256(payload).hexdigest()
             slice_key = f"ramp:{scope}:{digest[:16]}"

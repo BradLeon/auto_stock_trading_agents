@@ -382,3 +382,24 @@ def test_trade_read_consumers_that_are_modules_are_zero_only_through_state_api(t
     assert "direct_trade_table_sql" in found["x.sql"].evidence["violations"][0]
     # A module that reads nothing is not evidence of having moved onto the governed layer.
     assert found["x.quiet"].evidence["call_path"] == []
+
+
+def test_g0_record_is_found_in_the_dated_archive_folder(tmp_path):
+    from ats.workflow import retirement_clearance as rc
+
+    changes = tmp_path / "changes"
+    archived = changes / "archive" / "2026-11-12-retire-legacy-and-migration-tooling" / "verification.md"
+    archived.parent.mkdir(parents=True)
+    archived.write_text("archived", encoding="utf-8")
+    assert rc._g0_verification_path(changes) == archived
+
+    active = changes / "retire-legacy-and-migration-tooling" / "verification.md"
+    active.parent.mkdir(parents=True)
+    active.write_text("active", encoding="utf-8")
+    assert rc._g0_verification_path(changes) == active
+
+
+def test_g0_default_path_points_at_an_existing_record():
+    from ats.workflow import retirement_clearance as rc
+
+    assert rc.G0_VERIFICATION.exists()

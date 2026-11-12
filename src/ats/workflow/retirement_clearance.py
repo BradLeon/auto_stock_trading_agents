@@ -118,8 +118,24 @@ class TombstoneVerdict:
 
 # --- gates ------------------------------------------------------------------
 
-G0_VERIFICATION = Path(__file__).resolve().parents[3] / "openspec" / "changes" / \
-    "retire-legacy-and-migration-tooling" / "verification.md"
+_CHANGES = Path(__file__).resolve().parents[3] / "openspec" / "changes"
+_G0_CHANGE = "retire-legacy-and-migration-tooling"
+
+
+def _g0_verification_path(changes: Path = _CHANGES) -> Path:
+    """The G0 record of the retirement change: its active folder, or its dated archive folder once archived.
+
+    The change was archived on 2026-11-12 (`archive/2026-11-12-retire-legacy-and-migration-tooling`); the signed
+    record moved with it and is still the gate's evidence.
+    """
+    active = changes / _G0_CHANGE / "verification.md"
+    if active.exists():
+        return active
+    archived = sorted((changes / "archive").glob(f"????-??-??-{_G0_CHANGE}/verification.md"))
+    return archived[-1] if archived else active
+
+
+G0_VERIFICATION = _g0_verification_path()
 _OPEN_VERDICTS = {"通过", "接受缺口", "不适用"}
 
 

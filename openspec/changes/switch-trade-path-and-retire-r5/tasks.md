@@ -153,7 +153,8 @@
   - 记录（2026-11-11，用户批准草稿）：`data/target-dataflow-assurance` 逐条结论——保留 3 条（目标节点与连线登记、数据域写入到读取验证、Evidence Observer 退役）；修改 2 条（「Data 与目标角色的每条对接关系必须有独立契约」去掉读取切流资格措辞；「五角色实际读取必须保留治理来源」改为重查读取范围与隔离写入，场景名按校验要求沿用原名）；删除 8 条（独立读取契约和回退证据、来源与旧流程对照、A 行情契约重验资格、十角色接入核验、决策链接入验证、逐消费者缺口处置、隔离验收不以资格为前置、持久部署批准），每条写明接手的现行规格；新增 1 条「每次运行必须重查实际输入的有效性与新鲜度」。本 change 已删 2 条、退役 change 已删 2 条不再重复。`workflow/cutover-control`：除本 change 已有的启动检查与门禁不变量外，其余要求在退役 change 的增量里，R5d 后需处理 3 条——「研究读路由固定为新路径」删除（即 10.1）、「被意外切回旧路径的研究消费者必须能经批准恢复」删除（restore 已退役）、「数据产品检查失败时必须安全停止」修改（读停止策略与旧路径回退已删），均并入 10.1，待退役 change 归档后补。范围外发现两处，用户当天决定一并处理：`workflow/shadow-reconciliation` 整份 11 条删除（描述 8.4 已删的影子与验收工具；进程级禁止真实下单、单一路由与隔离写入由 authorization-gate、live-route-switch 与 `isolation.assert_write_destination` 承担）；`execution/authorization-gate`「持久部署批准必须独立于单笔交易批准」删除（部署许可随 R5d 删除，研究运行不得放行交易由同规格的完整授权要求与 C3 承担）。`openspec validate --strict` 通过。
 - [x] 10.3 文档：ARCHITECTURE §6、§10、§11，OPERATIONS 第 7 节，退役 runbook，README，同步到 R5 之后的状态。验证：文档中的命令都能照写运行
   - 记录（2026-11-11）：ARCHITECTURE §6（读取改为按声明与业务 scope、Chief 行去掉读路由、旧实现在册 38 条退 37 条）、§10.1（快照记录业务 scope、不再记录路由与资格）、§11（写入路径唯一、只留隔离写入检查）、§15.5（影子运行改为观察窗口）；OPERATIONS 第 7 节切换进度、服务表 serve 一行、第 12 节退役命令；退役 runbook 新增「〇·〇 2026-11-11 现状」；README 交易路径改为已切换、审批改为命令行。文档中 127 条 `ats` 命令逐条过 CLI 解析器：代码块示例全部可解析，17 条未过的都是正文里的命令名、斜杠简写或已退役命令的历史记录（脚本 scratchpad doc_cmds.py）。
-- [ ] 10.4 全量测试一次，与基线逐项对照，并登记删除的测试与任何新失败的归因。验证：TEST_BASELINE 有本 change 的权威测量
+- [x] 10.4 全量测试一次，与基线逐项对照，并登记删除的测试与任何新失败的归因。验证：TEST_BASELINE 有本 change 的权威测量
+  - 记录（2026-11-12）：提交 3896f69 全量 21 failed / 3660 passed，对照第 9 组：删除 0、新增 5（全过）、恢复 0、新增变红 1（`test_phase_f_trader_a::test_later_handoff_failure_preserves_first_receipt`，报价按真实时钟过期，属本机内存换页造成的环境失败，单独与整文件复跑均通过）；其余 20 个与第 9 组相同。本 change 各组删除的测试已在第 6–9 组 TEST_BASELINE 行逐组登记。见 TEST_BASELINE「交易路径切换收尾全量」。
 - [ ] 10.5 在退役 change 归档之后，`openspec validate --all --strict` 通过。验证：命令输出通过
 
 ## 11. 遗留事项（2026-11-03 登记，不阻塞 4–10 组）

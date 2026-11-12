@@ -142,7 +142,8 @@
 - [x] 9.3 删除 `cutover`、`cutover_routing`、`scoped_routes`、`consumer_cutover` 路由表、`consumer_reads`、`read_windows`、`read_recovery`、`invocation_bindings`、`boundary_evidence`、`cutover_wiring`、`exit_requirements`（先拆 `data/assurance.py` 读恢复核验的引用）、`cutover_guards`、`business_replay_inputs` 的剩余部分（先把 `route_switch` 用的 `implementation_hashes` 迁到长期模块，`route_switch` 本身保留），以及 `assurance_surface` 中只为资格存在的指纹清单；历史路由与资格记录保留只读。验证：V1–V3 通过；架构守卫测试通过；`ats live drill/rollback-drill` 与隔离环境的停止恢复测试仍通过
   - 2026-11-08 按 8.2 结论加入 `joint_cutover`（先拆 `runtime_reads`、`schedule_runtime` 等六处空操作门禁）；`implementation_hashes` 已在 8.4 迁出，回放冻结已在 8.4 去掉。
   - 记录（2026-11-11）：3fa0191（写入侧只留隔离写入检查，搬到 `isolation.assert_write_destination`）、2dff0d9（启动检查改读交易路由登记表 `route_registry.assert_runtime_startup`）、da5a1a3（调度侧去联合门禁与 resume 路由前提，健康记录归 `consumer_health.data_health_log`）、2b5330e（删除 14 个模块与 `data/assurance`，`assurance_surface` 只留 `route_switch` 的实现指纹，删除指纹清单与冻结面，`ats consumer-cutover`、`ats data assurance` 改提示桩，登记处 retired）。V1 src 无导入；V2 全部模块可导入、探测与 9.2 相同；V3 `decide` 可退出、tombstone 一致。`ats live drill/rollback-drill` 与隔离环境的停止恢复测试（test_live_route_drill、test_route_switch、test_phase_f_trade_stop、test_phase_f_trade_switch_drill）全过。历史路由、资格与健康记录留在 var/phase_f_cutover.sqlite、var/data.sqlite，只读。全量见 TEST_BASELINE「交易路径切换第 9 组全量」。
-- [ ] 9.4 本批复验 V4–V6：重启后一个完整周期（工作日研究、主理人、Clerk，周六宏观与行业）无因退役导致的失败。验证：观察记录写进 observation.md
+- [x] 9.4 本批复验 V4–V6：重启后一个完整周期（工作日研究、主理人、Clerk，周六宏观与行业）无因退役导致的失败。验证：观察记录写进 observation.md
+  - 记录（2026-11-12）：见 observation.md「第 9 组复验 V4–V6」。11-11 晚研究三项、22:49 chief-daily（待审批）、11-12 07:01 clerk-daily 均按时运行；周六宏观与行业复盘按用户 11-12 要求提前手动各跑一次，工作流均 complete。无因退役导致的失败。technical-review 缺读数查明为本机到 Yahoo 的 TLS 握手被掐，修复 3896f69 已合入；宏观复盘这次模型只返回前四段、未写周报，属模型单次输出问题。V6 旧表可读、退役命令有提示、38 条登记全部 retired 且墓碑一致。
 
 ## 10. 规格与收尾
 

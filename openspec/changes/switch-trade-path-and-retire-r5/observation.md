@@ -96,3 +96,40 @@ OpenRouter 11-06（台北 08:00–11-07 08:00）共约 60 次：约 55 次是 21
 **窗口结论签字：** 通过（用户在会话中回复“确认签字”，2026-11-07；确认对象为本节两项）
 
 签字人：用户　日期：2026-11-07
+
+# 第 9 组复验 V4–V6（tasks 9.4，2026-11-12）
+
+第 9 组（R5d 读路由与资格机制退役）11-11 14:58 合入 `feat/rebuild_workflow_dataflow` 并重启 dispatcher、serve。下面是重启后一个完整周期的观察。周六宏观与行业复盘由用户 11-12 要求提前手动运行一次（`--trigger-kind manual`），与定时触发走同一 dispatcher 工作流。
+
+## 结论
+
+重启后工作日研究、主理人、Clerk 与宏观、行业复盘都按设计跑完，**没有因退役导致的失败**。dispatcher 日志自重启起没有 traceback，也没有导入已删模块的错误。两处异常都与退役无关，见下表“判断”列。
+
+## V5 运行
+
+| 时间（台北） | 工作流 | 运行 | 结果 | 判断 |
+|---|---|---|---|---|
+| 11-11 21:03 | information-brief | `run-f22beebd…` | complete | 正常 |
+| 11-11 21:30 | fundamental-routine | `run-759cf354…` | complete | 正常 |
+| 11-11 21:33 | technical-review | `run-b8ae632b…` | incomplete，18 只中 14 只无读数 | 与退役无关：Yahoo 取价经本机 Clash 新建 TLS 握手被随机掐断（见下节）；11-10 合入前已出现（16/18） |
+| 11-11 22:49 | chief-daily | `chief-20261111-144500` | pending_approval（卖 NVDX 全部、DRAM 250 股，风控两笔放行） | 正常。风控读收盘价有 2 次 partial、2 次 unavailable，同为 Yahoo 握手失败，风控按缺数据跳过后照常出结论 |
+| 11-11 23:58 | fills-capture | — | finished | 正常 |
+| 11-12 07:01 | clerk-daily | `run_29fd6093…` | completed | 正常：Flex 补录 1 笔（11-10 7709 买 1000 @15.78）、持仓 18、标记 48、绩效已记 |
+| 11-12 09:31 | macro-review（手动） | `run-ea8508aa…` | complete，投影已发布（goldilocks，provisional） | 工作流正常；但模型只返回前四段（态势、总评、结论变化、利率路径），行业倾斜、主题、情景、风险、证伪条件为空，因此未写周报文件。同一模型 11-07 输出完整，属模型单次输出不完整，与退役无关 |
+| 11-12 09:35 | sector-review（手动） | `run-3c4b74f5…` | complete：8 层（2 层复用）+ 行业全部 succeeded | 正常：7 份层报告、行业报告与丰富版 HTML 仪表盘均已写出 |
+
+数据刷新与日历消费：`phase_e:calendar-consume` 每 30 分钟正常结束（11-11 17:05 一次跑到 18:12，其间两次因上一次未结束而跳过，既有现象）；data-refresh 的 misfire 是既有遗留。`data_health_log` 已开始记录（11-11 六个消费者 ok）。
+
+### technical-review 无读数的根因与处理
+
+11-12 手动复跑（`run-519701be…`）复现 7/18 无读数。诊断（`var/test_runs/technical-yahoo/`）：失败请求没有任何 HTTP 响应，是到 `query1/query2.finance.yahoo.com`（解析为 Clash fake-IP 198.18.1.24）的新建 TLS 握手被掐断（curl 35）；串行新建连接失败 10–30%，8 并发最高 13/16；yfinance 把它报成 “possibly delisted”。成功返回的日线截到当日、格式正常，与美股 Day+Overnight 交易无关；yfinance 1.7.0 自 9 月未变。用户确认网络侧无调整空间，代码侧修复 3896f69（串行下载、复用一个会话、只重试传输失败的标的，最终失败记 `unavailable/transport_error`），11-12 09:21 合入并重启 dispatcher 与 serve。之后的行业复盘中，GOOG 重试 3 次仍握手失败，按新格式记了一条传输失败，其余标的正常。修复效果待 11-12 21:30 定时 technical-review 确认。
+
+## V6 历史
+
+- `var/phase_f_cutover.sqlite`（11 表，含 `read_recovery_events` 240 行、`production_consumer_receipts` 4105 行）、`var/phase_f_batches.sqlite`（5 表）、`var/data.sqlite` 的 `dataflow_assurance_events`（384 行）只读打开正常。
+- `ats consumer-cutover`、`ats data assurance` 返回已退役提示与替代命令（`ats data health`、`ats data health-log`）及存档位置。
+- `ats retirement decide --drill-reference "verification.md 3.9 回退演练（2026-10-29）"`：38 条全部 retired、可退出；`ats retirement tombstone --identifier migration.read_route_and_qualification` 判 consistent。
+
+## V4 测试
+
+见 tasks 10.4 与 TEST_BASELINE「交易路径切换第 10 组全量」。第 9 组本身的全量对照见 TEST_BASELINE「交易路径切换第 9 组全量」（新增变红 0）。

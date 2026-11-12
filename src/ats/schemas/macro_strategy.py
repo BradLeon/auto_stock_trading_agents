@@ -361,6 +361,11 @@ class MacroReview(BaseModel):
     scenarios: list[MacroScenario] = Field(default_factory=list)
     horizon: str = ""
     factset_earnings_assessment: FactSetEarningsAssessment | None = None
+    # Completeness of the model's answer (2026-11-12). `llm_truncated`: the output reached max_tokens, so fields
+    # the model had not finished were dropped and came back as their defaults. `llm_missing_fields`: narrative
+    # fields the answer left empty, whether cut off or simply omitted. Defaults keep older rows valid.
+    llm_truncated: bool = False
+    llm_missing_fields: list[str] = Field(default_factory=list)
 
     def quadrant_brief(self) -> str:
         """Shortest useful form, for callers on a tight character budget.

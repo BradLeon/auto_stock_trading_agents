@@ -1040,6 +1040,8 @@ def _macro_adapter(context: TaskContext) -> TaskAdapterResult:
     if not review.regime or review.regime.startswith("("):
         raise ProjectionMissing("Macro Analyst did not publish a formal regime projection")
     detail = f"regime={review.regime}"
+    if review.as_of >= started and review.llm_truncated:
+        detail += f"; INCOMPLETE truncated, empty={','.join(review.llm_missing_fields) or '-'}"
     # The readable weekly report: the CLI path always wrote it, this path did not (found 2026-10-17). A new
     # version file, never an overwrite. `run` returns the PRIOR review when the model call fails, so a stale
     # review must not be written out under today's name.

@@ -66,11 +66,15 @@ def get_model(role: str, reasoning: Any = None) -> Any:
     rc = cfg.app.llm.for_role(role)
     if reasoning is not None:
         rc = rc.model_copy(update={"reasoning": reasoning})
+    from .telemetry import UsageCallback
+
     common = dict(
         temperature=rc.temperature,
         max_tokens=rc.max_tokens,
         timeout=cfg.app.llm.timeout_seconds,
         max_retries=cfg.app.llm.max_retries,
+        # Logs id/usage/finish per call and flags output that reached max_tokens (see llm/telemetry.py).
+        callbacks=[UsageCallback(role, rc.max_tokens)],
     )
 
     if rc.provider == "anthropic":

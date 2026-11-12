@@ -20,6 +20,7 @@ from ...schemas.macro_strategy import (
     SectorTilt,
     ThemeAssess,
 )
+from ...llm.telemetry import capture_calls
 from ..base import run_structured
 from . import assemble, indicators, regime
 from .outputs import MacroReviewLLMView
@@ -399,16 +400,36 @@ def run(name: str = "macro", *, use_llm: bool = True, live_data: bool = True) ->
         context = "\n\n".join(x for x in (comparison, block, universe, context) if x)
 
     try:
-        view: MacroReviewLLMView = run_structured("macro_strategist", MacroReviewLLMView,
-                                                  context, skill_slug="macro-strategist")
+        with capture_calls() as calls:
+            view: MacroReviewLLMView = run_structured("macro_strategist", MacroReviewLLMView,
+                                                      context, skill_slug="macro-strategist")
     except Exception as exc:  # noqa: BLE001
         log.warning("macro review LLM failed for %s: %s", name, exc)
         return latest or prior or MacroReview(name=name, as_of=started, regime="(LLM unavailable)")
 
     review = _to_review(name, cfg, view, det, prior=prior, as_of=started)
+    review = _mark_completeness(review, view, truncated=bool(calls) and calls[-1].truncated,
+                                factset_expected=det.get("factset_material") is not None)
     store.save_macro_review(review)
     _publish_projection(store, review)
     return review
+
+
+def _mark_completeness(review: MacroReview, view: MacroReviewLLMView, *, truncated: bool,
+                       factset_expected: bool) -> MacroReview:
+    """Record whether the model's answer is whole, instead of letting defaults pass for content.
+
+    A truncated answer still parses: the relay returns the finished parameters as closed JSON (2026-11-12).
+    No retry here — a rerun is the user's call (cost); the review is kept, labelled, and logged.
+    """
+    missing = [field for field, value in view if value in ("", [], None)
+               and (factset_expected or field != "factset_earnings_assessment")]
+    if truncated:
+        log.warning("macro %s: model output truncated at max_tokens; empty fields: %s",
+                    review.name, ", ".join(missing) or "(none)")
+    elif missing:
+        log.warning("macro %s: model left fields empty: %s", review.name, ", ".join(missing))
+    return review.model_copy(update={"llm_truncated": truncated, "llm_missing_fields": missing})
 
 
 def _to_review(name: str, cfg: MacroConfig, view: MacroReviewLLMView,

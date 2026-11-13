@@ -115,8 +115,8 @@
 
 ## 6. 真实定时观察
 
-- [ ] 6.1 观察下一次 `ramp_ai_index_fred_weekly` 的真实定时触发。验证：刷新账本有成功或 `no_change` 记录，且 `no_change` 基于本次实际取得的 payload。
-- [ ] 6.2 观察下一次 `ramp_ai_index_p10d_probe` 的真实定时触发。验证：成功入库，或给出明确的 `export_unreadable` 原因码；同期 FRED 部分状态不受影响。
+- [ ] 6.1 **（2026-11-13 用户决定不等观察、直接归档；交由日常数据健康检查覆盖）** 观察下一次 `ramp_ai_index_fred_weekly` 的真实定时触发。验证：刷新账本有成功或 `no_change` 记录，且 `no_change` 基于本次实际取得的 payload。
+- [ ] 6.2 **（2026-11-13 用户决定不等观察、直接归档；交由日常数据健康检查覆盖）** 观察下一次 `ramp_ai_index_p10d_probe` 的真实定时触发。验证：成功入库，或给出明确的 `export_unreadable` 原因码；同期 FRED 部分状态不受影响。
 
 ## 实施记录（2026-11-12，分支 feat/ramp-ai-index-v2）
 
@@ -125,4 +125,5 @@
 - 实测发现：Volumes 模式下单个模型的指数最高就是 100（领先模型被定为 100），所以 Volumes 的判据改为 “某周各列合计超过 101”，而不是 “单值超过 100”。
 - `test_evidence_ai_production_workflow` 的假数据产品按 v2 接口更新：`ramp_model_market_share_series` 换为 `ramp_token_spend_share_series`。
 - 2026-11-12 合入 feat/rebuild_workflow_dataflow（c0c5ce1），dispatcher、serve 已重启。用户确认后安装：`uv pip install playwright`（1.65.1，附带 greenlet）并 `playwright install chromium`；uv.lock 已用 `uv lock` 更新（只新增 playwright、greenlet 与 ramp-browser 组）。实际占用约 610 MB（完整 Chromium 387 MB + headless shell 219 MB），比 proposal 估计的 150 MB 大。`tests/test_ramp_ai_index.py` 26 passed、1 skipped（跳过的是“未安装浏览器”场景），两个本地夹具页面 runner 测试通过，据此勾 3.2、5.1。
+- 2026-11-13：用户决定不修 release-check“部分成功记为整版已入库”的通用缺陷（收益不大），并直接归档本 change；6.1、6.2 未观察。
 

@@ -184,6 +184,28 @@ RISK_LEGACY_DIGESTS = {
 }
 
 
+# Every other YAML config is hashed by its parsed content, not its bytes. A comment-only edit is not new input: on
+# 2026-11-12 one comment line in sectors/ai_hardware.yaml (Ramp v2, c0c5ce1) made all eight Layer reviews and the
+# sector review look built from different rules, and that evening's chief-daily refused to assemble its context.
+# Exception: config/pead/<SYMBOL>.yaml keeps the byte hash — its comments are data (the curated signal-chain notes
+# such as "HBM 主供" are read back off the raw file by the evidence observer).
+#
+# Same rule as RISK_LEGACY_DIGESTS: a content hash verified equal to the content behind a recorded byte digest answers
+# with that digest, so projections already built stay valid. Key = content hash now; value = byte digest recorded.
+# Verified 2026-11-13 (parsed YAML equal as data):
+#   sectors/ai_hardware.yaml — current file vs c0c5ce1^ (438828…, the digest the 11-07/11-12 Layer reviews recorded);
+#   technical.yaml, macro.yaml — current file vs itself (the digest the newest projections recorded).
+# Add nothing here without that check; it states the analysis inputs did not change, it does not silence a mismatch.
+CONFIG_LEGACY_DIGESTS = {
+    "a79d51d94177a406c001d7653d33d37fb705291751b5ac7395e57e84c80b4b67":   # sectors/ai_hardware.yaml
+        "438828883b7b708941f1596840032b848b7685738e05d2d60826edb5674e32c6",
+    "e16c1689698e5a8638b56ec93bd511cb77ed9ad136e4c0edc8671498c09b5c51":   # technical.yaml
+        "565e32e14d8a70b4815304eb8fd720e33d6bab14b554c1fff6e232e54248c5e8",
+    "11110de3eb1c84466f1965554e8d7783ab19b51e68d7c888ccd98d5d618fc4a5":   # macro.yaml
+        "360596556e12ea1c77c03e824be2ae8ae21f76594d4dd88d834c246f94803ab8",
+}
+
+
 def _file_hash(path: Path) -> str:
     if path.name == "risk.yaml":
         try:
@@ -200,6 +222,14 @@ def _file_hash(path: Path) -> str:
             doc = None
         if isinstance(doc, dict):
             return _hash({k: v for k, v in doc.items() if k not in ROSTER_KEYS})
+    if path.suffix in {".yaml", ".yml"} and path.parent.name != "pead":
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
+            doc = None
+        if doc is not None:
+            content = _hash(doc)
+            return CONFIG_LEGACY_DIGESTS.get(content, content)
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 

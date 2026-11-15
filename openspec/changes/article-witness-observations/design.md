@@ -9,12 +9,12 @@
 ## Goals / Non-Goals
 
 **Goals：**
-- `SEMIANALYSIS`、`DOWJONES` 在 L5 产生可追溯观测，每篇文章只抽取一次。
+- `DOWJONES`、`SEMIANALYSIS`、`TRENDFORCE` 在其登记为证人的各层（L4–L8）恢复产生可追溯观测，每篇文章的同一版本只抽取一次。
 - 抽取成本可控、可预估。
 
 **Non-Goals：**
 - 不新增文章来源。
-- 不改 L5 命题内容。
+- 不改任何层的命题内容与证人声明。
 - 不提高 ibkr_news 正文预算（另行评估）。
 
 ## Decisions
@@ -31,8 +31,11 @@
 ### D2. 新增派生动作 `article-evidence-observe`
 
 参数为 `--source <article source id>`，每个来源一个任务：
-- `article_evidence_semianalysis_weekly`：排在 `semianalysis_newsletter_weekly` 之后 2 小时。
 - `article_evidence_ibkr_news_daily`：排在 `ibkr_news_daily` 之后 1 小时。
+- `article_evidence_semianalysis_weekly`：排在 `semianalysis_newsletter_weekly` 之后 2 小时。
+- `article_evidence_trendforce_weekly`：排在 `trendforce_news_weekly`（周一 10:00 UTC）之后 2 小时。
+
+（2026-11-13 补 TrendForce：它是 L4–L8 五层的证人，原稿漏了。）
 
 ### D3. 已抽取标记
 
@@ -40,9 +43,13 @@
 
 ### D4. 预抽取过滤
 
-在调用模型前用确定性规则过滤：
-- 文章提及 L5 见证方声明的实体或 `config/pead.yaml` 中 L5 相关标的；
-- 或命中 L5 命题关键词表。
+在调用模型前用确定性规则过滤。过滤范围按**来源**推导，不写死某一层：先从 `config/sectors/ai_hardware.yaml` 找出该来源（DOWJONES / SEMIANALYSIS / TRENDFORCE）被登记为证人的全部命题，再取这些命题所在层的成员、命题的 `entities` 与 `expect_from` 实体，以及 `config/data/sources.yaml` 中该来源已有的关键词表（`match`）。文章满足以下任一条即进入抽取：
+- 标题命中关键词（允许英文复数）；
+- 标题点名了上述范围内的公司，且正文开头 3000 字命中关键词。
+
+关键词表为空表示全读（SemiAnalysis）。例如 TrendForce 的过滤范围覆盖 L4–L8，DOWJONES 与 SEMIANALYSIS 目前只覆盖 L5；以后在别的层登记这些来源为证人，过滤范围自动跟着扩大。
+
+**为什么不是"提到实体或命中关键词"（2026-11-13 实测，IBKR 一周 160 篇）：** 入库时已按标的挑选，"文中提到范围内公司"160/160 全中，等于不过滤；"开头命中关键词"153/160，`order`、`supply` 这类词到处都是；只看标题关键词（8 月 `_wanted` 的口径）14/160，会漏掉"Jensen Huang Affair Revives Push for Chip Restrictions"这类证人最该读的报道。采用的规则为 115/160，约每天 16 篇，在每次运行 20 次请求的上限之内；TrendForce 8 月以来 118 篇中 117 篇入选，SemiAnalysis 全读。
 
 未命中的文章记为“已检查、不相关”，同样只检查一次。
 
@@ -62,7 +69,7 @@
 ## Migration Plan
 
 1. 先修 ibkr_news 两个缺陷并观察一个窗口。
-2. 新增抽取动作，对历史已入库文章做一次手动回填。回填会消耗模型请求，执行前会先报预计请求数并征得用户确认。
-3. 开启两个派生任务。
+2. 新增抽取动作，对历史已入库文章（三个来源，自 8 月停产起）做一次手动回填。回填会消耗模型请求，执行前会先按来源报过滤命中数与预计请求数，征得用户确认。
+3. 开启三个派生任务。
 
-回滚：关闭两个任务即可；已写入的观测保留并可追溯。
+回滚：关闭三个任务即可；已写入的观测保留并可追溯。

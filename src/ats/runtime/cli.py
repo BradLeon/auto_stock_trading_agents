@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import sys
@@ -3171,6 +3171,7 @@ def main(argv: list[str] | None = None) -> int:
             "document-ingest",
             "fixed-ingest",
             "chain-source-collect",
+            "article-evidence-observe",
             "evidence-observe",
             "macro-news-collect",
             "calendar-refresh",
@@ -3281,6 +3282,8 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--dry-run", action="store_true",
                       help="evidence-observe / macro-news-collect: 只列出会处理什么，不写入")
     data.add_argument("--since", default="", help="最早期间或发布日期")
+    data.add_argument("--max-requests", type=int, default=20,
+                      help="article-evidence-observe: 单次运行的抽取请求上限（超出留到下次，记为成功的 partial）")
     data.add_argument("--as-of", default="", help="series: 历史可见时点（ISO 8601）")
     data.add_argument("--limit", type=int, default=20, help="通用结果条数")
     data.add_argument("--status", default="", help="conflicts / pending-mappings 状态过滤")
@@ -3782,7 +3785,8 @@ def main(argv: list[str] | None = None) -> int:
         } or (args.action == "release-check" and args.ingest_new)
         persistent_write = persistent_write or args.action == "chain-source-collect"
         persistent_write = persistent_write or (
-            args.action in {"evidence-observe", "macro-news-collect"} and not args.dry_run)
+            args.action in {"evidence-observe", "macro-news-collect", "article-evidence-observe"}
+            and not args.dry_run)
         persistent_write = persistent_write or (args.action == "article-metadata-reconcile" and args.apply)
         worker_task_id = os.environ.get("ATS_PERSISTENT_QUEUE_TASK_ID", "")
         if persistent_write:
@@ -3843,6 +3847,22 @@ def main(argv: list[str] | None = None) -> int:
             from ..data.collection.macro_news import collect
 
             packet = collect(dry_run=args.dry_run)
+            print(json.dumps(packet, ensure_ascii=False, default=str))
+            return 1 if packet["status"] == "failed" else 0
+        if args.action == "article-evidence-observe":
+            from ..chain.articles import observe_ingested_articles
+            from ..memory import get_store
+
+            if not args.source:
+                parser.error("data article-evidence-observe requires --source <article source id>")
+            if not args.dry_run:
+                from ..data.persistent_queue import require_queue_worker
+
+                require_queue_worker(os.environ.get("ATS_PERSISTENT_QUEUE_SOURCE_ID", ""))
+            since = args.since or (datetime.now(timezone.utc)
+                                   - timedelta(days=args.lookback_days)).date().isoformat()
+            packet = observe_ingested_articles(get_store(), source_id=args.source, since=since,
+                                               max_requests=args.max_requests, dry_run=args.dry_run)
             print(json.dumps(packet, ensure_ascii=False, default=str))
             return 1 if packet["status"] == "failed" else 0
         if args.action == "evidence-observe":

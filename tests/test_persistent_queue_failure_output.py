@@ -20,3 +20,20 @@ def test_a_failed_attempt_keeps_stderr_in_the_task_and_in_a_log_file(tmp_path, m
     log = (tmp_path / 'logs' / f'{task_id}-attempt1.log').read_text()
     assert '--- stderr ---' in log and stored['stderr_tail'][:50] in log
     assert stored['output_log'].endswith(f'{task_id}-attempt1.log')
+
+
+def test_a_timed_out_worker_records_timeout_and_wait_not_an_unbound_local(tmp_path, monkeypatch):
+    """2026-11-13: the timeout branch read an unbound `payload` and raised UnboundLocalError instead."""
+    queue = _queue(tmp_path, monkeypatch)
+    task_id, _ = queue.enqueue(source_id='s', scope={}, trigger_kind='manual', trigger_ref='t-timeout',
+                               command=['ats', 'data', 'ingest', '--source', 'x'], policy_fingerprint='p',
+                               requested_as_of='2026-11-13T00:00:00+00:00', priority=20)
+    real_popen = persistent_queue.subprocess.Popen
+    monkeypatch.setattr(persistent_queue.subprocess, 'Popen',
+                        lambda argv, **kw: real_popen([argv[0], '-c', 'import time; time.sleep(30)'], **kw))
+    result = queue.run_one(task_id=task_id, timeout_seconds=1)
+    assert result['error'].startswith('worker_timeout:waited=')
+    assert result['stdout'] == {}
+    stored = queue.get(task_id)['result']
+    assert stored['timeout'] is True and stored['timeout_seconds'] == 1
+    assert stored['waited_seconds'] >= 1

@@ -630,7 +630,29 @@ TrendForce、SemiAnalysis 等来源采用“一个来源资产，多个消费订
 
 这样既避免高价值原文遗漏，也不会让每篇文章都触发所有昂贵模型任务。
 
-### 12.3 新 Agent 的接入方式
+### 12.3 文章类见证方的命题证据抽取
+
+道琼斯（经 IBKR 新闻）、SemiAnalysis、TrendForce 在产业链命题里登记为第三方证人（stance 为 regulator）。它们的文章分两步进入命题证据：
+
+| 步骤 | 任务 | 做什么 | 频率 |
+|---|---|---|---|
+| 入库 | `ibkr_news_daily`、`semianalysis_newsletter_weekly`、`trendforce_news_weekly`（`ats data article-ingest`） | 取正文、去重、存版本 | 每日 / 每周 |
+| 抽取 | `article_evidence_ibkr_news_daily`、`article_evidence_semianalysis_weekly`、`article_evidence_trendforce_weekly`（`ats data article-evidence-observe --source <id>`） | **只读已入库的文章版本**，抽成带说话人与原文位置的中性观测 | 入库后 1–2 小时 |
+
+抽取的规则：
+
+- **每个版本只读一次。** 按"文章版本 + 抽取器版本"记账，正文改版会再读一次。
+- **过滤范围由证人声明推导，不写死某一层。** 先从 `config/sectors/ai_hardware.yaml` 找出该来源登记为证人的全部命题（DOWJONES、SEMIANALYSIS 在 L5，TRENDFORCE 在 L4–L8），再取这些命题所在层的成员与 `expect_from` 实体，以及 `config/data/sources.yaml` 里该来源的关键词表。满足以下任一条才调用模型：
+  - 标题命中关键词；
+  - 标题点名了范围内的公司，且正文开头 3000 字命中关键词。
+
+  关键词表为空表示全读（SemiAnalysis）。不相关的文章记为"已检查、不相关"，同一过滤口径下不再检查。
+- **每次运行最多 20 次抽取请求**（长文按窗口计数）。超出的留到下次运行，本次记为成功的 `partial`，原因里写明剩余篇数。
+- 抽取不访问网络；"没采到"看入库任务的账本，"没抽到"看抽取任务的账本。
+
+2026-08 到 2026-11 之间，抽取步骤因平台迁移失去调用方，三个证人停在 08-18 / 08-30。历史文章的回填须先按来源报预计请求数，经确认后执行（`--since` 指定起点）。
+
+### 12.4 新 Agent 的接入方式
 
 新增 Agent 时，原则上不新增数据抓取器。
 

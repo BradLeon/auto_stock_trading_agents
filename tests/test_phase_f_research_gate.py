@@ -456,7 +456,7 @@ def test_fixed_requirement_damage_blocks_actual_cycle_write(business_inputs, iso
     elif damage=="manifest":requirement["manifest"][0]["content_hash"]="changed"
     elif damage=="config":
         path=business_inputs.root/"technical.yaml"
-        path.write_text(path.read_text()+"\n# configuration changed\n")
+        path.write_text(path.read_text()+"\n_lineage_probe: configuration changed\n")   # a value; comments are not config (495c0db)
     elif damage=="lineage":
         isolated.conn.execute("UPDATE task_projection_envelopes SET input_refs='[]' WHERE projection_id=?",
                               (payload["items"][0]["projection_id"],))

@@ -16,7 +16,7 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
 |---|---|
 | 读什么 | 公司研究包（财务、一致预期、公告、纪要、指引、期权隐含波动等市场预期）、产业链共享事实、**信息分析师的简报**（唯一允许读的其他分析师产出） |
 | 不读什么 | 行业、宏观、技术面的观点；不调用组合 pre-trade check |
-| 产出 | 例行：`fundamental_expectation_update` 投影；事件：`fundamental_event_review` 投影 |
+| 产出 | 例行：`fundamental_expectation_update` 投影；事件：`fundamental_event_review` 投影；重大事件：`fundamental_material_review`；公司风险项：`fundamental_risk_register` |
 | 谁读它 | Chief |
 | 代码 | `src/ats/agents/fundamental/`（`routine.py`、`event.py`、`baseline_view.py`）；打分、单位与报告在 `src/ats/agents/pead/`；财报事件流程用 LangGraph（`graph/pead.py`） |
 | 单票设置 | `config/pead/<SYM>.yaml` 合并在 `config/pead/_defaults.yaml` 之上（打分维度、权重、阈值、上下游） |
@@ -55,6 +55,22 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
 
 `FundamentalEventReviewPayload` 主要字段：`direction`（-1/0/1）、`magnitude`、`confidence`、`scorecard`、
 `guidance`、`narrative`、`falsifiable_conditions`、`actuals`、`baseline_ref`、`baseline_as_of`、`comparison_basis`。
+
+## 重大事件评审与公司风险项（event-impact-routing）
+
+除了例行与事件两种模式，还有第三种产出：**重大事件评审**（`FundamentalMaterialReview`，任务 `fundamental-material`）。
+
+- **什么时候跑**：信息简报里某个"本公司"事件成分被评为重大及以上、且是首发或升级时，由事件路由触发（路由开关见
+  `config/workflow/event_impact.yaml`，默认关闭）。
+- **回答什么**：碰到了论点、风险项或证伪条件里的哪一条；论点状态（稳定 / 承压 / 被证伪）；预期影响是改季度数字（`quarterly_numbers`）
+  还是只改风险溢价（`risk_premium`）；方向、幅度、信心；还有什么待核验；对信息岗评的重要性是否同意（`materiality_review`，以
+  agree / higher / lower 开头）。
+- **边界**：只评公司特有的部分；整层共同的影响（出口规则、同行连带）归层次分析。不输出动作、数量或风控结论。
+- **和另外两种产出的关系**：Chief 对每个标的仍按"有效的财报事件评审优先，否则例行更新"读一份财报口径的基本面，**另外**读有效期内
+  的重大事件评审（14 天，有新进展时重新发布）。没有财报基线时照样评审，信心上限 0.3。
+- **公司风险项**（`FundamentalRiskRegister`）：全年有效的公司特有风险清单，每项带可核对的证伪条件。上线时初始化一次
+  （`python -m ats.agents.fundamental.material --init`，加 `--apply` 才执行），之后每次建财报基线时刷新；重大事件评审读最新一版。
+- 代码 `src/ats/agents/fundamental/material.py`；提示词 `skills/fundamental-material-review`、`skills/fundamental-risk-register`。
 
 ## 没有基线时
 

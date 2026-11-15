@@ -66,7 +66,8 @@ OWNED_PROJECTION_ROLES: dict[str, tuple[str, ...]] = {
     "information_analyst": ("information_brief",),
     "layer_analyst": ("layer_analysis",),
     "sector_analyst": ("sector_allocation",),
-    "fundamental_analyst": ("fundamental_expectation_update", "fundamental_event_review"),
+    "fundamental_analyst": ("fundamental_expectation_update", "fundamental_event_review",
+                            "fundamental_material_review", "fundamental_risk_register"),   # event-impact-routing
     "macro_analyst": ("macro_review",),
     "technical_analyst": ("technical_review",),
 }

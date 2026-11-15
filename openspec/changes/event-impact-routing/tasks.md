@@ -48,14 +48,24 @@
 - [x] 3.3 每周校准报告（纯代码）：下游复核分歧、补认领次数、按重要性分组的 1–3 日超额收益（相对层篮子等权）、当周抽检清单，并入日报或周报。验证：单测用合成数据断言分组与超额收益计算；对真实库跑一次生成报告。
 - [x] 3.4 文档：`docs/OPERATIONS.md` §2（每天/每周看什么：触发台账、分歧、补认领、校准报告）。验证：文档含报告位置与解读。
 
-  - 2026-11-15 实施记录（3.3–3.4）：`src/ats/agents/information/calibration.py`（纯代码）读一周内的事件成分、`fundamental_material_review` 与层分析的 `materiality_review`（不以"一致 / agree"开头即为分歧）、`cross_scope_claims`，按重要性分组计算 1–3 个交易日相对层内其他成员等权篮子的超额收益（行情经 `market_data._download_close_frame`，带 3896f69 的 Yahoo 修复；取不到时写明），并列出当周最高重要性的成分供抽检。由 `report_publishers.event_calibration_report` 在周六行业评审之后写 `事件评级校准-<日期>.md`（没有成分时不写）。测试 `tests/test_event_calibration.py` 5 项（含发布器跳过）、`test_report_publishers` 通过；对真实库空跑与真实行情取数均正常。3.4：`docs/OPERATIONS.md` §2（每周看什么）、§3.2（报告表）。
+  - 2026-11-15 实施记录（3.3–3.4）：`src/ats/workflow/event_calibration.py`（纯代码；2026-11-15 从 agents/information 挪出：它读多个角色的投影，是运维报告而非分析师）读一周内的事件成分、`fundamental_material_review` 与层分析的 `materiality_review`（不以"一致 / agree"开头即为分歧）、`cross_scope_claims`，按重要性分组计算 1–3 个交易日相对层内其他成员等权篮子的超额收益（行情经 `market_data._download_close_frame`，带 3896f69 的 Yahoo 修复；取不到时写明），并列出当周最高重要性的成分供抽检。由 `report_publishers.event_calibration_report` 在周六行业评审之后写 `事件评级校准-<日期>.md`（没有成分时不写）。测试 `tests/test_event_calibration.py` 5 项（含发布器跳过）、`test_report_publishers` 通过；对真实库空跑与真实行情取数均正常。3.4：`docs/OPERATIONS.md` §2（每周看什么）、§3.2（报告表）。
 
 ## 4. 基本面：公司风险项与重大事件评审
 
-- [ ] 4.1 公司风险项投影：生成、刷新（建基线时）、读取最新版；只写公司特有风险。验证：单测覆盖刷新保留上一版引用；初始化 18 份前报请求数，经确认后执行。
-- [ ] 4.2 重大事件评审 runner 与 skill：读简报成分、论点基线、风险项，输出论点状态、命中项、预期影响类别、`direction/magnitude/confidence`、待核验、重要性复核、认领成分编号；无基线时 `confidence ≤ 0.3`；只评估公司特有部分。验证：单测用录制响应覆盖有基线/无基线、拒绝仓位字段；skill 文档写明认领分工。
-- [ ] 4.3 有效期与续期：14 天过期，同簇再触发发布新版本并续期。验证：单测覆盖过期不再被选入、续期生效。
-- [ ] 4.4 文档：`docs/agents/FUNDAMENTAL_ANALYST.md`（第三种产出与叠加关系、风险项）、`docs/ARCHITECTURE.md` §9.2/§9.3、`docs/OPERATIONS.md` §3.3（手动运行重大事件评审）。验证：文档与实现一致。
+- [x] 4.1 公司风险项投影：生成、刷新（建基线时）、读取最新版；只写公司特有风险。验证：单测覆盖刷新保留上一版引用；初始化 18 份前报请求数，经确认后执行。
+- [x] 4.2 重大事件评审 runner 与 skill：读简报成分、论点基线、风险项，输出论点状态、命中项、预期影响类别、`direction/magnitude/confidence`、待核验、重要性复核、认领成分编号；无基线时 `confidence ≤ 0.3`；只评估公司特有部分。验证：单测用录制响应覆盖有基线/无基线、拒绝仓位字段；skill 文档写明认领分工。
+- [x] 4.3 有效期与续期：14 天过期，同簇再触发发布新版本并续期。验证：单测覆盖过期不再被选入、续期生效。
+- [x] 4.4 文档：`docs/agents/FUNDAMENTAL_ANALYST.md`（第三种产出与叠加关系、风险项）、`docs/ARCHITECTURE.md` §9.2/§9.3、`docs/OPERATIONS.md` §3.3（手动运行重大事件评审）。验证：文档与实现一致。
+
+  - 2026-11-15 实施记录（第 4 组）：
+    - `src/ats/agents/fundamental/material.py`（新）：`build_register` / `latest_register` / `init_registers`（默认 dry-run，`python -m ats.agents.fundamental.material --init [--apply]`）；`run_material_pass` 读简报里被引用的成分及其所引事实、财报基线、最新风险项，发布 `fundamental_material_review`（`valid_until` = 现在 + 14 天；无基线时信心封顶 0.3；叙述过交易建议拦截）。
+    - 提示词 `skills/fundamental-material-review`、`skills/fundamental-risk-register`；路由角色 `fundamental_material`、`fundamental_risk_register`（默认中档模型，同 fundamental_analyst）。
+    - `entry.py` 新模式 `material`（触发 `material_development`，`material_request`）；`dispatcher.py` 新适配器 `_fundamental_material_adapter`（需 `component_refs`）；`routine.ensure_baseline` 建新基线后刷新风险项（失败只记日志）；`architecture_guards` 把两个新投影登记为基本面自有。
+    - 4.3：有效期由 `valid_until` 与任务新鲜度 14 天共同约束；同簇再触发发布新版本。过期评审不进决策快照的读取规则在第 8 组实现。
+    - 测试 `tests/test_fundamental_material.py` 7 项；基本面、调度、规划、架构守卫相关 150 余项通过（名单数量断言为既有失败）。
+    - 顺带修复：`1de28d6` 把校准报告放在 `agents/information/` 下，触发架构守卫（信息岗跨角色读取），已挪到 `src/ats/workflow/event_calibration.py`。
+    - 4.1：2026-11-15 用户批准后初始化 18 个 target 的风险项，18 次请求全部成功，记录在 `var/manual_fixes/risk-register-init-20261115/`。抽查发现风险项只依据财报基线叙事生成、不读近期简报，NVDA 的清单里没有关键人一项（黄仁勋事件未进入），待用户决定是否让生成时也读近期简报事实。
+    - 文档：`docs/agents/FUNDAMENTAL_ANALYST.md`、`docs/ARCHITECTURE.md` §9.4、`docs/OPERATIONS.md` §3.3。
 
 ## 5. 层次分析：风险命题、冲击与补认领
 

@@ -17,14 +17,17 @@ log = __import__("logging").getLogger("ats.agents.fundamental.entry")
 
 MODE_ROUTINE = "routine"
 MODE_EVENT = "event"
+MODE_MATERIAL = "material"     # event-impact-routing: a material non-earnings event, read beside the other two
 
 # 触发契约：一种模式只接受自己的触发类型（5.1）。
 ROUTINE_TRIGGERS: tuple[str, ...] = ("information_brief_update", "expectation_data_change")
 EVENT_TRIGGERS: tuple[str, ...] = ("earnings_release", "company_event")
+MATERIAL_TRIGGERS: tuple[str, ...] = ("material_development",)
 
 TRIGGERS_BY_MODE: dict[str, tuple[str, ...]] = {
     MODE_ROUTINE: ROUTINE_TRIGGERS,
     MODE_EVENT: EVENT_TRIGGERS,
+    MODE_MATERIAL: MATERIAL_TRIGGERS,
 }
 
 
@@ -78,6 +81,13 @@ def event_request(symbol: str, *, trigger: str, fiscal_label: str,
                                  use_llm=use_llm, extra=dict(extra or {}))
 
 
+def material_request(symbol: str, *, component_refs: list[str], use_llm: bool = True,
+                     extra: dict | None = None) -> FundamentalRunRequest:
+    """重大事件评审请求：由简报里的事件成分触发（material_development）。"""
+    return FundamentalRunRequest(mode=MODE_MATERIAL, symbol=symbol, trigger="material_development",
+                                 use_llm=use_llm, extra={**dict(extra or {}), "component_refs": list(component_refs)})
+
+
 def build_run_request(mode: str, symbol: str, *, trigger: str,
                       **kwargs) -> FundamentalRunRequest:
     """按模式名分发构造——CLI 与调度器的唯一构造口。"""
@@ -102,6 +112,10 @@ def run_fundamental_pass(request: FundamentalRunRequest) -> dict:
         from . import routine
 
         return routine.run_routine_pass(request)
+    if request.mode == MODE_MATERIAL:
+        from . import material
+
+        return material.run_material_pass(request)
     from . import event
 
     return event.run_event_pass(request)

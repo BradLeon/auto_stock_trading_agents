@@ -1,5 +1,8 @@
 """Weekly calibration of event-component ratings (event-impact-routing 3.3). Pure code: no model call.
 
+An operations report, not an analyst: it reads the outputs of several roles (briefs, Fundamental material
+reviews, Layer analyses) to check one of them, so it lives with the workflow, outside `agents/`.
+
 What it answers, for the week before `now`:
   * how the information analyst rated (materiality x direction x scope);
   * where downstream disagreed — the Fundamental material review and the Layer analysis each record a
@@ -19,7 +22,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any, Callable
 
-log = logging.getLogger("ats.agents.information.calibration")
+log = logging.getLogger("ats.workflow.event_calibration")
 
 ORDER = {"minor": 0, "moderate": 1, "major": 2, "critical": 3}
 LABEL = {"minor": "轻微", "moderate": "中等", "major": "重大", "critical": "极重大"}
@@ -122,7 +125,7 @@ def summarize(ar_rows: list[dict]) -> list[dict]:
 
 def _market_history(symbols: list[str]) -> dict[str, list[tuple[date, float]]]:
     """Dated closes through the runtime market-data downloader (its session carries the Yahoo TLS fix, 3896f69)."""
-    from ...data.runtime.market_data import _download_close_frame, _frame_columns
+    from ..data.runtime.market_data import _download_close_frame, _frame_columns
 
     frame, _normalized, _failed = _download_close_frame(symbols, "3mo")
     return {sym: [(idx.date(), float(v)) for idx, v in series.dropna().items()]
@@ -130,7 +133,7 @@ def _market_history(symbols: list[str]) -> dict[str, list[tuple[date, float]]]:
 
 
 def build(store, *, now: datetime | None = None, days: int = 7, history=None) -> dict[str, Any]:
-    from .event_components import chain_scope
+    from ..agents.information.event_components import chain_scope
 
     now = now or datetime.now(timezone.utc)
     start = now - timedelta(days=days)
@@ -183,7 +186,7 @@ def render(report: dict[str, Any]) -> str:
 
 
 def write(store, *, output_dir: str | Path, now: datetime | None = None, history=None) -> Path | None:
-    from ..report_files import unique_path
+    from ..agents.report_files import unique_path
 
     report = build(store, now=now, history=history)
     if not report["components"]:

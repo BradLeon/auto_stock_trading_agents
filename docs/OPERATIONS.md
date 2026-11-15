@@ -51,7 +51,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 - **事后对照**：各档重要性对应的事发后 1–3 个交易日平均|超额收益|（相对所在层其他成员的等权篮子）。应随重要性单调上升；
   只用来校准评级，不改写历史评级。行情取不到时报告会写明。
 
-报告最后是当周重要性最高的几个成分，供抽检。生成代码在 `agents/information/calibration.py`，纯代码、不调用模型。
+报告最后是当周重要性最高的几个成分，供抽检。生成代码在 `workflow/event_calibration.py`，纯代码、不调用模型。
 
 ## 3. 研究调度
 
@@ -111,6 +111,10 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 - 依赖的数据版本未变、投影仍在有效期内时直接复用，**不重复请求模型**。要在数据没变时强制重算，
   用 `--inputs-json '{"<task_id>": {"force_recompute": true}}'`。
 - 旧手动入口（`ats macro review`、`ats pead prep`、`ats analyst information` 等）已退役，会提示对应的 `ats workflow run` 写法。
+- 某只票的重大事件评审要手动补跑：`ats workflow run --task fundamental-material --scope-kind entity --scope-id <SYM>
+  --inputs-json '{"fundamental-material": {"component_refs": ["<简报投影 id>#<成分编号>"]}}'`（成分编号在简报的 `event_components` 里）。
+- 公司风险项初始化（event-impact-routing 4.1，一次性）：`python -m ats.agents.fundamental.material --init` 先列出缺风险项的
+  target 与请求数，确认后加 `--apply` 执行；之后每次建财报基线时自动刷新。
 - 某只票要手动刷新财报前基线：`ats workflow run --task fundamental-routine --scope-kind entity --scope-id <SYM>
   --inputs-json '{"fundamental-routine": {"refresh_baseline": true}}'`。
 

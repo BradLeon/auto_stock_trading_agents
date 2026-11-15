@@ -423,7 +423,18 @@ def ensure_baseline(store, request) -> dict:
     except Exception as exc:  # noqa: BLE001 - the baseline itself is saved; the record of it is refused
         log.warning("baseline projection for %s %s refused: %s", symbol, label, exc)
         projection = ""
-    return {"baseline": "built", "reason": reason, "projection_id": projection, **window}
+    register = ""
+    if request.use_llm:
+        # event-impact-routing 4.1: the company risk register is refreshed with every new baseline. A failure is
+        # logged and leaves the previous register in force; it never fails the baseline.
+        from .material import build_register
+
+        try:
+            register = build_register(store, symbol, refreshed_with=refs[0])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("risk register refresh for %s %s failed: %s", symbol, label, exc)
+    return {"baseline": "built", "reason": reason, "projection_id": projection, "risk_register": register,
+            **window}
 
 
 from ...workflow.runtime_reads import scoped_read  # noqa: E402

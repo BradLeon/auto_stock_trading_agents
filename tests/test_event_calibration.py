@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from ats.agents.information import calibration as cal
+from ats.workflow import event_calibration as cal
 
 NOW = datetime(2026, 11, 14, 2, 0, tzinfo=timezone.utc)
 DAY = NOW - timedelta(days=3)       # 11-11

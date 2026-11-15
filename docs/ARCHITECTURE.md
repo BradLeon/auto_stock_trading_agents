@@ -639,6 +639,17 @@ Information Analyst 处理的是多类信息资产，因此公开角色名不使
 Fundamental 不读取 Sector 或 Macro 报告，也不调用最终组合 pre-trade check。
 上下游信号必须以共享事实或 Data Product 形式输入，不能通过另一个分析师的观点绕过依赖约束。
 
+### 9.4 Fundamental 重大事件评审与公司风险项（event-impact-routing）
+
+财报以外的重大事件另有第三种产出 `FundamentalMaterialReview`（任务 `fundamental-material`，模式 `material`，触发
+`material_development`）。它由简报里被评为重大及以上的"本公司"事件成分触发，回答：碰到了论点里的哪一条、哪个风险项或证伪
+条件；论点状态（稳定 / 承压 / 被证伪）；预期影响是改季度数字还是只改风险溢价；方向、幅度、信心；待核验项；对成分重要性的复核。
+它**只评估公司特有的部分**，整层共同影响归层次分析；有效期 14 天，同一事件有新进展时重新发布。Chief 读取时与例行更新或财报
+事件评审**并列**，不参与那两者的二选一。没有财报基线的标的照样评审，信心上限 0.3。
+
+公司风险项 `FundamentalRiskRegister` 是全年有效的公司特有风险清单（关键人、治理、客户集中度、监管个案等），每项带证伪条件。
+上线时为每个 target 初始化一次，此后每次建立财报基线时刷新；刷新失败只记日志，沿用上一版。实现见 `agents/fundamental/material.py`。
+
 ## 10. Chief—Risk—Boss—Trader 审批链
 
 ### 10.1 决策快照

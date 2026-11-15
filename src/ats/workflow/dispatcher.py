@@ -920,6 +920,7 @@ def default_adapters() -> dict[str, TaskAdapter]:
         "sector-review": _sector_adapter,
         "fundamental-routine": _fundamental_routine_adapter,
         "fundamental-event": _fundamental_event_adapter,
+        "fundamental-material": _fundamental_material_adapter,
         "macro-review": _macro_adapter,
         "technical-review": _technical_adapter,
     }
@@ -1027,6 +1028,21 @@ def _fundamental_event_adapter(context: TaskContext) -> TaskAdapterResult:
                "data_vintage_refs": list(context.data_vintage_refs)})
     result = run_fundamental_pass(request)
     return TaskAdapterResult(detail=str(result.get("summary", "event review completed")))
+
+
+def _fundamental_material_adapter(context: TaskContext) -> TaskAdapterResult:
+    """event-impact-routing: a material, non-earnings event for one company, from the brief's rated components."""
+    from ..agents.fundamental.entry import material_request, run_fundamental_pass
+
+    refs = [str(ref) for ref in context.task_inputs.get("component_refs", []) or []]
+    if not refs:
+        raise DependencyUnavailable("Fundamental material review requires component_refs from a brief")
+    request = material_request(
+        context.task.scope.id, component_refs=refs, use_llm=_use_llm(context),
+        extra={"input_refs": [*_information_dependency_refs(context), *refs],
+               "data_vintage_refs": list(context.data_vintage_refs)})
+    result = run_fundamental_pass(request)
+    return TaskAdapterResult(detail=str(result.get("summary", "material review completed")))
 
 
 def _macro_adapter(context: TaskContext) -> TaskAdapterResult:

@@ -109,7 +109,7 @@ def chain_evidence_report(outcomes: list[dict], *, store_path: str | None) -> di
 
 def event_calibration_report(outcomes: list[dict], *, store_path: str | None) -> dict[str, Any]:
     """Weekly calibration of event-component ratings (event-impact-routing 3.3), after the Saturday sector review."""
-    from ..agents.information import calibration
+    from . import event_calibration as calibration
     from ..config import load_sector_config
     from ..memory import task_store_scope
 

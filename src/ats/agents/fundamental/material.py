@@ -57,13 +57,46 @@ def latest_register(store, symbol: str) -> dict | None:
     return rows[0] if rows else None
 
 
-def register_context(symbol: str, baseline: dict, previous: dict | None) -> str:
+RECENT_FACT_DAYS = 14
+RECENT_FACT_LIMIT = 40
+
+
+def recent_facts(store, symbol: str, *, now: datetime | None = None) -> tuple[list[str], list[str]]:
+    """Facts from this company's information briefs of the last 14 days (newest first, de-duplicated, at most 40),
+    and the brief ids they came from. The register is built from the baseline alone otherwise, so a risk that arose
+    after the last earnings (the NVDA CEO probe, 2026-11) would never enter it."""
+    now = now or _now()
+    cutoff = now - timedelta(days=RECENT_FACT_DAYS)
+    facts, refs, seen = [], [], set()
+    for row in store.task_projection_envelopes(agent_role="information_brief", scope_kind="entity",
+                                               scope_id=symbol.upper(), limit=30):
+        try:
+            as_of = datetime.fromisoformat(str(row.get("as_of")))
+        except ValueError:
+            continue
+        if as_of.tzinfo is None or not cutoff <= as_of <= now:
+            continue
+        used = False
+        for fact in (row.get("payload") or {}).get("fact_changes") or []:
+            if fact not in seen and len(facts) < RECENT_FACT_LIMIT:
+                seen.add(fact)
+                facts.append(fact)
+                used = True
+        if used:
+            refs.append(row["projection_id"])
+    return facts, refs
+
+
+def register_context(symbol: str, baseline: dict, previous: dict | None, facts: list[str] | None = None) -> str:
     prior = "\n".join(f"- {i.get('key')}: {i.get('label')} — 证伪：{i.get('falsifier')}"
                       for i in ((previous or {}).get("payload") or {}).get("items") or []) or "(none)"
+    recent = "\n".join(f"- {fact}" for fact in facts or []) or "(none)"
     return (f"Company: {symbol}\n\nCurrent thesis narrative (may be empty):\n{baseline.get('narrative') or '(none)'}\n\n"
             f"Tracked expectation dimensions: {', '.join(baseline.get('dim_keys') or []) or '(none)'}\n\n"
             f"Previous risk register:\n{prior}\n\n"
-            "List the company-specific risks an analyst should watch, each with an observable falsifier.")
+            f"Facts from recent information briefs (last {RECENT_FACT_DAYS} days):\n{recent}\n\n"
+            "List the company-specific risks an analyst should watch, each with an observable falsifier. "
+            "Include a risk that only appears in the recent facts (e.g. a key person under investigation).")
 
 
 def build_register(store, symbol: str, *, rate=None, refreshed_with: str = "") -> str:
@@ -74,7 +107,8 @@ def build_register(store, symbol: str, *, rate=None, refreshed_with: str = "") -
     symbol = symbol.upper()
     baseline = load_baseline(store, symbol)
     previous = latest_register(store, symbol)
-    context = register_context(symbol, baseline, previous)
+    facts, brief_refs = recent_facts(store, symbol)
+    context = register_context(symbol, baseline, previous, facts)
     rate = rate or (lambda ctx: run_structured(REGISTER_ROLE, RiskRegisterView, ctx, skill_slug=REGISTER_SKILL))
     view = rate(context)
     payload = {"entity": symbol, "items": [item.model_dump() for item in view.items],
@@ -82,7 +116,7 @@ def build_register(store, symbol: str, *, rate=None, refreshed_with: str = "") -
                "previous_ref": (previous or {}).get("projection_id", "")}
     envelope = build_envelope(
         role="fundamental_risk_register", payload=payload, scope=ProjectionScope(kind="entity", id=symbol),
-        as_of=_now().isoformat(), input_refs=[*(baseline.get("baseline_refs") or []),
+        as_of=_now().isoformat(), input_refs=[*(baseline.get("baseline_refs") or []), *brief_refs,
                                               *([previous["projection_id"]] if previous else [])],
         supersedes_projection_id=(previous or {}).get("projection_id", ""),
         **execution_versions(REGISTER_ROLE, REGISTER_SKILL, template_source=__file__))
@@ -177,9 +211,10 @@ def run_material_pass(request, *, store=None, rate=None) -> dict:
             "summary": f"material review {view.thesis_status}, direction {view.direction}"}
 
 
-def init_registers(store, symbols: list[str], *, apply: bool = False) -> dict:
-    """One-time initialisation (tasks 4.1): a register for every target that has none. Dry-run by default."""
-    missing = [s.upper() for s in symbols if latest_register(store, s) is None]
+def init_registers(store, symbols: list[str], *, apply: bool = False, rebuild: bool = False) -> dict:
+    """One-time initialisation (tasks 4.1): a register for every target that has none (or every target with
+    `rebuild`, which keeps the previous version as `previous_ref`). Dry-run by default."""
+    missing = [s.upper() for s in symbols if rebuild or latest_register(store, s) is None]
     out = {"targets": len(symbols), "missing": missing, "requests": len(missing), "built": {}, "failed": {}}
     if not apply:
         return out
@@ -202,12 +237,14 @@ def main(argv: list[str] | None = None) -> int:
                                      description="初始化公司风险项（event-impact-routing 4.1）；默认只列出要建的标的与请求数")
     parser.add_argument("--init", action="store_true", help="为没有风险项的 PEAD target 建立风险项")
     parser.add_argument("--apply", action="store_true", help="真正调用模型并发布；不加只做 dry-run")
+    parser.add_argument("--rebuild", action="store_true", help="已有风险项的也重建一版（保留上一版引用）")
     args = parser.parse_args(argv)
     if not args.init:
         parser.print_help()
         return 2
     targets = [str(s) for s in load_pead_global().get("targets", [])]
-    print(json.dumps(init_registers(get_store(), targets, apply=args.apply), ensure_ascii=False, indent=1))
+    print(json.dumps(init_registers(get_store(), targets, apply=args.apply, rebuild=args.rebuild),
+                     ensure_ascii=False, indent=1))
     return 0
 
 

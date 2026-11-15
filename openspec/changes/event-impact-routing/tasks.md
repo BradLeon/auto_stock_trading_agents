@@ -64,7 +64,7 @@
     - 4.3：有效期由 `valid_until` 与任务新鲜度 14 天共同约束；同簇再触发发布新版本。过期评审不进决策快照的读取规则在第 8 组实现。
     - 测试 `tests/test_fundamental_material.py` 7 项；基本面、调度、规划、架构守卫相关 150 余项通过（名单数量断言为既有失败）。
     - 顺带修复：`1de28d6` 把校准报告放在 `agents/information/` 下，触发架构守卫（信息岗跨角色读取），已挪到 `src/ats/workflow/event_calibration.py`。
-    - 4.1：2026-11-15 用户批准后初始化 18 个 target 的风险项，18 次请求全部成功，记录在 `var/manual_fixes/risk-register-init-20261115/`。抽查发现风险项只依据财报基线叙事生成、不读近期简报，NVDA 的清单里没有关键人一项（黄仁勋事件未进入），待用户决定是否让生成时也读近期简报事实。
+    - 4.1：2026-11-15 用户批准后初始化 18 个 target 的风险项，18 次请求全部成功，记录在 `var/manual_fixes/risk-register-init-20261115/`。抽查发现风险项只依据财报基线叙事生成、不读近期简报，NVDA 的清单里没有关键人一项（黄仁勋事件未进入），用户决定改为生成时也读近 14 天简报事实（最多 40 条）并立即重建：`recent_facts` 与 `--rebuild`，测试 2 项；重建 18 次请求全部成功（`var/manual_fixes/risk-register-rebuild-20261115/`），NVDA 清单新增"CEO 去职与治理危机""CEO 调查与国会传唤""中国出口许可与监管"。
     - 文档：`docs/agents/FUNDAMENTAL_ANALYST.md`、`docs/ARCHITECTURE.md` §9.4、`docs/OPERATIONS.md` §3.3。
 
 ## 5. 层次分析：风险命题、冲击与补认领

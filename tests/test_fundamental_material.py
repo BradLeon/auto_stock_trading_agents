@@ -121,3 +121,36 @@ def test_an_expired_material_review_is_not_reused_and_a_new_development_republis
     mat.run_material_pass(request, store=store, rate=lambda ctx: _review_view(thesis_status="falsified"))
     reviews = [e for e in store.saved if e.agent_role == "fundamental_material_review"]
     assert len(reviews) == 2 and reviews[-1].payload["thesis_status"] == "falsified"
+
+
+def test_register_reads_recent_brief_facts_so_new_company_risks_enter_it(env):
+    """2026-11-15: built from the baseline alone, NVDA's register had no key-person item during the CEO probe."""
+    from ats.agent.task_projection import ProjectionScope, build_envelope
+
+    store = Store()
+    brief = build_envelope(role="information_brief", scope=ProjectionScope(kind="entity", id="NVDA"),
+                           as_of=(NOW - timedelta(days=2)).isoformat(),
+                           payload={"entity": "NVDA", "headline": "h", "summary": "s", "relevance": "high",
+                                    "sources": ["ibkr_news"], "fact_changes": ["来源信息（WSJ）：董事会调查 CEO 黄仁勋"]})
+    old = build_envelope(role="information_brief", scope=ProjectionScope(kind="entity", id="NVDA"),
+                         as_of=(NOW - timedelta(days=30)).isoformat(),
+                         payload={"entity": "NVDA", "headline": "h", "summary": "s", "relevance": "low",
+                                  "sources": ["ibkr_news"], "fact_changes": ["一个月前的旧事实"]})
+    store.saved += [old, brief]
+    seen = {}
+
+    def rate(ctx):
+        seen["ctx"] = ctx
+        return _register_view()
+
+    mat.build_register(store, "NVDA", rate=rate)
+    assert "董事会调查 CEO 黄仁勋" in seen["ctx"] and "一个月前的旧事实" not in seen["ctx"]
+    register = [e for e in store.saved if e.agent_role == "fundamental_risk_register"][-1]
+    assert brief.projection_id in register.input_refs
+
+
+def test_rebuild_covers_targets_that_already_have_a_register(env):
+    store = Store()
+    mat.build_register(store, "NVDA", rate=lambda ctx: _register_view())
+    assert mat.init_registers(store, ["NVDA", "TSM"])["missing"] == ["TSM"]
+    assert mat.init_registers(store, ["NVDA", "TSM"], rebuild=True)["missing"] == ["NVDA", "TSM"]

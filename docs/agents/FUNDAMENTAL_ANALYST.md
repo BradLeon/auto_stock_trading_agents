@@ -68,7 +68,8 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
 - **边界**：只评公司特有的部分；整层共同的影响（出口规则、同行连带）归层次分析。不输出动作、数量或风控结论。
 - **和另外两种产出的关系**：Chief 对每个标的仍按"有效的财报事件评审优先，否则例行更新"读一份财报口径的基本面，**另外**读有效期内
   的重大事件评审（14 天，有新进展时重新发布）。没有财报基线时照样评审，信心上限 0.3。
-- **公司风险项**（`FundamentalRiskRegister`）：全年有效的公司特有风险清单，每项带可核对的证伪条件。上线时初始化一次
+- **公司风险项**（`FundamentalRiskRegister`）：全年有效的公司特有风险清单，每项带可核对的证伪条件。生成时读财报基线叙事、
+  上一版清单，以及该标的近 14 天简报里的事实（最多 40 条），所以财报之后才出现的风险（比如 CEO 被调查）也会进清单。上线时初始化一次
   （`python -m ats.agents.fundamental.material --init`，加 `--apply` 才执行），之后每次建财报基线时刷新；重大事件评审读最新一版。
 - 代码 `src/ats/agents/fundamental/material.py`；提示词 `skills/fundamental-material-review`、`skills/fundamental-risk-register`。
 

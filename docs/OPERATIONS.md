@@ -114,7 +114,8 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 - 某只票的重大事件评审要手动补跑：`ats workflow run --task fundamental-material --scope-kind entity --scope-id <SYM>
   --inputs-json '{"fundamental-material": {"component_refs": ["<简报投影 id>#<成分编号>"]}}'`（成分编号在简报的 `event_components` 里）。
 - 公司风险项初始化（event-impact-routing 4.1，一次性）：`python -m ats.agents.fundamental.material --init` 先列出缺风险项的
-  target 与请求数，确认后加 `--apply` 执行；之后每次建财报基线时自动刷新。
+  target 与请求数，确认后加 `--apply` 执行；之后每次建财报基线时自动刷新。要让已有清单立刻吸收近期简报里的新风险，
+  加 `--rebuild`（全部重建一版，保留上一版引用；每个标的 1 次请求）。
 - 某只票要手动刷新财报前基线：`ats workflow run --task fundamental-routine --scope-kind entity --scope-id <SYM>
   --inputs-json '{"fundamental-routine": {"refresh_baseline": true}}'`。
 

@@ -1,0 +1,14 @@
+# event-impact-routing (2026-11-13): material events split by impact scope and routed to Fundamental / Layer.
+# Both switches stay OFF until the replay acceptance (tasks 9.2) passes and the user approves go-live (9.3).
+# This file is NOT in any task's config lineage yet; going live adds it to information-brief and layer-review
+# (design D1), so flipping a switch then re-runs what it should.
+schema_version: 1
+components:
+  enabled: false          # information brief: split facts into rated event components (1 flash request per brief)
+  novelty_window_days: 7  # a cluster seen within this window is a follow-up unless the model rates an escalation
+  max_facts: 120          # facts sent to the rater per brief (NVDA 11-12 had 109); the rest are named in `unverified`
+routing:
+  enabled: false          # material_development events (tasks group 7)
+  trigger_min_materiality: major   # either direction
+  validity_days: 14       # material reviews and off-thesis shocks
+  ad_hoc_max_notches: 1   # an event-triggered sector review lowers a layer by at most one notch

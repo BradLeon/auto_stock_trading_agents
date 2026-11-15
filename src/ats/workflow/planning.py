@@ -29,6 +29,9 @@ TASK_ROLE: dict[str, AgentRole] = {
     "sector-review": "sector_allocation",
     "fundamental-routine": "fundamental_expectation_update",
     "fundamental-event": "fundamental_event_review",
+    # event-impact-routing (2026-11-13): a material, non-earnings event for one company. Read ALONGSIDE the
+    # earnings-anchored Fundamental view, so it is deliberately not in FUNDAMENTAL_TASKS (the per-target choice).
+    "fundamental-material": "fundamental_material_review",
     "macro-review": "macro_review",
     "technical-review": "technical_review",
 }
@@ -36,6 +39,7 @@ ALLOWED_CROSS_ANALYST_EDGES = {
     ("layer_analysis", "sector_allocation"),
     ("information_brief", "fundamental_expectation_update"),
     ("information_brief", "fundamental_event_review"),
+    ("information_brief", "fundamental_material_review"),
 }
 TASK_POLICIES: dict[str, dict[str, Any]] = {
     "layer-review": {"trigger_modes": ("manual", "schedule", "event"), "resource_group": "llm"},
@@ -45,6 +49,7 @@ TASK_POLICIES: dict[str, dict[str, Any]] = {
     "fundamental-routine": {"trigger_modes": ("manual", "schedule", "event"),
                              "resource_group": "llm"},
     "fundamental-event": {"trigger_modes": ("manual", "event"), "resource_group": "pead"},
+    "fundamental-material": {"trigger_modes": ("manual", "event"), "resource_group": "llm"},
     "macro-review": {"trigger_modes": ("manual", "schedule", "event"),
                       "resource_group": "llm"},
     "technical-review": {"trigger_modes": ("manual", "schedule", "event"),
@@ -55,6 +60,7 @@ TASK_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "sector-review": ("layer-review",),
     "fundamental-routine": ("information-brief",),
     "fundamental-event": ("information-brief",),
+    "fundamental-material": ("information-brief",),
     "macro-review": (), "technical-review": (),
 }
 FRESHNESS_SECONDS: dict[str, int] = {
@@ -69,6 +75,7 @@ FRESHNESS_SECONDS: dict[str, int] = {
     "layer-review": 7 * 86_400, "information-brief": 120 * 3_600,
     "sector-review": 7 * 86_400, "fundamental-routine": 72 * 3_600,
     "fundamental-event": 4 * 86_400, "macro-review": 7 * 86_400,
+    "fundamental-material": 14 * 86_400,   # a material review is valid 14 days; a new development re-publishes it
     "technical-review": 24 * 3_600,   # with its market-session vintage: reused within one session (2026-10-16)
 }
 # A model-service outage (connection reset, rate limit) rarely clears in one second. Information fans out one
@@ -79,7 +86,7 @@ TIMEOUT_SECONDS: dict[str, int] = {
     # 52 adjudications, one rotation). At the old 1200 s the Dispatcher would cancel the attempt and retry the whole
     # review while the first worker kept calling the model, doubling the requests (10.5, 2026-10-17).
     "layer-review": 900, "information-brief": 900, "sector-review": 3_600,
-    "fundamental-routine": 900, "fundamental-event": 1_200,
+    "fundamental-routine": 900, "fundamental-event": 1_200, "fundamental-material": 900,
     "macro-review": 900, "technical-review": 600,
 }
 
@@ -295,6 +302,33 @@ def _targets(config_dir: Path) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
+def _chain_observe(config_dir: Path) -> list[str]:
+    """Observe-list names that sit in a chain layer, for light briefs (event-impact-routing 2.4).
+
+    Empty unless the event-component switch is on: a light brief exists only to carry rated event components, so
+    with the switch off nothing changes. A name counts when it is a layer member or a declared witness of a layer
+    claim (ORCL, INTC and NBIS speak to chain claims without being members).
+    """
+    try:
+        switch = _load_yaml(config_dir / "workflow" / "event_impact.yaml")
+    except Exception:  # noqa: BLE001 - no switch file = switched off
+        return []
+    if not bool((switch.get("components") or {}).get("enabled", False)):
+        return []
+    pead = _load_yaml(config_dir / "pead.yaml")
+    observe = [str(item).upper() for item in pead.get("observe", [])]
+    members: set[str] = set()
+    for path in sorted((config_dir / "sectors").glob("*.yaml")):
+        for layer in _load_yaml(path).get("layers", []):
+            members |= {str(t.get("symbol", "")).upper() for t in layer.get("tickers", [])}
+            for claim in layer.get("claims") or []:
+                members |= {str(w.get("entity", "")).upper() for w in claim.get("witnesses") or []}
+                for concept in claim.get("concepts") or []:
+                    members |= {str(e).upper() for e in concept.get("expect_from") or []}
+    targets = set(_targets(config_dir))
+    return [symbol for symbol in dict.fromkeys(observe) if symbol in members and symbol not in targets]
+
+
 FUNDAMENTAL_TASKS = ("fundamental-routine", "fundamental-event")
 
 # A routine cycle may leave this many targets without a usable Fundamental (stated, and barred from new exposure by the
@@ -339,9 +373,14 @@ def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) ->
             raise ContractError(f"sector {requested_scope.id!r} has no configured layers")
         return [ProjectionScope(kind="layer", id=layer) for layer in layers]
     if task_id in {"information-brief", "fundamental-routine", "fundamental-event",
-                   "technical-review"}:
+                   "fundamental-material", "technical-review"}:
         symbols = ([requested_scope.id.upper()] if requested_scope.kind == "entity"
                    else _targets(config_dir))
+        if (task_id == "information-brief" and requested_scope.kind == "portfolio"
+                and requested_scope.id == "pead-targets"):
+            # The daily brief run also covers chain-layer observe names when event components are on (light briefs:
+            # no Fundamental follows them, and decision plans resolve briefs from the sector scope, not from here).
+            symbols = [*symbols, *_chain_observe(config_dir)]
         if not symbols:
             raise ContractError(f"{task_id} has an empty entity scope")
         return [ProjectionScope(kind="entity", id=symbol) for symbol in symbols]
@@ -364,7 +403,7 @@ def _config_paths(task_ids: Iterable[str], scope_id: str,
     if task_ids & {"layer-review", "sector-review"}:
         paths |= {f"sectors/{scope_id}.yaml", "risk.yaml"}
     if task_ids & {"information-brief", "fundamental-routine", "fundamental-event",
-                   "technical-review"}:
+                   "fundamental-material", "technical-review"}:
         paths.add("pead.yaml")
     if "technical-review" in task_ids:
         paths.add("technical.yaml")

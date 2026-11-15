@@ -18,7 +18,7 @@
 | 谁读它 | 基本面分析师（唯一的跨分析师依赖之一）、Chief |
 | 什么时候跑 | 工作日 08:00（纽约时间）定时；财报计划与发布的日历事件也会唤醒它（见 OPERATIONS §3.1） |
 | 手动运行 | `ats workflow run --task information-brief --scope-kind entity --scope-id <代码>`（全部目标标的用 `--scope-kind portfolio --scope-id pead-targets`）；旧入口 `ats analyst information` 已退役，运行只会提示上述写法 |
-| 代码 | `src/ats/agents/information/`（`entry.py` 入口、`selection.py` 候选选择、`triage.py` 材料性评估、`extract.py` 抽取、`briefs.py` 发布契约） |
+| 代码 | `src/ats/agents/information/`（`entry.py` 入口、`selection.py` 候选选择、`triage.py` 材料性评估、`extract.py` 抽取、`briefs.py` 发布契约、`event_components.py` 事件成分评级） |
 
 ## 一份简报里有什么
 
@@ -31,6 +31,33 @@
 - `confidence`、`freshness`、`unverified`：可信度、时效、**待核验项**。
 - `event_time`、`published_at`、`extracted_at`：三个时钟。时效按**发布时间**判，不按入库时间。
 - `cluster_key`、`source_count`、`independent_sources`：同一事件的多篇报道聚成一簇。
+- `event_components`（开关打开后才有）：把一件事拆成**事件成分**，每个成分一行，供事件路由把公司部分交给基本面、
+  层面部分交给层次分析。见下一节。
+
+## 事件成分（event-impact-routing）
+
+开关在 `config/workflow/event_impact.yaml` 的 `components.enabled`，**默认关闭**；关闭时简报与请求都和以前一样。
+
+**怎么来的。** 简报的事实汇总好之后，对该标的当期全部事实（最多 `max_facts` 条，默认 120）做**一次**评级请求
+（路由角色 `event_component_rating`，提示词 `skills/information-event-components`，代码 `event_components.py`）。
+这一步不改逐篇抽取，抽取缓存不受影响。
+
+| 字段 | 谁判断 | 含义 |
+|---|---|---|
+| `cluster_key` | 模型给出、代码规范化 | 底层事件；评级时列出近 7 天（所有标的）已出现的簇，同一事件复用同一个键 |
+| `scope`、`layers`、`entities` | 模型 | 影响面：本公司 `entity` / 本层 `layer` / 跨层 `cross_layer`，以及涉及的层与标的 |
+| `materiality`、`direction` | 模型 | 轻微 / 中等 / 重大 / 极重大，对预期或论点的改变有多大，正负都算 |
+| `role`、`status` | 模型 | 直接或连带；持续或了结 |
+| `novelty` | 代码 + 模型 | 簇在近 7 天没出现过为"首发"，出现过为"后续"；只有已出现过的簇，模型才能判"升级" |
+| `citations` | 代码 | 从简报的 `source_evidence` 按事实编号取原文定位，模型不写 |
+
+**发布契约。** 层与标的必须是 `ai_hardware.yaml` 里登记过的成员或证人；层面成分必须给出涉及的层，跨层至少两层；
+含交易建议措辞的成分不发布；"重大"及以上但没有原文定位的降为"中等"并记 `downgrade_reason`。被拒的成分与评级失败都写进
+`unverified`，简报照常发布，不因评级而失败。
+
+**轻量简报。** 开关打开后，每日简报还覆盖 observe 名单中属于产业链层成员或命题证人的 9 家（META、ORCL、
+005930.KS、SPCX、INTC、AMD、AMAT、CRWV、NBIS）。它们走同一条简报流程，只为事件成分服务，不触发基本面；
+决策周期按板块范围解析简报，不受影响。成本约每天 32 次逐篇抽取加 9 次评级（flash）。
 
 ## 发布前必须通过的规则（`briefs.py`）
 

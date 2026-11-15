@@ -1,0 +1,86 @@
+# Tasks
+
+> 前置：`article-witness-observations` 已完成（三个文章证人恢复产出观测）。每组只跑直接相关的测试；写生产、改定时任务与路由开关前须经用户批准。
+
+## 1. 投影契约
+
+- [x] 1.1 `task_projection.py`：新增 `FundamentalMaterialReviewPayload`（拒绝动作与数量字段），以及 `InformationBrief.event_components`、`LayerAnalysis` 的风险命题状态 / 论点外冲击 / 补认领 / 下调建议、`SectorAllocation` 每层的 `downgrade_reasons`，全部 v1 可省略。验证：新增单测覆盖新字段校验、含 `target_weight` 的重大事件评审被拒；用库中一份上线前的 `LayerAnalysis` 与 `InformationBrief` 投影做回读校验并通过。
+- [x] 1.2 `planning.py`：登记任务 `fundamental-material` 与角色 `fundamental_material_review`（依赖 `information-brief`，有效期 14 天）。验证：`test_workflow_planning`、`validate_task_registry` 通过（既有的名单数量失败除外）。
+- [x] 1.3 文档：`docs/ARCHITECTURE.md` §7.2/§7.3（新角色与各 Payload 新字段）。验证：文档与 schema 字段一致（人工核对，或按文档一致性测试）。
+
+  - 2026-11-13 实施记录（第 1 组）：
+    - `task_projection.py`：新增 `EventComponent`（简报 `event_components`）、`RiskClaimState` / `OffThesisShock` / `CrossScopeClaim` / `UtilizationAdvice`（层分析，`direction` 只允许 down/none）、`LayerAllocation.downgrade_reasons`（嵌套字段，空时在 `SectorAllocationPayload.payload_json` 中剔除）、`FundamentalMaterialReviewPayload`、`FundamentalRiskRegisterPayload`（设计 D4 的风险项投影，规格同步补入），两者共享"拒绝仓位/动作"的校验基类；新角色加入 `AgentRole`、`AGENT_ROLES`、`PAYLOAD_SCHEMA_BY_ROLE`。
+    - 兼容性：库内 173 份已发布投影（层、简报、板块、财报评审、例行）改前改后按存储字段重算 `content_hash` 全部一致（另有 1 份 10-25 的 L1 投影本来就被现 schema 拒收，与本次无关）。
+    - `planning.py`：任务 `fundamental-material`（角色 `fundamental_material_review`、依赖 `information-brief`、有效期 14 天、超时 900 秒、读 `pead.yaml`），不进 `FUNDAMENTAL_TASKS`；跨分析师边 `information_brief → fundamental_material_review`。
+    - 测试：新增 `tests/test_event_impact_contracts.py` 8 项；投影、规划、调度、架构守卫等相关 270 余项通过，唯一失败为既有的名单数量断言（18≠11）。
+    - 顺带修复：`495c0db` 让"只改注释"不再算配置变化，但 `test_chief_snapshot` 2 项与 `test_phase_f_research_gate` 1 项仍用追加注释来模拟配置变化，改为追加一个配置值后通过；`test_phase_f_research_gate` 余下 2 项为 `TEST_BASELINE` 已登记的既有失败。
+    - 文档：`docs/ARCHITECTURE.md` §7.2、§7.3。
+
+## 2. 信息简报：事件成分与评级
+
+- [x] 2.1 简报级成分评级（D1，方案 A）：开关 `config/workflow/event_impact.yaml`（默认关闭）、路由角色 `event_component_rating`、提示词 `information-event-components`（四级重要性的"伤害性质 × 波及范围"判据、影响面定义、直接/连带、持续/了结、升级判据）、模块 `event_components.py` 在简报发布前对当期全部事实评级一次；不改 `extract.py` 与 `research-insight`。验证：单测用录制响应断言成分结构与引用由代码取自 `source_evidence`；开关关闭时无请求、简报不变；对一份 NVDA 11-12 简报做 dry-run（录制响应）。
+- [x] 2.2 新颖度与事件簇（D2）：代码按簇查 7 天台账判首发/后续，规范化簇键。验证：单测覆盖首发、后续、模型判升级三种。
+- [x] 2.3 发布契约（`briefs.py`）：层与成员合法性、重大及以上须有可回溯引用否则降为中等并记原因、不合规成分拒发。验证：单测覆盖降级、拒发、全部不合规判失败。
+  - 2026-11-13 实施记录（2.1–2.3）：
+    - 开关 `config/workflow/event_impact.yaml`（`components.enabled: false`、`novelty_window_days: 7`、`max_facts: 120`）；路由角色 `event_component_rating`（`config/settings.yaml`，flash、关闭推理）；提示词 `src/ats/skills/information-event-components/SKILL.md`；模块 `src/ats/agents/information/event_components.py`。
+    - 接入点：`briefs.publish_information_brief` 在发布前调用 `event_components.attach`（只对实体简报、且有原文定位时）；开关关闭时原样返回、不发请求。`extract.py`、`target_research.py`、`research-insight` 与 `agents/base.py` 均未改动，抽取缓存版本号不变。
+    - 2.2：事件簇键由代码规范化；评级上下文列出近 7 天（所有标的）已出现的簇，让模型复用同一个键；"首发 / 后续"由代码按台账判定，只有台账里已有的簇才接受模型的"升级"。
+    - 2.3：层与标的须在 `ai_hardware.yaml` 已登记（成员或证人）；层面成分须给层、跨层至少两层；含交易建议措辞的成分拒发；重大及以上无原文定位降为中等并记原因；评级失败或全部不合规时简报照常发布、不含成分，原因写入 `unverified`（规格同步改为不因评级失败而让简报失败）。
+    - 测试：`tests/test_event_components.py` 10 项；信息分析相关既有 188 项通过。
+    - dry-run：库内 NVDA 11-12 简报（109 条事实）用录制响应校验，两个成分（公司：董事会调查 CEO；跨层：对华芯片出口审视）的引用均由代码从 `source_evidence` 取到；据此把 `max_facts` 由 40 提到 120。
+- [x] 2.4 observe 产业链成员轻量简报：从 `ai_hardware.yaml` 成员与 `pead.yaml` observe 名单推导 9 家，只出成分，不触发基本面。验证：planning 单测断言范围为 9 家且无基本面下游；dry-run 一家。
+- [x] 2.5 文档：`docs/agents/INFORMATION_ANALYST.md`（成分与评级、轻量简报）、`docs/ARCHITECTURE.md` §9.1、`docs/OPERATIONS.md` §3.1（轻量简报时间表）。验证：文档描述与实现一致。
+
+  - 2026-11-13 实施记录（2.4–2.5）：
+    - 2.4：`planning._chain_observe` 在开关打开时，让每日简报（`portfolio:pead-targets`）额外覆盖 observe 名单中属于产业链层成员或命题证人的标的，实测 9 家：META、ORCL、005930.KS、SPCX、INTC、AMD、AMAT、CRWV、NBIS（只算层成员时只有 6 家，ORCL、INTC、NBIS 只是命题证人；用户确认 9 家都做）。基本面例行（同一范围）与决策周期（板块范围）不受影响。成本更正：轻量简报走同一条逐篇抽取，按近 7 天 226 篇文章计约每天 32 次抽取 + 9 次评级，首次运行补抽 7 天窗口约 226 次（原估"每天 9 次"有误，用户已确认）。测试：开关关/开两种情况的范围断言。
+    - 2.5：`docs/agents/INFORMATION_ANALYST.md`（字段与"事件成分"一节）、`docs/ARCHITECTURE.md` §9.1、`docs/OPERATIONS.md` §3.1。
+
+## 3. 评级基准集与校准
+
+- [x] 3.1 从库中挑约 60 个候选成分（黄仁勋事件、出口管制、非财报公告、噪音）导出为标注表，交用户选 40 个并标注。验证：标注表落 `var/`，用户确认完成。
+  - 2026-11-14：用户批准约 12 次请求。选 12 份近两周事实最多的简报（每标的一份：NVDA 11-12、TSLA、MU、AMZN、GOOG、SKHY、MSFT、LRCX、SNDK、COHR、TSM、AVGO），各评级 1 次，共 12 次请求，得 91 个候选成分（模型分布：轻微 39、中等 48、严重 4；本公司 78、本层 7、跨层 6）。标注表 `var/manual_fixes/event-rating-benchmark/labels.csv`（不含模型评级），模型评级另存 `model_ratings.json`。
+  - 过程中修了两处：同簇同影响面的两个成分编号相同（编号改为纳入所引事实），候选已离线重新编号；4 个"层面"成分没给出层被契约拒收，提示词补明"层面成分必须给层，否则按本公司或不出"。
+  - 2026-11-15 用户完成标注：只选有独特信息量的 27 个（用户判断：拆解财报、报道股价变化的条目不值得分析，不必凑满 40 个），验收以这 27 个为准。
+- [x] 3.2 基准集评测脚本：对 40 个成分跑评级（执行前报请求数），计算相邻档一致率与"重大及以上"漏判。验证：达到 ≥85% 且零漏判；未达标则调整提示词后重测，结果与版本记入 `var/`。
+  - 2026-11-15 首轮评测（27 条，用户标注）：完全一致 11（41%），相邻档以内 25（93%，达标），用户标为严重及以上而模型判低的 6 条（门槛 0，未达标）。原因：① 正面重大事件被只看伤害的口径评低（2 条）→ 用户确认改为"重要性 + 方向"（design D2b），代码、提示词、规格、文档已改；② 枢纽公司事件的传导（3 条）与 ③ 传闻级重大事件（1 条）待定。改口径后需重测。
+  - 2026-11-15 第二轮（口径改为重要性 + 方向；对 27 个已标成分只评级、不重拆，9 次请求）：完全一致 15（56%，首轮 41%），相邻档以内 25（93%），漏判 6 → 3，误报（模型判重大、用户判中等）4。正面长约两条（B03-03、B06-04）与特斯拉—SpaceX 合并传闻（B02-09）已对上。剩余漏判：B01-15（中国外交部否认）所在事件簇已有 B01-01、B01-02 判为重大，簇层面会触发；真正未覆盖的是 B01-05（Megaspeed 芯片流向中国，独立事件簇）与 B01-08（neocloud 融资承压，独立事件簇）。误报：B05-02（谷歌 TPU 外售）、B06-03（SK 海力士股东回报）、B10-01（Coherent 200 亿美元长约）、B11-02（台积电购厂扩产）。结果文件 `var/manual_fixes/event-rating-benchmark/rerate_ratings.json`（已被第三轮覆盖，数字以本记录为准）``。
+  - 2026-11-15 第三轮（用户指定只加两条通用判据：可信的违法违规指控判重大；回购、分红、既定计划内的扩产默认中等，除非改变业务前景；不再过度优化）：完全一致 17（63%），相邻档以内 25（93%），漏判 2，误报 3。B01-05（Megaspeed 芯片外流）已对上。剩余：漏判 B01-15（同簇已有重大成分，簇层面会触发）、B01-08（neocloud 融资承压，用户决定不为它加判据）；误报 B05-02、B06-03、B10-01。**用户接受剩余分歧，3.2 按此验收**，上线后由每周校准报告（3.3）持续观察。结果 `rerate3_ratings.json`。
+- [ ] 3.3 每周校准报告（纯代码）：下游复核分歧、补认领次数、按重要性分组的 1–3 日超额收益（相对层篮子等权）、当周抽检清单，并入日报或周报。验证：单测用合成数据断言分组与超额收益计算；对真实库跑一次生成报告。
+- [ ] 3.4 文档：`docs/OPERATIONS.md` §2（每天/每周看什么：触发台账、分歧、补认领、校准报告）。验证：文档含报告位置与解读。
+
+## 4. 基本面：公司风险项与重大事件评审
+
+- [ ] 4.1 公司风险项投影：生成、刷新（建基线时）、读取最新版；只写公司特有风险。验证：单测覆盖刷新保留上一版引用；初始化 18 份前报请求数，经确认后执行。
+- [ ] 4.2 重大事件评审 runner 与 skill：读简报成分、论点基线、风险项，输出论点状态、命中项、预期影响类别、`direction/magnitude/confidence`、待核验、重要性复核、认领成分编号；无基线时 `confidence ≤ 0.3`；只评估公司特有部分。验证：单测用录制响应覆盖有基线/无基线、拒绝仓位字段；skill 文档写明认领分工。
+- [ ] 4.3 有效期与续期：14 天过期，同簇再触发发布新版本并续期。验证：单测覆盖过期不再被选入、续期生效。
+- [ ] 4.4 文档：`docs/agents/FUNDAMENTAL_ANALYST.md`（第三种产出与叠加关系、风险项）、`docs/ARCHITECTURE.md` §9.2/§9.3、`docs/OPERATIONS.md` §3.3（手动运行重大事件评审）。验证：文档与实现一致。
+
+## 5. 层次分析：风险命题、冲击与补认领
+
+- [ ] 5.1 链证据支持 `kind: risk`：独立来源计数（同出版方/同原发转载合一）、至少 1 个一手或权威来源、状态五档；经营命题门槛不变。验证：单测覆盖纯转载不达门槛、权威+独立达"承压"、经营命题行为不变。
+- [ ] 5.2 `ai_hardware.yaml`：L5 新增出口与市场准入风险命题（含证人、关键词、horizon）；重写 L5"刻意不立出口管制命题"注释为指向风险命题并说明门槛差异；其他层是否新增风险命题列出建议交用户确认。验证：配置加载测试通过；`ats sector` 的数据组装检查（不打 LLM）显示 L5 风险命题与候选证据。
+- [ ] 5.3 层次分析读取层面成分与安全网成分（D6），输出风险命题状态、论点外冲击（14 天过期、是否建议新增命题）、补认领、只下调的建议，每个认领成分附重要性复核；只评估整层共同与相对位置。验证：单测用录制响应覆盖归入命题、列为冲击、补认领、过期降为背景、无风险时不建议下调。
+- [ ] 5.4 文档：`docs/agents/LAYER_ANALYST.md`、`docs/ARCHITECTURE.md` §4（数据与 Agent 对接：层分析新增简报成分输入）。验证：文档与实现一致。
+
+## 6. 板块配置：只下调传导
+
+- [ ] 6.1 板块配置按触发来源区分临时/例行复盘，代码钳制方向只下调、临时单次最多一档，被截断的建议与原因记入 `downgrade_reasons`；`weight_cap` 与风控静态上限不变。验证：单测覆盖临时两档被截为一档、例行两档放行、风险解除不触发上调、风控读值不变。
+- [ ] 6.2 文档：`docs/agents/SECTOR_ANALYST.md`（配置结论 → 预算使用率一节补下调规则）。验证：文档与实现一致。
+
+## 7. 事件路由、去重与台账
+
+- [ ] 7.1 `event_routes.yaml` 新增 `material_development` 与两个 scope resolver（`component_entity`、`component_layers`），层复盘后接 `sector-review`；产业链成员的本公司重大成分同时路由到其所在层的 `layer-review`（D2b）；路由带总开关，默认关闭。验证：路由加载与解析单测；未登记层被拒并记原因。
+- [ ] 7.2 简报发布后把合格成分（重大及以上、首发或升级）写为事件候选；dispatcher 在 :05/:35 消费；去重键为簇 + 下游 + 范围 + UTC 日，升级或新成分可再触发；触发与"去重拦下"均入台账并带成分编号。验证：单测覆盖中等不触发、后续报道被拦、新成分再触发、不进入决策周期。
+- [ ] 7.3 文档：`docs/ARCHITECTURE.md` §2（新事件类型与路由）、§8.3（触发去重）；`docs/OPERATIONS.md` §3.1（事件表）、§9（排障：如何查一个成分触发了什么）。验证：文档与实现一致。
+
+## 8. Chief：可选类别与事件对齐
+
+- [ ] 8.1 `decision_profiles.yaml` 登记可选类别 `fundamental_material`；`decision_requirements` 冻结与校验有效的重大事件评审，缺失不算缺口，单份血缘失效只剔除该份不阻断周期；财报口径二选一不变。验证：单测覆盖无评审时快照完整、有评审时被冻结、血缘失效被剔除；用 495c0db 的只读重放脚本对真实库校验通过。
+- [ ] 8.2 `assemble.py` 按 `component_refs` 渲染事件簇对齐块；主理人 skill 加"同簇评估不重复计算"。验证：单测断言同簇的基本面评审、层风险、板块下调原因出现在同一块。
+- [ ] 8.3 文档：`docs/ARCHITECTURE.md` §10.1（决策快照的可选类别与事件对齐）、Chief skill 说明。验证：文档与实现一致。
+
+## 9. 总览文档与回放验收
+
+- [ ] 9.1 `README.md` 分析岗一览与数据流概览加入事件成分分发；`docs/ARCHITECTURE.md` §3（Dataflow：简报成分 → 事件 → 下游）与 §16（记录本 change 的六项决策）；`docs/data/` 补简报成分字段说明。验证：README、ARCHITECTURE、OPERATIONS、角色文档之间对新流程的描述一致（逐项核对清单记入任务说明）。
+- [ ] 9.2 回放验收：隔离环境回放 2026-11-09 至 11-12 的已入库新闻（执行前报请求数）。验证：拆出 NVDA 公司成分与出口管制层面成分；NVDA 重大事件评审与 L5（及涉及层）复盘各触发一次不重复；L5 使用率只下调且临时复盘不超过一档；Chief 只读重放显示事件对齐块。
+- [ ] 9.3 上线：经用户批准后打开路由开关、启用轻量简报定时、重启 dispatcher；观察第一次真实触发与当日 Chief 周期。验证：触发台账、下游投影、Chief 渲染各核对一次，记入观察记录。

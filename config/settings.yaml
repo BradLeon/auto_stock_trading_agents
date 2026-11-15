@@ -40,6 +40,8 @@ llm:
     # 风险（需观察）：intel_brief 此前在 deepseek/flash 上“偶发翻空”；actuals_extract 此前在 gemini-flash 上“空工具调用”。
     # --- mid tier: analysis/synthesis where near-Opus quality costs 1/4-1/20 ---
     research_extract: {model: deepseek/deepseek-v4.1-flash-1017, structured_output_method: function_calling}   # supply-chain insight extraction
+    # event-impact-routing (2026-11-13): one rating call per brief, after its facts are assembled (design D1, plan A).
+    event_component_rating: {model: deepseek/deepseek-v4.1-flash-1017, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling, reasoning: "off"}
     # 产业链证据抽取（观察名单财报）：只抽事实+原文片段，不做判断 → 便宜档足够。
     # 6 个名字 × 每年约 4 次财报 ≈ 24 次/年，成本可忽略。见 docs/archive/CHAIN_EVIDENCE.md
     # provider: deepseek —— 走官方 API 而不是 OpenRouter。同一份文档、同一段 prompt，

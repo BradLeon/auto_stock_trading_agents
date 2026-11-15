@@ -451,7 +451,7 @@ stateDiagram-v2
       "entity": "NVDA",
       "limit": 0.10,
       "post_trade_value": 0.134,
-      "severity": "hard"
+      "materiality": "hard"
     }
   ],
   "allowed_boundary": {
@@ -508,10 +508,10 @@ TaskProjection
 
 | 角色 | 可读输入 | 目标输出 | 明确禁止 |
 |---|---|---|---|
-| Layer Analyst | 产业链知识、实体关系、行业横截面、命题证据 | `LayerAnalysis` | 不给出超配/低配/清仓结论 |
+| Layer Analyst | 产业链知识、实体关系、行业横截面、命题证据；本层成员与跨层的**事件成分**（来自 `InformationBrief.event_components`） | `LayerAnalysis` | 不给出超配/低配/清仓结论（只给"只下调"的使用率建议）；不评估公司特有部分 |
 | Information Analyst | 通过准入的新闻、公告、研报、文章、电话会材料 | `InformationBrief` | 不输出买卖、仓位或组合建议 |
 | Sector Analyst | 共享行业事实、`LayerAnalysis` | `SectorAllocation` | 不读取 Information、Fundamental、Macro、Technical 观点 |
-| Fundamental Analyst | 公司研究包、产业链事实、`InformationBrief` | `FundamentalExpectationUpdate` / `FundamentalEventReview` | 不读取 Sector 或 Macro 观点，不执行最终风控 |
+| Fundamental Analyst | 公司研究包、产业链事实、`InformationBrief`（含事件成分） | `FundamentalExpectationUpdate` / `FundamentalEventReview` / `FundamentalMaterialReview` / `FundamentalRiskRegister` | 不读取 Sector 或 Macro 观点，不执行最终风控；重大事件评审不评估整层共同部分 |
 | Macro Analyst | 宏观数据包、政策和地缘文档 | `MacroReview` | 不读取其他分析师观点 |
 | Technical Analyst | 实时市场包和量价派生指标 | `TechnicalReview` | 不读取其他分析师观点 |
 | Chief | 全部被要求的分析投影、组合、历史和绩效 | `ChiefDecisionRevision` | 不能越过 Risk 或 Boss 到 Trader |
@@ -521,11 +521,13 @@ TaskProjection
 
 ### 7.3 Payload
 
-- `LayerAnalysis`：产业链层级、实体关系、标的横截面排名、共同证据和差异证据。
-- `InformationBrief`：来源文档、事实变化、影响候选、关联实体、置信度、时效和待核验项。
-- `SectorAllocation`：行业、层次、标的三级配置及其事实引用。
+- `LayerAnalysis`：产业链层级、实体关系、标的横截面排名、共同证据和差异证据；`risk_claims`（整层风险命题状态：休眠 / 出现 / 承压 / 兑现 / 解除，按独立来源计数）、`off_thesis_shocks`（论点外冲击，14 天过期）、`cross_scope_claims`（标为"本公司"但有整层传导的补认领）、`utilization_advice`（只下调的使用率建议）。
+- `InformationBrief`：来源文档、事实变化、影响候选、关联实体、置信度、时效和待核验项；`event_components`：把一件事拆成成分，每个成分带影响面（本公司 / 本层 / 跨层）、涉及的层与成员、重要性（轻微 / 中等 / 重大 / 极重大，正负都算）、方向（正面 / 负面 / 混合 / 不明）、直接或连带、持续或了结、新颖度（首发 / 升级 / 后续）、引用与理由（event-impact-routing）。
+- `SectorAllocation`：行业、层次、标的三级配置及其事实引用；每层的 `downgrade_reasons` 记录由风险命题或冲击引起的下调及被截断的建议。
 - `FundamentalExpectationUpdate`：财报前预期、市场隐含预期、核心叙事和变化路径。
 - `FundamentalEventReview`：现实与预期差、Surprise Scorecard、指引变化、叙事更新和投资建议。
+- `FundamentalMaterialReview`：财报以外的重大事件对单个公司的影响——认领的成分、论点状态（稳定 / 承压 / 被证伪）、命中的风险项或证伪条件、预期影响（改季度数字 / 只改风险溢价）、方向、幅度、信心、待核验与有效期（14 天）。与财报口径的基本面**叠加**读取，不参与"例行 / 财报事件"二选一。
+- `FundamentalRiskRegister`：按标的维护的公司特有风险项（关键人、治理、客户集中度、监管个案等）及其证伪条件，全年有效，建财报基线时刷新。
 - `MacroReview`：regime、影响传导、情景、时间范围和主要风险。
 - `TechnicalReview`：量价读数、趋势状态、失效条件和建议敞口。
 - `ChiefDecisionRevision`：完整交易提案或 No Action、研究投影引用、决策理由和可验证假设。
@@ -607,6 +609,13 @@ Information Analyst 处理的是多类信息资产，因此公开角色名不使
 
 实现在 `agents/information/`（抽取、材料性评估、文档识别与简报发布契约），角色说明见
 [`agents/INFORMATION_ANALYST.md`](agents/INFORMATION_ANALYST.md)。
+
+**事件成分（event-impact-routing，开关 `config/workflow/event_impact.yaml` 的 `components.enabled`，默认关闭）。**
+简报的事实汇总好之后，对该标的当期全部事实做一次评级请求（角色 `event_component_rating`），把事件拆成成分并评出影响面、
+重要性、直接或连带、持续或了结、是否升级；新颖度的"首发 / 后续"由代码按近 7 天的事件簇台账判定，引用由代码从简报的
+`source_evidence` 取。发布契约拒绝未登记的层与标的和含交易建议的成分，并把没有原文定位的"重大"成分降为"中等"。评级不改
+逐篇抽取（抽取缓存版本号不变），评级失败只让简报不带成分、不让简报失败。开关打开后，每日简报还会给 observe 名单里属于
+产业链层成员或命题证人的 9 家出**轻量简报**，只为事件成分服务，不触发基本面。
 
 ### 9.2 Fundamental 例行模式
 

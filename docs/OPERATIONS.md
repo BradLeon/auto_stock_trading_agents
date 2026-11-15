@@ -50,7 +50,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 | 工作流 | 时间 | 范围 |
 |---|---|---|
-| `information-brief` | 周一至周五 08:00 纽约 | `portfolio:pead-targets` |
+| `information-brief` | 周一至周五 08:00 纽约 | `portfolio:pead-targets`；事件成分开关（`config/workflow/event_impact.yaml`）打开后，另含 observe 名单中的产业链成员与命题证人 9 家（轻量简报，不触发基本面） |
 | `fundamental-routine` | 周一至周五 08:30 纽约（依赖当天的信息简报） | `portfolio:pead-targets` |
 | `technical-review` | 周一至周五 08:30 纽约 | `portfolio:portfolio` |
 | `macro-review` | 周六 09:00 台北 | `portfolio:portfolio` |

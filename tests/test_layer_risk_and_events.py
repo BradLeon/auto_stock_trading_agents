@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from ats.agents.layer import event_inputs as ei
@@ -78,17 +79,32 @@ def test_operating_claims_keep_the_company_speaker_rule():
 
 # --------------------------------------------------------------------------- 5.2 config switch
 
-def test_risk_claims_are_invisible_until_the_layer_switch_is_on(monkeypatch):
-    from ats import config
+def test_risk_claims_are_invisible_until_the_layer_switch_is_on(monkeypatch, tmp_path):
+    """The L5 claim waits in the change folder until go-live (the running dispatcher's schema predates `risk`)."""
+    import shutil
 
+    import yaml
+
+    from ats import config
+    from ats.schemas.chain import ClaimDef
+
+    pending = Path(__file__).resolve().parents[1] / "openspec/changes/event-impact-routing/pending" \
+        / "l5_export_market_access_risk.yaml"
+    claim = yaml.safe_load(pending.read_text(encoding="utf-8"))[0]
+    assert ClaimDef(**claim).kind == "risk" and {"DOWJONES", "NVDA"} <= {w["entity"] for w in claim["witnesses"]}
+
+    root = tmp_path / "config"
+    shutil.copytree(Path(config.__file__).resolve().parents[2] / "config", root)
+    doc = yaml.safe_load((root / "sectors/ai_hardware.yaml").read_text(encoding="utf-8"))
+    next(x for x in doc["layers"] if x["key"] == "L5_chip_design")["claims"].append(claim)
+    (root / "sectors/ai_hardware.yaml").write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setattr(config, "_config_dir", lambda: root)
     monkeypatch.setattr(config, "risk_claims_enabled", lambda: False)
     l5 = next(x for x in config.load_sector_config().layers if x.key == "L5_chip_design")
     assert not [c for c in l5.claims if c.kind == "risk"]
     monkeypatch.setattr(config, "risk_claims_enabled", lambda: True)
     l5 = next(x for x in config.load_sector_config().layers if x.key == "L5_chip_design")
-    risk = [c for c in l5.claims if c.kind == "risk"]
-    assert [c.id for c in risk] == ["l5_export_market_access_risk"]
-    assert {"DOWJONES", "NVDA"} <= {w.entity for w in risk[0].witnesses}
+    assert [c.id for c in l5.claims if c.kind == "risk"] == ["l5_export_market_access_risk"]
 
 
 # --------------------------------------------------------------------------- 5.3 inputs

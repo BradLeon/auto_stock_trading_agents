@@ -218,6 +218,7 @@ flowchart TB
         PRODUCTS -->|按需读取| WORKFLOW
         RUNTIME_API -->|按需查询| WORKFLOW
         WORKFLOW -->|写入自身隔离分区| MEMORY
+        MEMORY -.->|简报事件成分 → material_development 触发<br/>不作为共享事实| WORKFLOW
 
         MEMORY -->|已批准交易决策| TRADER
         TRADER -->|写订单| BROKER_EXT
@@ -263,6 +264,12 @@ flowchart TB
     class GOVERNANCE governance;
     class ISOLATION warning;
 ```
+
+**事件成分的数据流（event-impact-routing，开关默认关）。** 信息简报在 Memory 里携带 `event_components`：
+已准入文档 → 简报事实（`source_evidence` 原文定位）→ 一次评级请求拆成成分（影响面、重要性、方向、新颖度；引用由代码从
+`source_evidence` 取）→ 常驻进程 :05/:35 扫描合格成分，写触发台账 `material_event_ledger`，按影响面启动
+`fundamental-material` 或 `layer-review → sector-review`（§8.3）→ 各自的投影 → Chief 例行周期按事件簇对齐读取（§10.1）。
+成分是分析产出，只存在于 Memory，**不回写为共享事实**；层次分析读它们属于对信息简报的只读依赖（§4）。
 
 ## 4. Data 与 Agent 对接关系
 
@@ -933,4 +940,10 @@ A–F 六阶段迁移（2026-09 至 2026-10）已完成并归档在 `openspec/ch
 8. Chief—Risk 自动修订默认最多 3 轮，超过后进入 `manual_review`。
 9. 执行前市场或账户快照默认超过 60 秒即失效，需重新风控和重新人工批准。
 10. 普通分析 Workflow 由 Dispatcher 编排；LangGraph 用于 PEAD 事件流和 Chief 审批链。
-11. 本文四张 Mermaid 图是正式架构图，不在其他章节用另一套图替换。
+11. 本文四张 Mermaid 图是正式架构图，不在其他章节用另一套图替换。12. 重大事件按影响面分发（event-impact-routing，2026-11-13 定）：公司层面交基本面重大事件评审，层与跨层交层次分析
+    再接行业配置，按事件启动；Chief 不临时启动，保持每日例行，并纳入"论点外冲击"。
+13. 风险命题（`kind: risk`）按**独立来源**计数：至少 2 个独立来源、其中至少 1 个一手或权威；经营命题门槛不变。
+14. 风险与冲击只能下调层的配置：临时复审单次最多下调一档，周六例行复审不限；`weight_cap` 与风控静态上限不变。
+15. observe 名单中的 9 家产业链成员出轻量简报，只为事件成分服务、不触发基本面。
+16. 只有"重大"及以上、首发或升级的成分触发临时复审；评级口径为"重要性 + 方向"，基准集由用户标注。
+17. 论点外冲击与重大事件评审的有效期均为 14 天；同簇有新进展时续期。

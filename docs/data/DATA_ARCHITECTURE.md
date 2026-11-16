@@ -652,6 +652,15 @@ TrendForce、SemiAnalysis 等来源采用“一个来源资产，多个消费订
 
 2026-08 到 2026-11 之间，抽取步骤因平台迁移失去调用方，三个证人停在 08-18 / 08-30。历史文章的回填须先按来源报预计请求数，经确认后执行（`--since` 指定起点）。
 
+### 12.3a 简报事件成分不是共享事实（event-impact-routing）
+
+信息简报的 `event_components` 是分析产出，存放在 Workflow Memory 的 `information_brief` 投影里，**不进入**
+`evidence_facts` 或链证据台账。它与共享事实层的唯一连接是引用：每个成分的 `fact_indices` 指向简报的事实，
+`citations` 由代码从 `source_evidence` 取（`document_ref#start-end`，指向已准入文档的原文定位）；`source_actor`
+（如"WSJ（经IBD转述）"）同时是风险命题独立来源计数的依据（`chain/risk_sources.py`）。字段与判断分工见
+[`agents/INFORMATION_ANALYST.md`](../agents/INFORMATION_ANALYST.md)；触发台账 `material_event_ledger` 在
+`var/ats.sqlite`，查询方式见 [`OPERATIONS.md`](../OPERATIONS.md) §9。
+
 ### 12.4 新 Agent 的接入方式
 
 新增 Agent 时，原则上不新增数据抓取器。

@@ -82,8 +82,10 @@
 
 ## 6. 板块配置：只下调传导
 
-- [ ] 6.1 板块配置按触发来源区分临时/例行复盘，代码钳制方向只下调、临时单次最多一档，被截断的建议与原因记入 `downgrade_reasons`；`weight_cap` 与风控静态上限不变。验证：单测覆盖临时两档被截为一档、例行两档放行、风险解除不触发上调、风控读值不变。
-- [ ] 6.2 文档：`docs/agents/SECTOR_ANALYST.md`（配置结论 → 预算使用率一节补下调规则）。验证：文档与实现一致。
+- [x] 6.1 板块配置按触发来源区分临时/例行复盘，代码钳制方向只下调、临时单次最多一档，被截断的建议与原因记入 `downgrade_reasons`；`weight_cap` 与风控静态上限不变。验证：单测覆盖临时两档被截为一档、例行两档放行、风险解除不触发上调、风控读值不变。
+- [x] 6.2 文档：`docs/agents/SECTOR_ANALYST.md`（配置结论 → 预算使用率一节补下调规则）。验证：文档与实现一致。
+
+  - 2026-11-16 实施记录：`agents/sector/review.py` 新增 `ALLOCATION_LADDER`、`apply_downgrade`；`_sector_allocations_from_projections` 读层投影的 `utilization_advice` 沿档位向下调整（`ad_hoc` 时按 `routing.ad_hoc_max_notches` 钳制，例行不钳制），原因与被截断部分写入 `downgrade_reasons`，`allocation_extras` 发布下调后的档位。`run(..., trigger_source=)`；Dispatcher 的 `sector-review` 适配器从任务输入 `trigger_source` 取值（默认 `scheduled`，第 7 组路由传 `material_development`）。层投影只有在层开关打开后才可能带 `utilization_advice`，所以本组提交不改变现行配置结果。测试：`tests/test_sector_downgrade.py`（6 项）。`tests/test_sector_allocation.py::test_sector_allocation_projection_published_with_input_refs` 在改动前的 HEAD 上同样失败（既有问题，与本组无关）。
 
 ## 7. 事件路由、去重与台账
 

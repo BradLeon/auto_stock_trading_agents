@@ -201,6 +201,18 @@ cohort 内**把几个因子标准化成 z 分（Barra-lite），复合成排名�
   连同证据归因一起落库（判断归模型且留痕）。
 - 回滚开关：`config/pead.yaml` 的 `bind_layer_budget: false` → 使用率恒为 1.0。
 
+**风险与冲击的下调（event-impact-routing，层次分析开关开启后才有输入）**：
+
+- 层次分析投影里的 `utilization_advice` 只会是"向下"或"不动"，理由引用承压/兑现的风险命题或重大负面持续的冲击
+  （由层次分析侧的代码核对，见 [`LAYER_ANALYST.md`](LAYER_ANALYST.md)）。
+- 板块配置先按层状态得出档位，再沿 超配 → 标配 → 低配 → 清仓 往下走建议的档数（`review.apply_downgrade`）。
+  **方向只能向下**：风险命题"解除"不会触发上调，恢复配置由周六例行复审按经营命题重新判断。
+- **临时复审**（任务输入 `trigger_source: material_development`，由事件路由传入）单次最多下调
+  `config/workflow/event_impact.yaml` 的 `routing.ad_hoc_max_notches`（1）档；**周六例行复审不限**。
+- 每次下调与被截断的部分写进该层的 `downgrade_reasons`（`sector_allocation` 投影），引用风险命题或冲击编号；
+  没有下调时该字段省略，存量投影哈希不变。
+- `weight_cap` 与风控读取的静态上限不变：只动档位，进而动使用率。预算绑定关闭时只记录建议、不执行。
+
 ### 八层的 cap 怎么定的（2026-08-21 重设）
 
 此前的数值是从六层继承来的（L4/L5/L8 甚至只是原样搬过来的旧数）。重设时按**结构性判据**

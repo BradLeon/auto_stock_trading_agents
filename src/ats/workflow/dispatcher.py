@@ -974,9 +974,12 @@ def _sector_adapter(context: TaskContext) -> TaskAdapterResult:
     }
     if not layer_inputs:
         raise DependencyUnavailable("sector-review received no declared LayerAnalysis inputs")
+    # event-impact-routing D7: a review triggered by a material development is ad hoc and lowers a layer by at
+    # most one notch; the routine Saturday review is not clamped. The route sets `trigger_source` (group 7).
     review = run(
         context.task.scope.id, use_llm=_use_llm(context), live_data=True,
-        layers=True, write_reports=True, upstream_layer_projections=layer_inputs)
+        layers=True, write_reports=True, upstream_layer_projections=layer_inputs,
+        trigger_source=str(context.task_inputs.get("trigger_source") or "scheduled"))
     if not review.layer_verdicts:
         raise ProjectionMissing("Sector Analyst produced no allocation projection")
     # The sector report, the per-layer reports and the html dashboard are written by `run` itself, from the

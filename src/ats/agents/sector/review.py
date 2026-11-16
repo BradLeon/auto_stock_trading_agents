@@ -35,7 +35,8 @@ def _now() -> datetime:
 
 def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = True,
         layers: bool = True, write_reports: bool = True,
-        upstream_layer_projections: Mapping[str, object] | None = None) -> SectorReview:
+        upstream_layer_projections: Mapping[str, object] | None = None,
+        trigger_source: str = "scheduled") -> SectorReview:
     """Weekly review. `layers=False` falls back to the pre-2026-08-20 single synthesis.
 
     New order (design D8), per layer: quant cross-section -> structure analyst ->
@@ -77,7 +78,8 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
     if layers:
         return _run_layered(name, cfg, store, use_llm=use_llm, live_data=live_data,
                             write_reports=write_reports,
-                            upstream_layer_projections=upstream_layer_projections)
+                            upstream_layer_projections=upstream_layer_projections,
+                            ad_hoc=trigger_source == "material_development")
 
     sc = assemble.build(cfg, live_data=live_data, allow_llm_evidence=use_llm)
     log.info("sector %s: context %s", name, sc.stats())
@@ -103,7 +105,8 @@ def run(name: str = "ai_hardware", *, use_llm: bool = True, live_data: bool = Tr
 
 def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
                  write_reports: bool = True,
-                 upstream_layer_projections: Mapping[str, object] | None = None) -> SectorReview:
+                 upstream_layer_projections: Mapping[str, object] | None = None,
+                 ad_hoc: bool = False) -> SectorReview:
     from ..layer import layer_review
     from . import assemble as sector_assemble
     from . import cross_section, rotation
@@ -187,9 +190,11 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     # Phase D（agent/sector-allocation）：三级配置的唯一依据是 LayerAnalysis 投影。
     # 行业评审经 task_projection_envelopes 读取各层最新可用投影（这是守卫显式允许的
     # 唯一跨角色读取）；缺投影 / 过期 / schema 不兼容的层按缺失保守处理并显式留痕。
+    downgrades: dict[str, list[str]] = {}
     allocations, projection_refs, projection_missing = (
         _sector_allocations_from_projections(
-            store, cfg, bind, projection_overrides=upstream_layer_projections))
+            store, cfg, bind, projection_overrides=upstream_layer_projections,
+            ad_hoc=ad_hoc, downgrades=downgrades))
 
     # Group ceilings can only be applied once EVERY member's ask is known — two 超配
     # halves of a split layer add up past the pre-split envelope, and neither half can
@@ -252,7 +257,8 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
     # 层级投影标识，使配置可追溯到具体的层级判断。
     _publish_allocation_projection(store, name, review, budgets, projection_refs,
                                    missing_layers=[k for k, _reason in projection_missing],
-                                   rotation_available=view is not None)
+                                   rotation_available=view is not None,
+                                   allocations=allocations, downgrades=downgrades)
 
     if write_reports:
         # The sector report itself (行业分析-<行业>-<日期>.md). The Dispatcher path used to write only the layer reports
@@ -286,8 +292,58 @@ def _bind_layer_budget() -> bool:
         return True
 
 
+# 配置档位从高到低。风险与冲击只能沿这条梯子往下走（event-impact-routing D7）。
+ALLOCATION_LADDER = ("超配", "标配", "低配", "清仓")
+
+
+def _ad_hoc_max_notches() -> int:
+    import yaml
+
+    from ...config import _config_dir
+
+    try:
+        doc = yaml.safe_load((_config_dir() / "workflow" / "event_impact.yaml").read_text(encoding="utf-8")) or {}
+    except FileNotFoundError:
+        doc = {}
+    return max(0, int((doc.get("routing") or {}).get("ad_hoc_max_notches", 1)))
+
+
+def apply_downgrade(layer_key: str, allocation: str | None, advice: dict | None, *,
+                    ad_hoc: bool, max_notches: int = 1) -> tuple[str | None, list[str]]:
+    """Lower a layer's allocation by the layer analyst's down-only advice. Returns (allocation, reasons).
+
+    Code owns the direction and the size: only `direction: down` with cited reasons moves anything, it never
+    raises a tier (a risk claim turning "resolved" restores nothing — the routine review re-reads the operating
+    claims), and an event-triggered review (`ad_hoc`) moves at most `max_notches`. `weight_cap` and the risk
+    caps are not touched; only the tier, and through it the utilisation, moves. A clamp is recorded.
+    """
+    advice = advice or {}
+    asked = int(advice.get("notches") or 0)
+    cited = [str(r) for r in advice.get("reasons") or [] if str(r).strip()]
+    if advice.get("direction") != "down" or asked <= 0 or not cited:
+        return allocation, []
+    if allocation is None:
+        return None, [f"{layer_key}: 层次分析建议下调 {asked} 档（依据 {'、'.join(cited)}），"
+                      f"预算绑定关闭，未执行"]
+    if allocation not in ALLOCATION_LADDER:
+        return allocation, [f"{layer_key}: 配置结论 {allocation!r} 不在档位梯子上，下调建议未执行"]
+    applied = min(asked, max_notches) if ad_hoc else asked
+    start = ALLOCATION_LADDER.index(allocation)
+    end = min(len(ALLOCATION_LADDER) - 1, start + applied)
+    lowered = ALLOCATION_LADDER[end]
+    reason = (f"{layer_key}: {allocation}→{lowered}（下调 {end - start} 档，依据 {'、'.join(cited)}）"
+              + (f"；{advice.get('rationale')}" if advice.get("rationale") else ""))
+    out = [reason]
+    if applied < asked:
+        out.append(f"{layer_key}: 层次分析建议下调 {asked} 档，临时复审单次最多 {max_notches} 档，"
+                   f"其余 {asked - applied} 档留待周六例行复审")
+    return lowered, out
+
+
 def _sector_allocations_from_projections(store, cfg, bind: bool, *,
-                                         projection_overrides: Mapping[str, object] | None = None):
+                                         projection_overrides: Mapping[str, object] | None = None,
+                                         ad_hoc: bool = False,
+                                         downgrades: dict[str, list[str]] | None = None):
     """行业评审的三级配置依据：各层最新可用的 LayerAnalysis 投影（3.2/3.5/3.10）。
 
     Returns `(allocations, projection_refs, missing)`：
@@ -337,6 +393,13 @@ def _sector_allocations_from_projections(store, cfg, bind: bool, *,
             continue
         allocations[layer.key] = allocation_for_status(status)
         refs[layer.key] = env.projection_id
+        advice = (env.payload or {}).get("utilization_advice")
+        if advice:
+            lowered, reasons = apply_downgrade(layer.key, allocations[layer.key], advice, ad_hoc=ad_hoc,
+                                               max_notches=_ad_hoc_max_notches() if ad_hoc else 0)
+            allocations[layer.key] = lowered
+            if reasons and downgrades is not None:
+                downgrades[layer.key] = reasons
     return allocations, refs, missing
 
 
@@ -381,7 +444,8 @@ def _cross_section_divergence(review) -> list[dict]:
     return out
 
 
-def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), rotation_available=None) -> dict:
+def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), rotation_available=None,
+                      allocations=None, downgrades=None) -> dict:
     """ARCHITECTURE §7.3: the three-level allocation (sector -> layer -> name) with its fact references.
 
     Everything here already exists in the review (layer verdicts, per-layer budgets, baskets, name calls);
@@ -398,8 +462,12 @@ def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), ro
             gaps.append("本层无命题")
         if v.layer_key in missing_layers:
             gaps.append("层级投影缺失或不兼容，按标配保守处理")
+        reasons = list((downgrades or {}).get(v.layer_key) or [])
+        allocation = allocation_for_status(v.layer_status)
+        if reasons and (allocations or {}).get(v.layer_key):
+            allocation = allocations[v.layer_key]          # lowered by the layer's down-only advice
         layers.append({"layer": v.layer_key, "status": v.layer_status,
-                       "allocation": allocation_for_status(v.layer_status),
+                       "allocation": allocation, "downgrade_reasons": reasons,
                        "budget": (None if budgets.get(v.layer_key) is None
                                   else max(0.0, min(1.0, float(budgets[v.layer_key])))),
                        "confidence": v.confidence, "cycle_position": v.cycle_position,
@@ -436,7 +504,8 @@ def allocation_extras(review, budgets, projection_refs, *, missing_layers=(), ro
 
 
 def _publish_allocation_projection(store, name, review, budgets, projection_refs, *,
-                                   missing_layers=(), rotation_available=None) -> str | None:
+                                   missing_layers=(), rotation_available=None,
+                                   allocations=None, downgrades=None) -> str | None:
     """把本轮配置结论发布为 `sector_allocation` 投影（3.7）。Best-effort。"""
     from ...agent.task_projection import ProjectionScope, build_envelope
 
@@ -457,7 +526,8 @@ def _publish_allocation_projection(store, name, review, budgets, projection_refs
             payload={"sector": name, "stance": stance, "target_weight": target_weight,
                      "rationale": rationale, "drivers": drivers,
                      **allocation_extras(review, budgets, projection_refs, missing_layers=missing_layers,
-                                         rotation_available=rotation_available)},
+                                         rotation_available=rotation_available,
+                                         allocations=allocations, downgrades=downgrades)},
             scope=ProjectionScope(kind="sector", id=name),
             as_of=review.as_of.isoformat(timespec="seconds"),
             input_refs=sorted(projection_refs.values()))

@@ -294,3 +294,12 @@ def test_the_event_block_comes_before_the_evidence(monkeypatch):
     layer = SimpleNamespace(key="L5_chip_design", label="L5", question="Q", claims=[_risk()], structure_notes={})
     ctx = layer_review.build_context(None, layer, event_block="## 事件成分与风险命题")
     assert ctx.index("## 事件成分与风险命题") < ctx.index("## 共同需求议题")
+
+
+def test_a_live_risk_without_advice_is_named_in_gaps():
+    comps = _components()
+    view = _view(risk_claims=[{"claim_id": "l5_export_market_access_risk", "status": "pressured",
+                               "component_refs": ["b1#c-layer"]}])
+    fields, gaps = ei.apply(LAYER, view, assessments=[], components=comps, now=NOW, conf=CONF)
+    assert fields["risk_claims"][0]["status"] == "pressured" and fields["utilization_advice"]["direction"] == "none"
+    assert any("没有给出下调建议" in g for g in gaps)

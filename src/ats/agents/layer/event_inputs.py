@@ -272,6 +272,12 @@ def apply(layer, view, *, assessments, components: list[dict], now: datetime,
         gaps.append(f"成分 {comp['ref']}（{comp['materiality']}：{comp['content'][:40]}）未归宿："
                     "既未归入经营或风险命题，也未列为论点外冲击")
 
+    # A live risk with no downgrade is allowed (the model may judge the layer already priced it), but it must be
+    # visible: in the 2026-11-16 replay it was a truncated answer, not a judgement.
+    live = [r["claim_id"] for r in risk_rows if r["status"] in _GATED]
+    if live and advice["direction"] == "none":
+        gaps.append(f"风险命题 {'、'.join(live)} 为承压/兑现，但没有给出下调建议（若非有意判断，可能是输出被截断）")
+
     fields: dict[str, Any] = {}
     if risk_rows:
         fields["risk_claims"] = risk_rows

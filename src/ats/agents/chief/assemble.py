@@ -685,8 +685,11 @@ def event_alignment_block(store, detail: list[dict], material: list[dict]) -> st
             continue
         for layer in (d.get("payload") or {}).get("layers") or []:
             for reason in layer.get("downgrade_reasons") or []:
+                # Only the ids the downgrade RESTS ON ("依据 a、b）"), not ids its rationale merely mentions — the replay's
+                # rationale named two shocks as "not a basis" and the line landed under their clusters too.
+                cited = reason.split("依据 ", 1)[1].split("）", 1)[0] if "依据 " in reason else reason
                 for key, ids in layer_ids.items():
-                    if any(i and i in reason for i in ids):
+                    if any(i and i in {x.strip() for x in cited.split("、")} for i in ids):
                         line = f"- 行业配置下调 {reason}"
                         if line not in clusters[key]:
                             clusters[key].append(line)

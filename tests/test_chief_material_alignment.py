@@ -95,3 +95,23 @@ def test_no_components_no_alignment_block():
 
 def test_the_profile_declares_the_optional_category():
     assert asm.optional_categories() == {"fundamental_material": "fundamental_material_review"}
+
+
+def test_a_downgrade_lands_only_under_the_cluster_it_rests_on():
+    detail = [
+        {"role": "layer_analysis", "scope": "layer:L5_chip_design", "status": "fresh",
+         "payload": {"layer": "L5_chip_design",
+                     "risk_claims": [{"claim_id": "l5_export_market_access_risk", "status": "pressured",
+                                      "component_refs": ["brief-1#NVDA-2"]}],
+                     "off_thesis_shocks": [{"shock_id": "L5-shock-1", "materiality": "moderate", "direction": "negative",
+                                            "summary": "选举抛售", "component_refs": ["brief-2#X-1"]}]}},
+        {"role": "sector_allocation", "scope": "sector:ai_hardware", "status": "fresh",
+         "payload": {"layers": [{"layer": "L5_chip_design", "downgrade_reasons": [
+             "L5_chip_design: 超配→标配（下调 1 档，依据 l5_export_market_access_risk）；L5-shock-1 不作为下调依据"]}]}},
+    ]
+    brief2 = {"projection_id": "brief-2", "agent_role": "information_brief", "status": "published",
+              "payload": {"event_components": [{"component_id": "X-1", "cluster_key": "election", "content": "选举"}]}}
+    text = asm.event_alignment_block(Store([BRIEF, brief2]), detail, [])
+    election = text.split("### 事件簇 election")[1].split("### 事件簇")[0]
+    assert "行业配置下调" not in election
+    assert "行业配置下调" in text.split("### 事件簇 nvda-ceo-probe")[1]

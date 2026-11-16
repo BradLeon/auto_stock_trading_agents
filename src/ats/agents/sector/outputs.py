@@ -210,8 +210,10 @@ class UtilizationAdviceView(BaseModel):
 class LayerVerdictEventView(LayerVerdictView):
     """LayerVerdictView plus the event-impact fields; selected only while the layer switch is on."""
 
-    risk_claims: list[RiskClaimStateView] = Field(default_factory=list, description=(
-        "本层每条风险命题一行（上下文「风险命题」一节列出的全部）"))
+    # Required (no default): the 2026-11-16 replay's L5 run simply left it out. An empty list is a valid answer for a
+    # layer with no risk claims; omitting the key is not.
+    risk_claims: list[RiskClaimStateView] = Field(description=(
+        "**必填**。本层每条风险命题一行（上下文「风险命题」一节列出的全部，含休眠的）；本层没有风险命题时给空列表"))
     off_thesis_shocks: list[OffThesisShockView] = Field(default_factory=list, description=(
         "无法归入任何经营或风险命题、且重要性不低于中等的层面成分"))
     cross_scope_claims: list[CrossScopeClaimView] = Field(default_factory=list, description=(

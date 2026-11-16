@@ -76,7 +76,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 - 简报里评级为**重大及以上**、且首发或升级的**事件成分**（`material_development`，`config/workflow/event_impact.yaml`
   的 `routing.enabled` 打开后才生效，现为关闭）→ 本公司成分：该公司的重大事件评审（`fundamental-material`）；
   本层/跨层成分，以及产业链成员的重大本公司成分：所涉层的层次分析，随后一次行业评审（临时复审，单次最多下调一档）。
-  同一事件簇对同一任务与范围每个 UTC 日只触发一次，升级或新成分可再触发；不启动 Chief。上线前须在调度负责人表里
+  同一节拍内同一任务与范围只跑一次（带上全部合格成分），当天出现升级或新成分可再触发；不启动 Chief。上线前须在调度负责人表里
   登记 `fundamental-material` 为 dispatcher（`ats dispatch` 的负责人切换，需批准）。
 
 两类事件唤醒的开关在研究时间表配置的 `event_triggers`：`earnings`（财报事件，现为 `true`）、

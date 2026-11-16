@@ -128,3 +128,18 @@ def test_an_unregistered_layer_is_refused_with_a_reason(env):
 def test_off_by_default():
     assert me.settings()["enabled"] is False
     assert me.dispatch_material_developments(store=Store([]), runner=Runner()) == []
+
+
+def test_one_tick_runs_each_task_and_scope_once_with_all_its_components(env):
+    """2026-11-16 replay: 11-09 13:05 ran L5 four times and the NVDA review twice."""
+    store = Store([_brief("b1", "NVDA", [_comp("c1", "entity"), _comp("c2", "entity", content="second part"),
+                                         _comp("c3", "cross_layer", layers=["L5_chip_design"], cluster="other")])])
+    runner = Runner()
+    _run(store, env, runner)
+    called = [(wf, scope) for wf, scope, _i, _c in runner.calls]
+    assert called.count(("fundamental-material", "entity:NVDA")) == 1
+    assert called.count(("layer-review", "layer:L5_chip_design")) == 1
+    refs = runner.calls[0][2]["fundamental-material"]["component_refs"]
+    assert refs == ["b1#c1", "b1#c2"]
+    l5 = [r for r in me.ledger_rows(env) if r["workflow_id"] == "layer-review"]
+    assert {r["component_id"] for r in l5} == {"c1", "c2", "c3"} and len({r["trigger_key"] for r in l5}) == 1

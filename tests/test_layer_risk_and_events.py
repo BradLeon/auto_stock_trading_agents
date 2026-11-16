@@ -161,7 +161,7 @@ def _components():
 
 
 def _view(**kw):
-    return LayerVerdictEventView.model_validate({"layer_key": "L5_chip_design", **kw})
+    return LayerVerdictEventView.model_validate({"layer_key": "L5_chip_design", "risk_claims": [], **kw})
 
 
 def test_pressured_needs_the_source_gate_and_is_kept_when_it_passes():
@@ -267,3 +267,30 @@ def test_an_unlaunched_risk_claim_does_not_move_the_sector_config_lineage(monkey
     assert _file_hash(a) == _file_hash(b)
     monkeypatch.setattr(config, "risk_claims_enabled", lambda: True)
     assert _file_hash(a) != _file_hash(b)
+
+
+def test_risk_claims_must_be_answered_when_the_event_view_is_used():
+    """2026-11-16 replay: the L5 run left risk_claims out entirely; the key is now required (an empty list is fine)."""
+    import pydantic
+
+    with __import__("pytest").raises(pydantic.ValidationError):
+        LayerVerdictEventView.model_validate({"layer_key": "L5_chip_design"})
+
+
+def test_a_layer_component_without_a_destination_is_named_in_gaps():
+    comps = _components()
+    view = _view(claim_attributions=["订单命题：成分 b2#c-weak 归入，选举后的采购担忧"])
+    _, gaps = ei.apply(LAYER, view, assessments=[], components=comps, now=NOW, conf=CONF)
+    assert any("b1#c-layer" in g and "未归宿" in g for g in gaps)          # neither claimed nor attributed
+    assert not any("b2#c-weak" in g for g in gaps)                           # attributed by ref
+    assert not any("b1#c-own" in g for g in gaps)                            # safety net: no destination required
+
+
+def test_the_event_block_comes_before_the_evidence(monkeypatch):
+    from ats.agents.layer import layer_review
+    from ats.agents.sector import assemble
+
+    monkeypatch.setattr(assemble, "layer_evidence_blocks", lambda cfg, layer, a: ("## 共同需求议题\n长证据", ""))
+    layer = SimpleNamespace(key="L5_chip_design", label="L5", question="Q", claims=[_risk()], structure_notes={})
+    ctx = layer_review.build_context(None, layer, event_block="## 事件成分与风险命题")
+    assert ctx.index("## 事件成分与风险命题") < ctx.index("## 共同需求议题")

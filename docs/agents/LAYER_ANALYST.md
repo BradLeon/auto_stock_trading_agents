@@ -53,6 +53,8 @@
 
 模型负责判读，代码负责核对（`agents/layer/event_inputs.py`）：未达来源门槛的"承压/兑现"降为"出现"；没有可读
 成分引用的冲击与补认领被丢弃；过期冲击降为背景；没有合格依据或方向不是向下的建议被清除。被改动的地方写进 `gaps`。
+另外两条（2026-11-16 回放后补）：事件成分一节放在证据块**之前**（放在长上下文末尾时模型整节没读）；`risk_claims` 为必填字段；
+"中等"及以上的本层/跨层成分若既未归入命题、也未列为冲击，代码在 `gaps` 里逐条写明"未归宿"（不追加请求）。
 
 `LayerAnalysisPayload` 主要字段：`layer`、`status`、`summary`、`findings`、`confidence`、`cycle_position`、
 `reversal_triggers`、`entities`、`cross_section`、`cross_section_basis`、`cross_section_coverage`、

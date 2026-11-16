@@ -173,19 +173,29 @@ def run_material_pass(request, *, store=None, rate=None) -> dict:
     refs = [str(r) for r in request.extra.get("component_refs") or []]
     if not refs:
         raise ValueError("material review requires component_refs")
-    brief_ids = {r.split("#", 1)[0] for r in refs}
-    brief = read_projection(store, consumer="fundamental", role="information_brief",
-                            scope=ProjectionScope(kind="entity", id=symbol))
-    if not brief or brief.get("projection_id") not in brief_ids:
-        raise ValueError("the brief that carries the components is not the readable one for this company")
-    payload = brief.get("payload") or {}
-    components = components_for(payload, [r.split("#", 1)[1] for r in refs if "#" in r])
+    # Each cited brief is read BY ID and must still be a published, usable brief of this company. Until the
+    # 2026-11-16 replay the review demanded that the cited brief be the company's newest one, so a brief published
+    # between the trigger and the run made the review fail outright.
+    brief_ids = list(dict.fromkeys(r.split("#", 1)[0] for r in refs))
+    facts: list[str] = []
+    components: list[dict] = []
+    for brief_id in brief_ids:
+        brief = read_projection(store, consumer="fundamental", role="information_brief",
+                                scope=ProjectionScope(kind="entity", id=symbol), projection_id=brief_id)
+        if not brief:
+            raise ValueError(f"cited brief {brief_id} is not a usable brief of {symbol}")
+        payload = brief.get("payload") or {}
+        offset = len(facts)
+        facts += list(payload.get("fact_changes") or [])
+        wanted = [r.split("#", 1)[1] for r in refs if r.startswith(brief_id + "#")]
+        components += [{**c, "fact_indices": [i + offset for i in c.get("fact_indices") or []]}
+                       for c in components_for(payload, wanted)]
     if not components:
-        raise ValueError("none of the referenced components is in the brief")
+        raise ValueError("none of the referenced components is in the cited briefs")
     baseline = load_baseline(store, symbol)
     register = latest_register(store, symbol)
     no_baseline = not (baseline.get("narrative") or baseline.get("dim_keys"))
-    context = review_context(symbol, components, list(payload.get("fact_changes") or []), baseline, register)
+    context = review_context(symbol, components, facts, baseline, register)
     rate = rate or (lambda ctx: run_structured(REVIEW_ROLE, MaterialReviewView, ctx, skill_slug=REVIEW_SKILL))
     view = rate(context)
     now = _now()
@@ -203,7 +213,7 @@ def run_material_pass(request, *, store=None, rate=None) -> dict:
     envelope = build_envelope(
         role="fundamental_material_review", payload=review, scope=ProjectionScope(kind="entity", id=symbol),
         as_of=now.isoformat(), valid_until=review["valid_until"],
-        input_refs=[*request.extra.get("input_refs", []), brief["projection_id"],
+        input_refs=[*request.extra.get("input_refs", []), *brief_ids,
                     *(baseline.get("baseline_refs") or []), *([register["projection_id"]] if register else [])],
         **execution_versions(REVIEW_ROLE, REVIEW_SKILL, template_source=__file__))
     store.save_task_projection_envelope(envelope)

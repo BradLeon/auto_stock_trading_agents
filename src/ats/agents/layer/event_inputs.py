@@ -120,13 +120,13 @@ def render_block(layer, *, assessments, components: list[dict], prior: list[dict
              "> 你只评估**整层共同**的影响与**层内相对位置**；公司特有的部分（治理、人事、单家诉讼）留给基本面，"
              "不要在这里定价。",
              "> 规则：",
-             "> 1. 每个「本层」或「跨层」成分必须有归宿：归入一条经营命题（在 claim_attributions 里写明成分编号），"
+             "> 1. 每个「本层」或「跨层」成分必须有归宿：归入一条经营命题（在 claim_attributions 里写明成分 ref），"
              "或归入一条风险命题（risk_claims 的 component_refs），或——都归不进且重要性不低于中等——列为"
              "论点外冲击（off_thesis_shocks）。",
              "> 2. 标为「安全网」的成分是成员公司的本公司事件。只有存在**整层传导**时才写 cross_scope_claims"
              "并写明传导路径；没有传导就不列，也**不得**据此建议下调。",
              "> 3. 每个被你认领的成分都要附重要性复核（agree / higher / lower + 理由）。",
-             "> 4. 风险命题逐条给状态。承压/兑现须有至少 2 个独立来源、其中至少 1 个一手或权威——"
+             "> 4. risk_claims 必填：风险命题逐条给状态（含休眠），引用的成分写进 component_refs。承压/兑现须有至少 2 个独立来源、其中至少 1 个一手或权威——"
              "同一出版方或同一原发的转载只算一个。代码会核对，不达标会降为「出现」。",
              "> 5. utilization_advice 只能向下：理由必须引用承压/兑现的风险命题 id，或重大及以上、负面、"
              "持续的冲击编号。没有这些就给 none。"]
@@ -258,6 +258,19 @@ def apply(layer, view, *, assessments, components: list[dict], now: datetime,
             advice = {"direction": "down", "notches": notches, "reasons": reasons, "rationale": raw.rationale}
         elif str(raw.direction).strip().lower() not in ("", "none") or notches:
             gaps.append("下调建议没有引用承压/兑现的风险命题或有效的重大负面冲击（或方向不是向下），已清除")
+
+    # --- every layer-level component of moderate or above needs a destination (spec: 层次分析承接层面成分) ---
+    claimed = ({r for row in risk_rows for r in row["component_refs"]}
+               | {r for sh in shocks for r in sh["component_refs"]} | {c["component_ref"] for c in cross})
+    attributions = "\n".join(getattr(view, "claim_attributions", []) or [])
+    for comp in components:
+        if comp["route"] != "layer" or MATERIALITY_ORDER.get(comp["materiality"], 0) < MATERIALITY_ORDER["moderate"]:
+            continue
+        component_id = comp["ref"].partition("#")[2]
+        if comp["ref"] in claimed or comp["ref"] in attributions or (component_id and component_id in attributions):
+            continue
+        gaps.append(f"成分 {comp['ref']}（{comp['materiality']}：{comp['content'][:40]}）未归宿："
+                    "既未归入经营或风险命题，也未列为论点外冲击")
 
     fields: dict[str, Any] = {}
     if risk_rows:

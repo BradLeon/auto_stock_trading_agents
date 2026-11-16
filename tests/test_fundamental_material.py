@@ -39,7 +39,8 @@ def env(monkeypatch):
 
     state = {"baseline": BASELINE}
     monkeypatch.setattr(routine, "load_baseline", lambda store, symbol: state["baseline"])
-    monkeypatch.setattr(read_scope, "read_projection", lambda store, **kw: BRIEF)
+    monkeypatch.setattr(read_scope, "read_projection",
+                        lambda store, **kw: BRIEF if kw.get("projection_id", "brief-1") in ("", "brief-1") else None)
     monkeypatch.setattr(mat, "_now", lambda: NOW)
     return state
 
@@ -154,3 +155,21 @@ def test_rebuild_covers_targets_that_already_have_a_register(env):
     mat.build_register(store, "NVDA", rate=lambda ctx: _register_view())
     assert mat.init_registers(store, ["NVDA", "TSM"])["missing"] == ["TSM"]
     assert mat.init_registers(store, ["NVDA", "TSM"], rebuild=True)["missing"] == ["NVDA", "TSM"]
+
+
+def test_a_newer_brief_does_not_break_a_review_of_the_cited_one(env, monkeypatch):
+    """2026-11-16 replay: a brief published between the trigger and the run made the review fail outright."""
+    from ats.workflow import read_scope
+
+    newer = {"projection_id": "brief-2", "payload": {"fact_changes": ["新的一天"], "event_components": []}}
+    seen = []
+
+    def read(store, **kw):
+        seen.append(kw.get("projection_id"))
+        return {"brief-1": BRIEF, "": newer}.get(kw.get("projection_id", ""), None)
+
+    monkeypatch.setattr(read_scope, "read_projection", read)
+    store = Store()
+    mat.run_material_pass(material_request("NVDA", component_refs=["brief-1#NVDA-1"]), store=store,
+                          rate=lambda ctx: _review_view())
+    assert seen == ["brief-1"] and "brief-1" in store.saved[-1].input_refs

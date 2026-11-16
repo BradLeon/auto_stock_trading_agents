@@ -51,7 +51,7 @@ def _now() -> datetime:
 
 
 def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = None,
-                  snapshot_block: str = "", assessments=None) -> str:
+                  snapshot_block: str = "", assessments=None, event_block: str = "") -> str:
     """Assemble ONE layer's context. Never includes another layer's material, and never
     includes macro."""
     from ...data.products import sector_inputs as industry
@@ -61,6 +61,9 @@ def build_context(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict 
     parts = [
         f"# {layer.label}  [layer key = {layer.key}]",
         f"本层要回答的问题：{layer.question}" if layer.question else "",
+        # event-impact-routing: right after the question, ahead of the long evidence blocks. Appended at the end,
+        # the 2026-11-16 replay's L5 run read none of it (export bill: neither a risk-claim state nor a shock).
+        event_block,
     ]
 
     common_block, relative_block = assemble.layer_evidence_blocks(
@@ -177,8 +180,6 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
             log.warning("layer %s: claim assessment failed (%s): treated as an evidence gap", layer.key, exc)
             assessments = []
 
-    ctx = build_context(cfg, layer, basket=basket, prior=prior,
-                        snapshot_block=snapshot_block, assessments=assessments)
     # event-impact-routing group 5: event components, risk claims and the down-only advice, behind the layer
     # switch. Off, the prompt and the output schema are exactly what they were.
     from . import event_inputs
@@ -187,14 +188,17 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
     events_on = event_conf["enabled"] and store is not None
     components: list[dict] = []
     view_cls = LayerVerdictView
+    event_block = ""
     if events_on:
         from ..sector.outputs import LayerVerdictEventView
 
         now = _now()
         components = event_inputs.read_components(store, layer, now=now, conf=event_conf)
-        ctx += "\n\n" + event_inputs.render_block(layer, assessments=assessments, components=components,
-                                                 prior=event_inputs.prior_shocks(store, layer), now=now)
+        event_block = event_inputs.render_block(layer, assessments=assessments, components=components,
+                                                prior=event_inputs.prior_shocks(store, layer), now=now)
         view_cls = LayerVerdictEventView
+    ctx = build_context(cfg, layer, basket=basket, prior=prior, snapshot_block=snapshot_block,
+                        assessments=assessments, event_block=event_block)
     try:
         view: LayerVerdictView = run_structured("layer_analyst", view_cls, ctx,
                                                 skill_slug="layer-analyst")

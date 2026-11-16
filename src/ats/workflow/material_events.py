@@ -10,8 +10,10 @@ qualifying ones into triggers on the dispatcher's calendar-consume tick:
     every layer it names; a chain member's own major component ALSO → its layer's `layer-review` (D2b — the layer
     analysis decides whether anything transmits); every tick that ran a layer review then runs `sector-review`
     once, as an ad hoc review (`trigger_source: material_development`, at most one notch down);
-  * one trigger per (cluster, task, scope, UTC day); its version is the component, so the same component seen
-    again is a no-op in the trigger ledger, while an escalation or a new component in the cluster triggers again;
+  * within one tick, every qualifying component for the same (task, scope) rides on ONE run; the trigger is keyed
+    (task, scope, UTC day) and versioned by the set of components, so the same components seen again are a no-op
+    while an escalation or a new component later the same day triggers again (2026-11-16 replay: one tick ran
+    L5 four times before this);
   * every decision — triggered, deduplicated, rejected (unregistered layer or ticker), paused — is written to
     `material_event_ledger` with the brief projection, component id and cluster;
   * nothing here enters a decision cycle: the Chief reads the outputs in its next routine run.
@@ -169,9 +171,17 @@ def _covered(entity: str) -> bool:
         return False
 
 
-def dedupe_key(candidate: Mapping[str, Any], workflow_id: str, scope: ProjectionScope) -> str:
-    day = candidate["at"].astimezone(timezone.utc).date().isoformat()
-    return f"material:{candidate['cluster_key']}:{workflow_id}:{scope.kind}:{scope.id}:{day}"
+def dedupe_key(at: datetime, workflow_id: str, scope: ProjectionScope) -> str:
+    """One downstream run per (task, scope, UTC day) and tick — every qualifying component of the tick rides on it.
+
+    Was (cluster, task, scope, day) until the 2026-11-16 replay: two clusters touching L5 in one tick, or two
+    components of one cluster, each started their own L5 review (11-09 13:05: L5 four times, NVDA twice).
+    """
+    return f"material:{workflow_id}:{scope.kind}:{scope.id}:{at.astimezone(timezone.utc).date().isoformat()}"
+
+
+def component_version(candidate: Mapping[str, Any]) -> str:
+    return f"{candidate['materiality']}:{candidate['fingerprint']}"
 
 
 def _ledger(path: str | None):
@@ -212,9 +222,9 @@ def _already(path: str | None, key: str, version: str) -> bool:
                             "outcome IN ('triggered','deduplicated') LIMIT 1", (key, version)).fetchone() is not None
 
 
-def _task_inputs(workflow_id: str, candidate: Mapping[str, Any], scope: ProjectionScope) -> dict[str, Any]:
+def _task_inputs(workflow_id: str, members: list[Mapping[str, Any]], scope: ProjectionScope) -> dict[str, Any]:
     if workflow_id == "fundamental-material":
-        return {workflow_id: {"component_refs": [f"{candidate['brief']}#{candidate['component_id']}"]},
+        return {workflow_id: {"component_refs": [f"{m['brief']}#{m['component_id']}" for m in members]},
                 "trigger": "material_development"}
     if workflow_id == "layer-review":
         return {workflow_id: {"sector": SECTOR}, "trigger": "material_development"}
@@ -243,6 +253,9 @@ def dispatch_material_developments(*, store=None, now: datetime | None = None,
     outcomes: list[dict[str, Any]] = []
     layer_runs: list[str] = []
 
+    # 1) Resolve every candidate; components already on the ledger (a rescanned brief) are skipped, follow-ups are
+    #    recorded as deduplicated, the rest are grouped per (task, scope, day).
+    groups: dict[tuple[str, str, str], dict[str, Any]] = {}
     for cand in candidates(store, now=now, conf=conf):
         pairs, refused = targets(cand, routes, chain)
         for reason in refused:
@@ -250,38 +263,50 @@ def dispatch_material_developments(*, store=None, now: datetime | None = None,
                    outcome="rejected", reason=reason)
             outcomes.append({"component": cand["component_id"], "outcome": "rejected", "reason": reason})
         for workflow_id, scope in pairs:
-            key = dedupe_key(cand, workflow_id, scope)
-            version = f"{cand['materiality']}:{cand['fingerprint']}"
-            row = {"component": cand["component_id"], "workflow_id": workflow_id, "scope": scope.key, "key": key}
+            key, version = dedupe_key(cand["at"], workflow_id, scope), component_version(cand)
             if _already(ledger_path, key, version):
-                continue                    # this exact decision is already on the ledger (rescanned brief)
+                continue
             if cand["novelty"] not in ("first", "escalation"):
                 record(ledger_path, at=now, candidate=cand, workflow_id=workflow_id, scope=scope.key, key=key,
                        version=version, outcome="deduplicated", reason=f"novelty={cand['novelty']}")
-                outcomes.append({**row, "outcome": "deduplicated"})
+                outcomes.append({"component": cand["component_id"], "workflow_id": workflow_id,
+                                 "scope": scope.key, "key": key, "outcome": "deduplicated"})
                 continue
-            ctx = TriggerContext(kind="event", workflow_id=workflow_id, event_id=key, event_version=version)
-            try:
-                result = runner(workflow_id, scope=scope, trigger=ctx,
-                                request={"requested_tasks": [workflow_id], "enter_decision_cycle": False,
-                                         "task_inputs": _task_inputs(workflow_id, cand, scope),
-                                         "as_of": now.isoformat()},
-                                now=now, config_dir=config_dir)
-            except Exception as exc:  # noqa: BLE001 - one route must not stop the others
-                log.exception("material route %s %s failed", workflow_id, scope.key)
-                record(ledger_path, at=now, candidate=cand, workflow_id=workflow_id, scope=scope.key, key=key,
-                       version=version, outcome="failed", reason=f"{type(exc).__name__}: {exc}"[:300])
-                outcomes.append({**row, "outcome": "failed"})
-                continue
-            status = str(result.get("status") or "")
-            outcome = ("deduplicated" if result.get("duplicate") else
-                       "triggered" if status in ("complete", "incomplete") else status or "unknown")
-            record(ledger_path, at=now, candidate=cand, workflow_id=workflow_id, scope=scope.key, key=key,
-                   version=version, outcome=outcome, reason=str(result.get("reason") or ""),
+            group = groups.setdefault((workflow_id, scope.key, key), {"scope": scope, "members": []})
+            if all(component_version(m) != version for m in group["members"]):
+                group["members"].append(cand)
+
+    # 2) One run per group. Its trigger version is the set of member components, so the same set is a no-op in the
+    #    trigger ledger while a new component or an escalation later the same day starts another run.
+    for (workflow_id, _scope_key, key), group in groups.items():
+        scope, members = group["scope"], group["members"]
+        version = hashlib.sha256(json.dumps(sorted(component_version(m) for m in members)).encode()).hexdigest()[:16]
+        ctx = TriggerContext(kind="event", workflow_id=workflow_id, event_id=key, event_version=version)
+        base = {"workflow_id": workflow_id, "scope": scope.key, "key": key,
+                "components": [m["component_id"] for m in members]}
+        try:
+            result = runner(workflow_id, scope=scope, trigger=ctx,
+                            request={"requested_tasks": [workflow_id], "enter_decision_cycle": False,
+                                     "task_inputs": _task_inputs(workflow_id, members, scope),
+                                     "as_of": now.isoformat()},
+                            now=now, config_dir=config_dir)
+        except Exception as exc:  # noqa: BLE001 - one route must not stop the others
+            log.exception("material route %s %s failed", workflow_id, scope.key)
+            for m in members:
+                record(ledger_path, at=now, candidate=m, workflow_id=workflow_id, scope=scope.key, key=key,
+                       version=component_version(m), outcome="failed", reason=f"{type(exc).__name__}: {exc}"[:300])
+            outcomes.append({**base, "outcome": "failed"})
+            continue
+        status = str(result.get("status") or "")
+        outcome = ("deduplicated" if result.get("duplicate") else
+                   "triggered" if status in ("complete", "incomplete") else status or "unknown")
+        for m in members:
+            record(ledger_path, at=now, candidate=m, workflow_id=workflow_id, scope=scope.key, key=key,
+                   version=component_version(m), outcome=outcome, reason=str(result.get("reason") or ""),
                    trigger_key=str(result.get("trigger_key") or ""), run_id=str(result.get("run_id") or ""))
-            outcomes.append({**row, "outcome": outcome})
-            if workflow_id == "layer-review" and outcome == "triggered":
-                layer_runs.append(str(result.get("trigger_key") or key))
+        outcomes.append({**base, "outcome": outcome})
+        if workflow_id == "layer-review" and outcome == "triggered":
+            layer_runs.append(str(result.get("trigger_key") or key))
 
     for workflow_id in sorted(then):
         if not layer_runs:

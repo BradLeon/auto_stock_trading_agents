@@ -61,7 +61,7 @@ research:
   push_threshold: 0.8            # >= this -> immediate Feishu info push
 
 schedule:
-  prep_days_before: 3            # run/refresh prep when earnings is within N days
+  prep_days_before: 3            # 交易日（2026-11-16 起）：财报前 N 个交易日内，每次例行运行检查基线、缺则补建
   score_after: true             # master switch for the score windows below
 
   # Scoring is triggered by an OBSERVED print (actual EPS in the calendar feeds, or a

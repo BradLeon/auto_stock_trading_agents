@@ -21,15 +21,36 @@ def calendar(monkeypatch, *, day, hour="amc", label="Q3 FY2027", before=3):
 
 
 @pytest.mark.parametrize("day,hour,open_,passed", [
-    (date(2026, 10, 19), "amc", True, False),      # 3 days out
-    (date(2026, 10, 20), "amc", False, False),     # 4 days out: too early
+    (date(2026, 10, 19), "amc", True, False),      # Mon print, today Fri: 1 session before it
+    (date(2026, 10, 21), "amc", True, False),      # Wed print: Fri, Mon, Tue = 3 sessions
+    (date(2026, 10, 22), "amc", False, False),     # Thu print: 4 sessions out, too early
     (date(2026, 10, 16), "amc", True, False),      # same-day after-close print: still before the release
     (date(2026, 10, 16), "bmo", False, True),      # same-day before-open print: already released
 ])
-def test_the_window_is_counted_in_days_before_the_next_print(monkeypatch, day, hour, open_, passed):
+def test_the_window_is_counted_in_trading_days_before_the_next_print(monkeypatch, day, hour, open_, passed):
     calendar(monkeypatch, day=day, hour=hour)
     window = routine.real_baseline_window("nvda", now=NOW)
     assert (window["open"], window["cutoff_passed"], window["label"]) == (open_, passed, "Q3 FY2027")
+
+
+@pytest.mark.parametrize("today,open_", [
+    (datetime(2026, 11, 11, 14, 0, tzinfo=UTC), False),   # Wed: Wed, Thu, Fri, Mon = 4 sessions
+    (datetime(2026, 11, 12, 14, 0, tzinfo=UTC), True),    # Thu: first of three runs (Thu, Fri, Mon)
+    (datetime(2026, 11, 13, 14, 0, tzinfo=UTC), True),    # Fri: the run that used to fall outside "3 days"
+    (datetime(2026, 11, 16, 14, 0, tzinfo=UTC), True),    # Mon
+])
+def test_a_tuesday_print_gets_three_weekday_runs(monkeypatch, today, open_):
+    """2026-11-16 NVDA (Tue 11-17 amc): as calendar days only the Monday run was inside the window."""
+    calendar(monkeypatch, day=date(2026, 11, 17))
+    assert routine.real_baseline_window("NVDA", now=today)["open"] is open_
+
+
+def test_exchange_holidays_are_not_sessions():
+    # Thanksgiving 2026-11-26: before a Mon 11-30 print the three sessions are Tue 11-24, Wed 11-25, Fri 11-27.
+    assert routine.trading_days_until(date(2026, 11, 24), date(2026, 11, 30)) == 3
+    assert routine.trading_days_until(date(2026, 11, 23), date(2026, 11, 30)) == 4
+    assert routine.trading_days_until(date(2026, 11, 17), date(2026, 11, 17)) == 0
+    assert routine.trading_days_until(date(2026, 11, 18), date(2026, 11, 17)) == -1
 
 
 def test_no_upcoming_print_means_no_window(monkeypatch):

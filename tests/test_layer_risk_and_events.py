@@ -303,3 +303,15 @@ def test_a_live_risk_without_advice_is_named_in_gaps():
     fields, gaps = ei.apply(LAYER, view, assessments=[], components=comps, now=NOW, conf=CONF)
     assert fields["risk_claims"][0]["status"] == "pressured" and fields["utilization_advice"]["direction"] == "none"
     assert any("没有给出下调建议" in g for g in gaps)
+
+
+def test_the_event_config_joins_lineage_only_with_its_switch(monkeypatch):
+    from ats.workflow import planning
+
+    monkeypatch.setattr(planning, "_event_impact_switches", lambda: {"components": False, "layer": False})
+    assert "workflow/event_impact.yaml" not in planning._config_paths(["information-brief", "layer-review"], "ai_hardware", [])
+    monkeypatch.setattr(planning, "_event_impact_switches", lambda: {"components": True, "layer": False})
+    assert "workflow/event_impact.yaml" in planning._config_paths(["information-brief"], "", [])
+    assert "workflow/event_impact.yaml" not in planning._config_paths(["layer-review"], "ai_hardware", [])
+    monkeypatch.setattr(planning, "_event_impact_switches", lambda: {"components": False, "layer": True})
+    assert "workflow/event_impact.yaml" in planning._config_paths(["layer-review"], "ai_hardware", [])

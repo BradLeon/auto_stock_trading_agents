@@ -431,7 +431,26 @@ def _config_paths(task_ids: Iterable[str], scope_id: str,
         paths.add("macro.yaml")
     if "information-brief" in task_ids:
         paths |= {f"pead/{entity.upper()}.yaml" for entity in brief_entities}
+    # event-impact-routing: the event config joins a task's lineage only once the switch that makes the task read
+    # it is on. While every switch is off nothing reads it, and adding it would make every existing brief and Layer
+    # review look built from different rules (the chief-daily failure of 2026-11-12).
+    switches = _event_impact_switches()
+    if switches.get("components") and "information-brief" in task_ids:
+        paths.add("workflow/event_impact.yaml")
+    if switches.get("layer") and task_ids & {"layer-review", "sector-review"}:
+        paths.add("workflow/event_impact.yaml")
     return paths
+
+
+def _event_impact_switches() -> dict[str, bool]:
+    import os
+
+    root = Path(os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
+    try:
+        doc = _load_yaml(root / "workflow" / "event_impact.yaml") or {}
+    except Exception:  # noqa: BLE001 - an unreadable file switches nothing on
+        return {}
+    return {name: bool((doc.get(name) or {}).get("enabled", False)) for name in ("components", "layer", "routing")}
 
 
 def task_config_hashes(plan: WorkflowPlan, task_id: str,

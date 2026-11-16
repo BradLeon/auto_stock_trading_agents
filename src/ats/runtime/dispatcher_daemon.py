@@ -260,10 +260,15 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
                 dispatch_released_calendar_events, reconcile_calendar_trigger_versions,
                 record_due_calendar_material_waits)
 
+            from ..workflow.material_events import dispatch_material_developments
+
+            # event-impact-routing: rated brief components → ad hoc reviews, same :05/:35 tick. A no-op until
+            # config/workflow/event_impact.yaml routing.enabled is on.
             for operation in (reconcile_calendar_trigger_versions,
                               dispatch_planned_calendar_events,
                               record_due_calendar_material_waits,
-                              dispatch_released_calendar_events):
+                              dispatch_released_calendar_events,
+                              dispatch_material_developments):
                 try:
                     operation()
                 except Exception:

@@ -73,6 +73,12 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 - 财报**已发布**且已准入公告或申报材料 → 信息简报 + 基本面事件评审（冻结基线、打分）。
 - FOMC、CPI、PCE、NFP、GDP 发布 → 宏观评审。
 
+- 简报里评级为**重大及以上**、且首发或升级的**事件成分**（`material_development`，`config/workflow/event_impact.yaml`
+  的 `routing.enabled` 打开后才生效，现为关闭）→ 本公司成分：该公司的重大事件评审（`fundamental-material`）；
+  本层/跨层成分，以及产业链成员的重大本公司成分：所涉层的层次分析，随后一次行业评审（临时复审，单次最多下调一档）。
+  同一事件簇对同一任务与范围每个 UTC 日只触发一次，升级或新成分可再触发；不启动 Chief。上线前须在调度负责人表里
+  登记 `fundamental-material` 为 dispatcher（`ats dispatch` 的负责人切换，需批准）。
+
 两类事件唤醒的开关在研究时间表配置的 `event_triggers`：`earnings`（财报事件，现为 `true`）、
 `macro_sector`（宏观数据发布，现为 `false`，宏观只按周跑）。
 
@@ -331,6 +337,7 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 | 日历消费日志里出现 `IdentityConflict` | 同一场财报的“计划事件”记录与“财报日到了仍缺材料”的等待记录共用触发键；已改为保留旧记录并跳过，不再整批中断。事件升版（材料入库）后换新键 |
 | 基本面报告第一、二节为空或“无比较依据” | 同一财季曾被存成两份档案（`FY2027Q1` 与 `Q1 FY2027`），已统一写法；基线读财报前已发布的记录。仍出现时先看 `ats pead show <代码>` 的阶段与预期维度 |
 | 定时任务没跑 | 看 `dispatcher.err.log` 是否有 `misfire_grace_exceeded`；或该工作流被停用（`ats dispatch owner-log`） |
+| 想知道一个事件成分触发了什么 | 查 `var/ats.sqlite` 的 `material_event_ledger`：`SELECT at,component_id,workflow_id,scope,outcome,reason,run_id FROM material_event_ledger WHERE cluster_key='<簇>' ORDER BY seq DESC`（代码里是 `material_events.ledger_rows(cluster_key=...)`）。`deduplicated` = 后续报道或同一成分；`rejected` = 引用了未登记的层或标的；`failed` 会在下一个节拍重试。`run_id` 可接着查工作流运行记录 |
 
 ## 10. 数据与备份
 

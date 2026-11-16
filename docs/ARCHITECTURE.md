@@ -41,11 +41,13 @@ flowchart TB
         MANUAL["手动执行<br/>单 Agent / 子流程 / 完整流程"]
         CRON["定时执行<br/>日度 / 周度 / 自定义周期"]
         CALENDAR["自动刷新 Schedule 日历<br/>财报日 / FOMC / 宏观数据发布 / 自定义事件"]
+        MATERIAL["重大事件成分 material_development<br/>简报评级为重大及以上、首发或升级<br/>（event_impact 路由开关，默认关）"]
         DISPATCHER["Workflow Dispatcher<br/>解析任务范围 · 补齐依赖 · 异步调度"]
 
         MANUAL --> DISPATCHER
         CRON --> DISPATCHER
         CALENDAR --> DISPATCHER
+        MATERIAL -->|"本公司 → fundamental-material<br/>本层/跨层、成员的重大本公司事件 → layer-review → sector-review<br/>不进入决策周期"| DISPATCHER
     end
 
     subgraph P0["Phase 0 · 前置研究（可并行）"]
@@ -592,6 +594,18 @@ WorkflowRunResult
 
 手动、定时和事件触发都转换为 `TriggerContext`。每个任务生成稳定 idempotency key，
 重启或 misfire 补偿不得重复产生同一逻辑任务。失败重试只重试该任务，不得无条件重跑已成功依赖。
+
+**重大事件成分的触发（event-impact-routing，`workflow/material_events.py`）。** 常驻进程在日历消费的同一节拍
+（每小时 :05、:35 UTC）扫描近 `lookback_hours` 小时发布的信息简报，取重要性在"重大"及以上的事件成分：
+
+- 只有新颖度为"首发"或"升级"的成分触发；"后续报道"记为去重拦下，不触发。
+- 去重键 = 事件簇 + 下游任务 + 范围 + UTC 日，作为 `TriggerContext.event_id`；版本 = 重要性 + 成分内容指纹，作为
+  `event_version`。同一成分再次出现是触发台账里的重复；同簇的升级或新成分换了版本，可以再触发。
+- 路由只能指向 `event_routes.yaml` 的 `material_development` 段登记的任务，以及产业链配置里登记的层与标的；
+  未登记的层被拒并记原因。本节拍跑过层复盘后，接一次 `sector-review`（任务输入 `trigger_source:
+  material_development`，配置单次最多下调一档）。
+- 每个决定（triggered / deduplicated / rejected / failed）写入 `material_event_ledger`，带简报投影、成分编号与事件簇。
+- 这些任务**不进入决策周期**，Chief 在下一次例行运行中读取产出。
 
 ### 8.4 LangGraph 的使用边界
 

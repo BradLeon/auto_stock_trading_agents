@@ -89,9 +89,11 @@
 
 ## 7. 事件路由、去重与台账
 
-- [ ] 7.1 `event_routes.yaml` 新增 `material_development` 与两个 scope resolver（`component_entity`、`component_layers`），层复盘后接 `sector-review`；产业链成员的本公司重大成分同时路由到其所在层的 `layer-review`（D2b）；路由带总开关，默认关闭。验证：路由加载与解析单测；未登记层被拒并记原因。
-- [ ] 7.2 简报发布后把合格成分（重大及以上、首发或升级）写为事件候选；dispatcher 在 :05/:35 消费；去重键为簇 + 下游 + 范围 + UTC 日，升级或新成分可再触发；触发与"去重拦下"均入台账并带成分编号。验证：单测覆盖中等不触发、后续报道被拦、新成分再触发、不进入决策周期。
-- [ ] 7.3 文档：`docs/ARCHITECTURE.md` §2（新事件类型与路由）、§8.3（触发去重）；`docs/OPERATIONS.md` §3.1（事件表）、§9（排障：如何查一个成分触发了什么）。验证：文档与实现一致。
+- [x] 7.1 `event_routes.yaml` 新增 `material_development` 与两个 scope resolver（`component_entity`、`component_layers`），层复盘后接 `sector-review`；产业链成员的本公司重大成分同时路由到其所在层的 `layer-review`（D2b）；路由带总开关，默认关闭。验证：路由加载与解析单测；未登记层被拒并记原因。
+- [x] 7.2 简报发布后把合格成分（重大及以上、首发或升级）写为事件候选；dispatcher 在 :05/:35 消费；去重键为簇 + 下游 + 范围 + UTC 日，升级或新成分可再触发；触发与"去重拦下"均入台账并带成分编号。验证：单测覆盖中等不触发、后续报道被拦、新成分再触发、不进入决策周期。
+- [x] 7.3 文档：`docs/ARCHITECTURE.md` §2（新事件类型与路由）、§8.3（触发去重）；`docs/OPERATIONS.md` §3.1（事件表）、§9（排障：如何查一个成分触发了什么）。验证：文档与实现一致。
+
+  - 2026-11-16 实施记录：`workflow/material_events.py`（`load_routes`、`chain_index`、`candidates`、`targets`、`dedupe_key`、`dispatch_material_developments`、`ledger_rows`）。**与原计划的差异**：没有另建"事件候选"表——消费节拍直接扫描近 `routing.lookback_hours`（6）小时创建的简报投影，候选就是简报里的合格成分；去重靠触发台账的 event_id/version 与 `material_event_ledger`，重扫同一简报不重复记账。`event_routes.yaml` 新增 `material_development` 段（`component_entity` → fundamental-material；`component_layers` → layer-review，`then: sector-review`）；`workflow_owners.yaml` 登记 `fundamental-material`（YAML 只是初始值，生产负责人在 `var/phase_f_dispatch.sqlite` 的 `schedule_scope_owners`，现无该行——**上线时需新增 `fundamental-material,*,dispatcher`，属生产写入，9.3 时报批**）。挂到 `dispatcher_daemon` 的日历消费节拍。总开关 `event_impact.yaml` 的 `routing.enabled`（关）。测试：`tests/test_material_events.py`（7 项）。
 
 ## 8. Chief：可选类别与事件对齐
 

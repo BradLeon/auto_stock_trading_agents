@@ -12,6 +12,7 @@ routing:
   trigger_min_materiality: major   # either direction
   validity_days: 14       # material reviews and off-thesis shocks
   ad_hoc_max_notches: 1   # an event-triggered sector review lowers a layer by at most one notch
+  lookback_hours: 6       # briefs published this recently are scanned on each consume tick (30 min)
 layer:
   enabled: false          # layer analysis reads event components + `kind: risk` claims (tasks group 5).
                           # While off, config.load_sector_config drops every `kind: risk` claim, so nothing

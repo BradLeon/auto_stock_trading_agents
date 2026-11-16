@@ -808,6 +808,7 @@ RESEARCH_WORKFLOW_CONSUMER = {
     "layer-review": "layer", "information-brief": "information", "sector-review": "sector",
     "fundamental-routine": "fundamental", "fundamental-event": "fundamental",
     "macro-review": "macro", "technical-review": "technical",
+    "fundamental-material": "fundamental",      # event-impact-routing (2026-11-16): added after initialization
 }
 _OWNER_LOG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS schedule_owner_log (
@@ -860,12 +861,13 @@ def owner_switch(workflow, *, to_owner, actor, reason, approval="", void_unfinis
         conn.execute("BEGIN IMMEDIATE")
         try:
             rows = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=?", (workflow,)).fetchall()
-            if not any(row["scope"] == "*" for row in rows) and to_owner == "dispatcher" \
-                    and workflow not in RESEARCH_WORKFLOW_CONSUMER:
-                # A trade-path workflow has no owner row until its first resume: record it as paused (`legacy`),
+            if not any(row["scope"] == "*" for row in rows) and to_owner == "dispatcher":
+                # A trade-path workflow, or a research workflow added after the authority was initialized (e.g.
+                # fundamental-material), has no owner row until its first resume: record it as paused (`legacy`),
                 # then the switch below moves it, so the owner log shows the whole step.
                 conn.execute("INSERT INTO schedule_scope_owners VALUES(?,?,?,1,0,'')", (workflow, "*", "legacy"))
-                _history(conn, "register", workflow, {"owner": "legacy", "reason": "first resume of a trade-path workflow"})
+                _history(conn, "register", workflow, {"owner": "legacy", "reason": "first resume of a workflow "
+                                                      "with no owner row (trade path, or added after initialization)"})
                 rows = conn.execute("SELECT * FROM schedule_scope_owners WHERE workflow=?", (workflow,)).fetchall()
             if not any(row["scope"] == "*" for row in rows):
                 raise ScheduleAuthorityError("workflow has no declared schedule owner")

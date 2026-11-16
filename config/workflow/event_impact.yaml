@@ -12,3 +12,37 @@ routing:
   trigger_min_materiality: major   # either direction
   validity_days: 14       # material reviews and off-thesis shocks
   ad_hoc_max_notches: 1   # an event-triggered sector review lowers a layer by at most one notch
+layer:
+  enabled: false          # layer analysis reads event components + `kind: risk` claims (tasks group 5).
+                          # While off, config.load_sector_config drops every `kind: risk` claim, so nothing
+                          # downstream (evidence engine, extraction menus, reports) sees them.
+  max_components: 30      # components shown to one layer analysis, newest first
+  safety_net_min_materiality: major   # member companies' own components at or above this also reach the layer (D6)
+
+# Independent-source rule for `kind: risk` claims (design D5, sector/chain-layers spec).
+# "Pressured" / "realized" need >= min_independent sources, >= min_authoritative of them first-hand or
+# authoritative. Sources are ORIGINS: "The Wall Street Journal（经IBD转述）" is the WSJ, and every relay of one
+# original report is one source. This list declares which names are the same outlet and which count as
+# authoritative; it never decides what a report means.
+risk_claims:
+  min_independent: 2
+  min_authoritative: 1
+  origins:                # canonical origin -> case-insensitive substrings that identify it
+    WSJ: ["wall street journal", "wsj", "华尔街日报"]
+    DOW_JONES_NEWSWIRES: ["dow jones newswires", "道琼斯通讯社", "dow jones market data"]
+    BARRONS: ["barron"]
+    IBD: ["investor's business daily", "ibd"]
+    NYT: ["new york times", "纽约时报"]
+    REUTERS: ["reuters", "路透"]
+    BLOOMBERG: ["bloomberg", "彭博"]
+    AP: ["associated press", "美联社"]
+    FT: ["financial times", "金融时报"]
+    BRIEFING: ["briefing.com"]
+    SEMIANALYSIS: ["semianalysis"]
+    TRENDFORCE: ["trendforce", "集邦"]
+  authoritative:          # mainstream wires (original reporting) and first-hand texts
+    origins: [DOW_JONES_NEWSWIRES, REUTERS, BLOOMBERG, AP]
+    markers: ["8-k", "10-k", "10-q", "6-k", "sec", "新闻稿", "公司声明", "公司公告", "董事会", "发言人", "press release",
+              "spokesperson", "spokesman", "spokeswoman",
+              "商务部", "commerce department", "bis", "federal register", "联邦公报", "国会", "众议院", "参议院",
+              "congress", "house of representatives", "senate", "法案"]

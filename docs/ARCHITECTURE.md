@@ -277,7 +277,7 @@ flowchart LR
         HISTORY_DATA["交易与绩效包<br/>订单、成交、归因、历史决策与复盘结果"]
     end
 
-    subgraph ANALYSTS["分析师：除两条明确依赖外，互不读取彼此的观点"]
+    subgraph ANALYSTS["分析师：除三条明确依赖外，互不读取彼此的观点"]
         LAYER["层次分析师<br/>仅 AI 硬件产业链"]
         INTEL["信息分析师"]
         SECTOR["行业分析师"]
@@ -308,6 +308,7 @@ flowchart LR
 
     HIER_DATA --> LAYER
     DOC_DATA --> LAYER
+    INTEL_OUT -.->|唯一跨分析师依赖之三：事件成分<br/>event_impact 开关开启后| LAYER
     LAYER --> LAYER_OUT
 
     HIER_DATA --> SECTOR
@@ -381,6 +382,14 @@ flowchart LR
     class TRADER,BROKER,CLERK,TRADE_LEDGER execution;
     class RULE note;
 ```
+
+**层次分析读事件成分（event-impact-routing，`config/workflow/event_impact.yaml` 的 `layer.enabled`，默认关）。**
+开启后，层次分析除产业链数据包外，还读信息简报里的**事件成分**——这是第三条、也是只读事实层的跨分析师依赖：
+它读的是简报对事件的拆分与重要性评级，不读信息分析师的结论。读取范围有两类：影响面为本层、或跨层且点名本层的
+成分；本层成员公司重要性在"重大"及以上的本公司成分（安全网，防止影响面判错时整层传导丢失）。同一开关还让
+`kind: risk` 风险命题生效（关闭时加载器直接滤掉，证据引擎、抽取菜单、报告都看不到它），风险命题按**独立来源**
+计数（`chain/risk_sources.py`）。层次分析据此产出风险命题状态、论点外冲击、补认领与只下调的使用率建议，代码核对
+门槛与方向（`agents/layer/event_inputs.py`）。细节见 [`agents/LAYER_ANALYST.md`](agents/LAYER_ANALYST.md)。
 
 ## 5. 主理人—风控主管多轮 Loop
 

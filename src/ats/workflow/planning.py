@@ -213,6 +213,24 @@ CONFIG_LEGACY_DIGESTS = {
 }
 
 
+def _effective_sector_doc(doc: dict) -> dict:
+    """The sector config as `load_sector_config` will see it: `kind: risk` claims only while the layer switch is on.
+
+    event-impact-routing adds risk claims to the sector YAML before they go live. Hashing the file as written would
+    make every Layer review and the sector review look built from different rules the moment the claim is committed
+    (the 2026-11-12 failure again), although nothing they read changed. Lineage follows what is loaded.
+    """
+    from ..config import risk_claims_enabled
+
+    if risk_claims_enabled() or not isinstance(doc.get("layers"), list):
+        return doc
+    out = dict(doc)
+    out["layers"] = [{**layer, "claims": [c for c in layer.get("claims") or [] if c.get("kind") != "risk"]}
+                     if isinstance(layer, dict) and "claims" in layer else layer
+                     for layer in doc.get("layers") or []]
+    return out
+
+
 def _file_hash(path: Path) -> str:
     if path.name == "risk.yaml":
         try:
@@ -235,6 +253,8 @@ def _file_hash(path: Path) -> str:
         except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
             doc = None
         if doc is not None:
+            if path.parent.name == "sectors" and isinstance(doc, dict):
+                doc = _effective_sector_doc(doc)
             content = _hash(doc)
             return CONFIG_LEGACY_DIGESTS.get(content, content)
     return hashlib.sha256(path.read_bytes()).hexdigest()

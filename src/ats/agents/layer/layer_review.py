@@ -179,8 +179,24 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
 
     ctx = build_context(cfg, layer, basket=basket, prior=prior,
                         snapshot_block=snapshot_block, assessments=assessments)
+    # event-impact-routing group 5: event components, risk claims and the down-only advice, behind the layer
+    # switch. Off, the prompt and the output schema are exactly what they were.
+    from . import event_inputs
+
+    event_conf = event_inputs.settings()
+    events_on = event_conf["enabled"] and store is not None
+    components: list[dict] = []
+    view_cls = LayerVerdictView
+    if events_on:
+        from ..sector.outputs import LayerVerdictEventView
+
+        now = _now()
+        components = event_inputs.read_components(store, layer, now=now, conf=event_conf)
+        ctx += "\n\n" + event_inputs.render_block(layer, assessments=assessments, components=components,
+                                                 prior=event_inputs.prior_shocks(store, layer), now=now)
+        view_cls = LayerVerdictEventView
     try:
-        view: LayerVerdictView = run_structured("layer_analyst", LayerVerdictView, ctx,
+        view: LayerVerdictView = run_structured("layer_analyst", view_cls, ctx,
                                                 skill_slug="layer-analyst")
     except Exception as exc:  # noqa: BLE001 - one layer must not stop the others
         log.warning("layer review failed for %s: registered as missing (%s)", layer.key, exc)
@@ -190,6 +206,10 @@ def run(cfg: SectorConfig, layer, *, basket=None, prior: LayerVerdict | None = N
                           bool(basket is not None and basket.rows
                                and basket.cross_section_applicable),
                           assessments=assessments)
+    if events_on:
+        fields, gaps = event_inputs.apply(layer, view, assessments=assessments, components=components,
+                                          now=verdict.as_of, conf=event_conf)
+        verdict.event_fields = {**fields, **({"gaps": gaps} if gaps else {})}
     if store is not None:
         _publish_projection(store, layer, verdict, workflow_run_id=workflow_run_id,
                             input_refs=input_refs, data_vintage_refs=data_vintage_refs,
@@ -210,8 +230,10 @@ def projection_extras(layer, verdict: LayerVerdict, assessments=None) -> dict:
     cluster count), NOT on financials — those cover few names — and says so in `cross_section_basis`.
     Lists are capped so the projection stays readable inside the Chief's prompt.
     """
-    assessments = [a for a in (assessments or []) if getattr(a, "layer", layer.key) in ("", layer.key)]
     claims = {c.id: c for c in layer.claims}
+    # Risk claims travel in `risk_claims` (event_inputs.apply), never as operating-claim evidence.
+    assessments = [a for a in (assessments or []) if getattr(a, "layer", layer.key) in ("", layer.key)
+                   and getattr(claims.get(a.claim_id), "kind", "") != "risk"]
     members = [t.symbol.upper() for t in layer.tickers]
     witnesses = []
     for claim in layer.claims:
@@ -264,10 +286,12 @@ def projection_extras(layer, verdict: LayerVerdict, assessments=None) -> dict:
         gaps.append("本层没有声明命题（配置缺口）")
     if not verdict.cross_section_applicable:
         gaps.append("本层可比样本不足，没有层内排序")
+    event_fields = dict(getattr(verdict, "event_fields", None) or {})
+    gaps += list(event_fields.pop("gaps", []))
     extras = {"cycle_position": verdict.cycle_position, "has_claims": verdict.has_claims,
               "reversal_triggers": list(verdict.reversal_triggers)[:6], "entities": entities,
               "cross_section": cross, "common_evidence": common[:8], "divergent_evidence": divergent[:8],
-              "gaps": gaps}
+              "gaps": gaps, **event_fields}
     if readings:
         extras["cross_section_basis"] = "evidence_readings"
         extras["cross_section_coverage"] = f"{len(readings)}/{len(members)} members read" if members else ""
@@ -315,8 +339,11 @@ def _to_verdict(layer, view: LayerVerdictView, has_claims: bool,
     conf = max(0.0, min(1.0, float(view.confidence or 0.0)))
     rationale = view.rationale or ""
 
+    risk_ids = {c.id for c in layer.claims if c.kind == "risk"}
+    # A risk claim never anchors the layer's operating status: "the export risk is live" is not
+    # "demand is contracting". It reaches the sector step through risk_claims / utilization_advice.
     common = [a for a in (assessments or [])
-              if getattr(a, "layer", layer.key) in ("", layer.key)]
+              if getattr(a, "layer", layer.key) in ("", layer.key) and a.claim_id not in risk_ids]
     supportive = [a for a in common if a.verdict == "supportive"]
     contrary = [a for a in common if a.verdict in ("contradicted", "falsified")]
     any_conclusion = [a for a in common if a.verdict != "unknown"]

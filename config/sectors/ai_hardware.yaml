@@ -786,11 +786,16 @@ layers:
     # 首轮判读后拆出来独立成命题——诊断与留痕写在 ④ 被删掉的那一维原位。
     #
     # **刻意不立的三条**（免得以后重复起草）：
-    #   ~~市场可达性 / 出口管制命题~~ —— 台账里只有 NVDA（7 条）与 AMD（1 条）说话，
-    #     **2 个说话人 < MIN_INDEPENDENT_SPEAKERS=3**，立了永远判 unknown。判据与 L6 那轮
-    #     否掉独立光刻命题完全一样。中国与主权敞口降为 ④ 的 xpu_account_and_customer_mix
-    #     里的客户结构一维 —— **在那里它反而有区分度**（NVDA 主权收入 +80%、中国 DC 收入
-    #     被排除在 outlook 外，对比 AVGO 只有三个客户）。
+    #   ~~市场可达性 / 出口管制的**经营**命题~~ —— 台账里只有 NVDA（7 条）与 AMD（1 条）说话，
+    #     **2 个说话人 < MIN_INDEPENDENT_SPEAKERS=3**，立成 common 永远判 unknown。判据与 L6 那轮
+    #     否掉独立光刻命题完全一样。中国与主权敞口作为**客户结构**仍留在 ④ 的
+    #     xpu_account_and_customer_mix 一维 —— **在那里它有区分度**（NVDA 主权收入 +80%、中国 DC
+    #     收入被排除在 outlook 外，对比 AVGO 只有三个客户）。
+    #     2026-11-16 改由下面的**风险命题** l5_export_market_access_risk 承接政策本身
+    #     （event-impact-routing）。两者门槛不同，这正是能立的原因：经营命题数**独立公司说话人**
+    #     （出口限制不会由被限制的公司率先报道），风险命题数**独立来源**——同一出版方或同一原发
+    #     的转载算一个，至少 2 个且其中至少 1 个是一手或权威来源（规则见
+    #     config/workflow/event_impact.yaml 的 risk_claims 段、chain/risk_sources.py）。
     #   ~~L4 侧的 ASIC 替代 common 命题~~ —— L2 的 asic_substitution_delivering 已经在问
     #     「自研 ASIC 兑现了没有」（买方视角，common）。供给侧要问的是**订单在四家之间
     #     怎么转移**，那是截面、就是 ④，不是第二条 common。
@@ -1196,6 +1201,37 @@ layers:
           - {entity: TRENDFORCE, stance: regulator}
           - {entity: DOWJONES, stance: regulator}
           - {entity: SEMIANALYSIS, stance: regulator}
+
+      # ⑥ 2026-11-16 风险命题（kind: risk，event-impact-routing）。只问**整层共同**的政策风险：
+      # 出口许可与市场准入收紧会同时压缩四家的可达市场。单家公司的治理、人事、诉讼不在这里——
+      # 那些是该公司的风险项，归基本面（fundamental_risk_register）。
+      # 状态五档（休眠/出现/承压/兑现/解除）由层次分析给出；「承压」「兑现」须过独立来源门槛，
+      # 由代码核对（agents/layer/event_inputs.py）。只要还在 layer.enabled=false，加载器会把它
+      # 整条滤掉，抽取菜单与证据引擎都看不到它。
+      - id: l5_export_market_access_risk
+        kind: risk
+        statement: 出口管制与市场准入限制正在收紧，压缩 XPU 厂商的可达市场
+        horizon: {from: 2026-11-01, to: 2027-12-31}
+        concepts:
+          - key: xpu_export_market_access
+            desc: 影响加速器出口与市场准入的**政策与执法动态**——出口许可的发放、撤销与收紧，
+                  相关立法草案与表决，针对特定国家或客户的销售限制，出口合规调查与处罚，
+                  以及公司因此把某地区收入排除在指引之外。方向指**限制的松紧**：收紧记 up，放宽记 down。
+                  ⛔ 不记单家公司的治理、人事、诉讼（那是公司风险项）。
+                  ⛔ 不记客户结构与地区收入占比本身（属 ④ 的 xpu_account_and_customer_mix），
+                  只记**政策变化**及其对可达市场的直接影响
+            expect_from: [NVDA, AMD, AVGO, MRVL, DOWJONES, SEMIANALYSIS, TRENDFORCE]
+        falsifiers:
+          - 出口许可恢复或放宽，且被排除的地区收入重新纳入指引
+          - 相关立法草案在委员会或表决中被否决或无限期搁置
+        witnesses:
+          - {entity: NVDA, stance: incumbent}
+          - {entity: AMD,  stance: incumbent}
+          - {entity: AVGO, stance: incumbent}
+          - {entity: MRVL, stance: incumbent}
+          - {entity: DOWJONES, stance: regulator}
+          - {entity: SEMIANALYSIS, stance: regulator}
+          - {entity: TRENDFORCE, stance: regulator}
 
   - key: L6_memory
     label: L6 存储（HBM/常规DRAM/NAND/HDD）

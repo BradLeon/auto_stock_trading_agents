@@ -45,7 +45,10 @@ WitnessStance = Literal[
 ]
 
 Direction = Literal["up", "flat", "down"]
-ClaimKind = Literal["common", "relative"]
+# `risk` (event-impact-routing, 2026-11-16): a layer-wide or cross-layer COMMON RISK. Aggregated like `common`
+# but counted by independent SOURCES (publisher / original report) with at least one authoritative source,
+# instead of independent company speakers — the people who report an export ban are not the companies it hits.
+ClaimKind = Literal["common", "relative", "risk"]
 # `resolved` belongs to cross-section (relative) claims only: they do not assert
 # anything to be supported or contradicted, they ask how a position is distributed, so
 # the only question is whether the comparison could be made at all.
@@ -379,7 +382,7 @@ class ClaimAssessment(BaseModel):
     # independent filers to stand on its own, so the verdict is `unknown` — kept as a
     # distinct reason because "nobody spoke" and "everyone who spoke shares a seat at
     # the table" call for different fixes.
-    unresolved_reason: Literal["", "dissent", "single_stance"] = ""
+    unresolved_reason: Literal["", "dissent", "single_stance", "source_gate"] = ""
     dissenters: list[str] = Field(default_factory=list)
     # Declared witnesses that said nothing this period. Named, not folded into a
     # count: a company's silence on a dimension is a gap, not neutrality.
@@ -392,6 +395,10 @@ class ClaimAssessment(BaseModel):
     # Cross-section claims only: one row per compared entity. `verdict` then says
     # whether the comparison could be made, not whether something is true.
     entity_readings: list[EntityReading] = Field(default_factory=list)
+    # `risk` claims only: the independent sources behind the supporting clusters, and which of them are
+    # first-hand or authoritative (chain/risk_sources.py).
+    independent_sources: list[str] = Field(default_factory=list)
+    authoritative_sources: list[str] = Field(default_factory=list)
     note: str = ""
 
     @property

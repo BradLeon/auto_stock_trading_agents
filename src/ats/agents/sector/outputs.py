@@ -154,6 +154,77 @@ class LayerVerdictView(BaseModel):
         return v
 
 
+# --- event-impact-routing (2026-11-16): only used when config/workflow/event_impact.yaml layer.enabled ---
+class RiskClaimStateView(BaseModel):
+    claim_id: str = Field(description="上下文「风险命题」里列出的命题 id，原样回填")
+    status: str = Field(default="dormant", description=(
+        "dormant 休眠 | emerging 出现 | pressured 承压 | realized 兑现 | resolved 解除。"
+        "承压/兑现须有至少 2 个独立来源且其中至少 1 个一手或权威——代码会按引用的成分与台账核对，不达标降为出现"))
+    component_refs: list[str] = Field(default_factory=list, description="支撑状态判断的事件成分编号（ref 原样回填）")
+    materiality_review: str = Field(default="", description=(
+        "对所引成分重要性评级的复核：agree / higher / lower + 一句理由"))
+    rationale: str = ""
+
+    @field_validator("component_refs", mode="before")
+    @classmethod
+    def _refs(cls, v):
+        return _as_strlist(v)
+
+
+class OffThesisShockView(BaseModel):
+    shock_id: str = Field(default="", description="本层内唯一的短编号，如 L5-shock-1；延续上一轮的冲击时沿用原编号")
+    component_refs: list[str] = Field(default_factory=list, description="该冲击依据的事件成分编号")
+    summary: str = Field(default="", description="一句话：发生了什么、为什么无法归入任何命题")
+    materiality: str = Field(default="moderate", description="minor | moderate | major | critical（只列中等及以上）")
+    direction: str = Field(default="unclear", description="positive | negative | mixed | unclear")
+    status: str = Field(default="ongoing", description="ongoing 持续 | concluded 已了结")
+    touched_claims: list[str] = Field(default_factory=list, description="它碰到但不足以归入的命题 id")
+    proposed_claim: str = Field(default="", description="若建议新增一条命题，写成可证伪的陈述；否则留空")
+    materiality_review: str = Field(default="", description="agree / higher / lower + 一句理由")
+
+    @field_validator("component_refs", "touched_claims", mode="before")
+    @classmethod
+    def _lists(cls, v):
+        return _as_strlist(v)
+
+
+class CrossScopeClaimView(BaseModel):
+    component_ref: str = Field(description="标为「本公司」、但你认为会传导到整层的成分编号")
+    transmission: str = Field(default="", description="传导路径与理由，如「董事会动荡推迟买方采购决策」")
+    materiality_review: str = Field(default="", description="agree / higher / lower + 一句理由")
+
+
+class UtilizationAdviceView(BaseModel):
+    direction: str = Field(default="none", description="down | none。**不得建议上调**")
+    notches: int = Field(default=0, description="建议下调档数（0-2）；临时复盘时板块配置只执行一档")
+    reasons: list[str] = Field(default_factory=list, description=(
+        "所依据的风险命题 id（须为承压/兑现）或冲击编号（须为重大及以上、负面、持续）"))
+    rationale: str = ""
+
+    @field_validator("reasons", mode="before")
+    @classmethod
+    def _reasons(cls, v):
+        return _as_strlist(v)
+
+
+class LayerVerdictEventView(LayerVerdictView):
+    """LayerVerdictView plus the event-impact fields; selected only while the layer switch is on."""
+
+    risk_claims: list[RiskClaimStateView] = Field(default_factory=list, description=(
+        "本层每条风险命题一行（上下文「风险命题」一节列出的全部）"))
+    off_thesis_shocks: list[OffThesisShockView] = Field(default_factory=list, description=(
+        "无法归入任何经营或风险命题、且重要性不低于中等的层面成分"))
+    cross_scope_claims: list[CrossScopeClaimView] = Field(default_factory=list, description=(
+        "标为「本公司」但存在整层传导的成分；无传导的不要列"))
+    utilization_advice: UtilizationAdviceView | None = Field(default=None, description=(
+        "只下调的使用率建议；没有承压/兑现的风险命题、也没有重大负面持续冲击时给 none"))
+
+    @field_validator("risk_claims", "off_thesis_shocks", "cross_scope_claims", mode="before")
+    @classmethod
+    def _objlists(cls, v):
+        return _as_objlist(v)
+
+
 class LayerRotationView(BaseModel):
     """Cross-layer pass — consumes layer verdicts, never re-litigates them."""
     regime: str = Field(description="一句话行业状态（自包含，会被注入其他 agent 的上下文）")

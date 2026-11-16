@@ -162,6 +162,7 @@ class RiskClaimState(_Item):
     authoritative_sources: int = Field(default=0, ge=0)
     sources: list[str] = Field(default_factory=list)
     component_refs: list[str] = Field(default_factory=list)
+    materiality_review: str = ""       # on the components it cites: agree / higher / lower, with a reason
     rationale: str = ""
 
 

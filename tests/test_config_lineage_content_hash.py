@@ -54,7 +54,10 @@ def test_unparseable_yaml_falls_back_to_bytes(tmp_path):
 @pytest.mark.parametrize("rel", ["sectors/ai_hardware.yaml", "technical.yaml", "macro.yaml"])
 def test_repo_files_answer_with_the_digest_their_projections_recorded(rel):
     path = planning.REPO_ROOT / "config" / rel
-    content = planning._hash(planning.yaml.safe_load(path.read_text(encoding="utf-8")))
+    doc = planning.yaml.safe_load(path.read_text(encoding="utf-8"))
+    if rel.startswith("sectors/"):
+        doc = planning._effective_sector_doc(doc)     # unlaunched `kind: risk` claims are not loaded, not hashed
+    content = planning._hash(doc)
     assert content in planning.CONFIG_LEGACY_DIGESTS, f"{rel} content changed: verify and re-record or let it recompute"
     assert planning._file_hash(path) == planning.CONFIG_LEGACY_DIGESTS[content]
 
@@ -65,4 +68,4 @@ def test_the_legacy_table_never_hides_a_real_change(tmp_path):
     doc["__probe__"] = 1
     changed = _hash_text(tmp_path, planning.yaml.safe_dump(doc, allow_unicode=True), "sectors/ai_hardware.yaml")
     assert changed not in planning.CONFIG_LEGACY_DIGESTS.values()
-    assert changed == planning._hash(doc)
+    assert changed == planning._hash(planning._effective_sector_doc(doc))

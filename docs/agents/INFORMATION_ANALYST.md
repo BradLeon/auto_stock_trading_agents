@@ -15,7 +15,7 @@
 | 读什么 | 数据平台**已准入**的文档、chunk 与中性证据事实（信息文档包）；`config/pead.yaml` 的跟踪标的。执行中不得直接调用新闻、研报或公告 Provider，正文由数据层采集 |
 | 不读什么 | 任何其他分析师的观点 |
 | 产出 | 每个标的一份 `information_brief` 投影（`InformationBriefPayload`） |
-| 谁读它 | 基本面分析师（唯一的跨分析师依赖之一）、Chief |
+| 谁读它 | 基本面分析师（唯一的跨分析师依赖之一）、Chief；event_impact 开关开启后层次分析读其中的事件成分 |
 | 什么时候跑 | 工作日 08:00（纽约时间）定时；财报计划与发布的日历事件也会唤醒它（见 OPERATIONS §3.1） |
 | 手动运行 | `ats workflow run --task information-brief --scope-kind entity --scope-id <代码>`（全部目标标的用 `--scope-kind portfolio --scope-id pead-targets`）；旧入口 `ats analyst information` 已退役，运行只会提示上述写法 |
 | 代码 | `src/ats/agents/information/`（`entry.py` 入口、`selection.py` 候选选择、`triage.py` 材料性评估、`extract.py` 抽取、`briefs.py` 发布契约、`event_components.py` 事件成分评级） |

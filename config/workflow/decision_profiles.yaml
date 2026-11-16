@@ -28,3 +28,11 @@ profiles:
       fundamental_analysis: config/pead.yaml
       sector_allocation: config/sectors/ai_hardware.yaml
       technical_review: config/technical.yaml
+
+# event-impact-routing: optional decision categories, per profile id. Frozen into the snapshot when a valid one
+# exists, never a gap when absent, independent of the per-target routine/event choice. Kept OUTSIDE `profiles`
+# on purpose: the plan hashes the profile dict, and a decision cycle frozen before this key existed must still
+# restore without "configuration drift".
+optional_categories:
+  ai_hardware:
+    fundamental_material: fundamental_material_review

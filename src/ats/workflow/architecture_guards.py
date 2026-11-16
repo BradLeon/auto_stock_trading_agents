@@ -58,6 +58,7 @@ ALLOWED_CROSS_ROLE_READS: dict[str, tuple[str, ...]] = {
     "layer_analyst": ("information_analyst", "information_brief"),
     "chief": ("layer_analysis", "information_brief", "sector_allocation",
               "fundamental_expectation_update", "fundamental_event_review",
+              "fundamental_material_review",          # event-impact-routing: optional category
               "macro_review", "technical_review"),
 }
 

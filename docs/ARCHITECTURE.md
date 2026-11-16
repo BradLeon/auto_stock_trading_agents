@@ -681,6 +681,19 @@ Chief 开始决策时必须固定一份 `research_snapshot`，其中列出每个
 projection ID、content hash、as-of 和新鲜度状态，以及这次决策读取的业务 scope（不再记录路由与资格状态）。Loop 默认不重跑分析师；若研究快照本身失效，
 当前 cycle 应转为 `superseded` 或人工处理，不在原 revision 中偷换研究输入。
 
+**可选类别：重大事件评审（event-impact-routing）。** 决策档案文件（`config/workflow/decision_profiles.yaml`）顶层的
+`optional_categories.ai_hardware` 登记 `fundamental_material: fundamental_material_review`（放在 `profiles` 之外：计划会哈希档案本身，放进去会让已冻结的周期恢复时报配置漂移）。快照构建时，对计划里的每个标的取最新
+一份重大事件评审：已发布、在 `valid_until` 内、距今不超过 14 天，且它引用的每个事件成分仍能在已发布的信息简报里
+找到，才冻结进快照的 `optional_items`；过期或血缘失效（简报已撤或成分不在）的不进入，原因写进 `optional_excluded`。
+可选类别**不计缺口**、**不进 `items`**，所以快照是否完整、严格的固定输入校验（`decision_requirements.validate`）
+与此前完全一致；单份失效只剔除该份，不阻断周期。财报口径的基本面（例行 / 事件评审，每个标的二选一）不受影响。
+没有评审时，快照的存储形状不变（不写这两个键）。
+
+**事件簇对齐。** Chief 上下文另有「重大事件评审（可选类别）」与「事件簇对齐」两块（`agents/chief/assemble.py` 的
+`material_block`、`event_alignment_block`）。对齐在代码里完成：按 `component_refs` 回查信息简报里的事件簇，把同一簇下的
+重大事件评审、层次分析的风险命题 / 论点外冲击 / 补认领、以及行业配置中引用这些命题或冲击编号的 `downgrade_reasons`
+归在一个「事件簇」标题下，并标明各自认领的成分编号。Chief skill 写明：同一事件簇的多份评估是一件事的不同部分，不得重复计算。
+
 ### 10.2 Revision 和风控
 
 1. `decision_revision` 内容不可变，新版本必须引用 `parent_revision` 和修订原因。

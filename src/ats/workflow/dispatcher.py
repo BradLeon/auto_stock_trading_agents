@@ -864,6 +864,8 @@ class Dispatcher:
             "scope": snapshot.scope.key, "built_at": snapshot.built_at,
             "complete": snapshot.complete,
             "items": [vars(item) for item in snapshot.items],
+            "optional_items": [vars(item) for item in snapshot.optional_items],
+            "optional_excluded": list(snapshot.optional_excluded),
             "detail": detail, "manifest": manifest, "chief_result": chief_payload,
             "requirements": snapshot.requirements,
         }

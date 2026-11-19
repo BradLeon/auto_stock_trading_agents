@@ -118,7 +118,14 @@ def get_model(role: str, reasoning: Any = None) -> Any:
         # OpenRouter (optional) attribution headers — harmless against vanilla OpenAI.
         headers = {"HTTP-Referer": "https://github.com/ats", "X-Title": "ats"} \
             if base_url and "openrouter" in base_url else None
-        extra = reasoning_body(rc.reasoning) if base_url and "openrouter" in base_url else None
+        extra = None
+        if base_url and "openrouter" in base_url:
+            extra = dict(reasoning_body(rc.reasoning) or {})
+            # 2026-11-19 (user): default load balancing spread one model over providers billing 1.5x-5x its
+            # listed price (3.4x on the day); `provider` preferences (e.g. sort by price) come from config.
+            if cfg.app.llm.openrouter_provider:
+                extra["provider"] = dict(cfg.app.llm.openrouter_provider)
+            extra = extra or None
         value = ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.openai_api_key or None,

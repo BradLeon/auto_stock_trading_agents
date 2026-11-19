@@ -90,7 +90,10 @@ def test_gateway_sends_the_reasoning_field_only_through_openrouter(monkeypatch):
         secrets = SimpleNamespace(openai_api_key="k", openai_base_url=base_url)
         return SimpleNamespace(app=real.app, secrets=secrets)
 
-    for base_url, expected in (("https://openrouter.ai/api/v1", {"reasoning": {"enabled": False}}),
+    openrouter = {"reasoning": {"enabled": False}}
+    if real.app.llm.openrouter_provider:
+        openrouter["provider"] = dict(real.app.llm.openrouter_provider)
+    for base_url, expected in (("https://openrouter.ai/api/v1", openrouter),
                                ("https://api.openai.com/v1", None)):
         gateway.get_model.cache_clear()
         monkeypatch.setattr(gateway, "get_config", lambda b=base_url: fake_config(b))
@@ -158,3 +161,31 @@ def test_a_role_that_already_has_reasoning_off_keeps_retrying_the_same_model(mon
     with pytest.raises(RuntimeError, match="after retries"):
         base.run_structured("layer_rotation", Answer, "ctx")
     assert Model.calls == 4
+
+
+def test_openrouter_provider_preferences_come_from_config(monkeypatch):
+    """Sort-by-price routing rides on every OpenRouter request, next to the reasoning field, and nowhere else."""
+    seen = []
+
+    class Recorder:
+        def __init__(self, **kwargs):
+            seen.append(kwargs)
+
+    import langchain_openai
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Recorder)
+    real = get_config()
+    llm = real.app.llm.model_copy(update={"openrouter_provider": {"sort": "price"}})
+    app = real.app.model_copy(update={"llm": llm})
+
+    def fake_config(base_url):
+        return SimpleNamespace(app=app, secrets=SimpleNamespace(openai_api_key="k", openai_base_url=base_url))
+
+    for base_url, expected in (
+            ("https://openrouter.ai/api/v1", {"reasoning": {"enabled": False}, "provider": {"sort": "price"}}),
+            ("https://api.openai.com/v1", None)):
+        gateway.get_model.cache_clear()
+        monkeypatch.setattr(gateway, "get_config", lambda b=base_url: fake_config(b))
+        gateway.get_model("layer_rotation")
+        assert seen[-1].get("extra_body") == expected
+    gateway.get_model.cache_clear()

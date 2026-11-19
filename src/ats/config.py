@@ -597,10 +597,21 @@ def load_sector_config(name: str = "ai_hardware"):
     c.setdefault("min_clusters", 2)         # independent evidence clusters for a verdict
     c.setdefault("min_stance_classes", 2)   # 3 sell-side notes are ONE witness class
     c.setdefault("min_confidence", 0.5)     # drop low-confidence extractions
+    risk_on = risk_claims_enabled()
     for layer in raw.get("layers", []):     # claims carry their layer for reporting
+        if not risk_on:
+            # event-impact-routing: `kind: risk` claims stay invisible to every consumer (evidence engine,
+            # extraction menus, reports) until the layer switch in config/workflow/event_impact.yaml is on.
+            layer["claims"] = [c for c in layer.get("claims", []) or [] if c.get("kind") != "risk"]
         for claim in layer.get("claims", []) or []:
             claim.setdefault("layer", layer.get("key", ""))
     return SectorConfig.model_validate(raw)
+
+
+def risk_claims_enabled() -> bool:
+    """Whether `kind: risk` claims are live (config/workflow/event_impact.yaml `layer.enabled`)."""
+    doc = _load_yaml(_config_dir() / "workflow" / "event_impact.yaml") or {}
+    return bool((doc.get("layer") or {}).get("enabled", False))
 
 
 def load_instrument_risk_registry():

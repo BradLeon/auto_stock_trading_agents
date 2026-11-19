@@ -48,6 +48,7 @@
 |---|---|---|
 | `anthropic_economic_index` | `platform`（2026-09-06） | `platform` |
 | `ramp_ai_index` | `platform`（2026-09-11） | `platform` |
+| `ramp_ai_index_fred` | — | `platform`（签入基线，2026-11-12 新增） |
 | `frontier_ai_capability` | `platform`（2026-09-18） | `platform` |
 | `sacra_public_company_profiles` | — | `platform`（签入基线） |
 | `tickertrends_public_research` | — | `platform`（签入基线） |
@@ -75,7 +76,8 @@
 | `us_census_btos` | 美国普查局 BTOS Core API 与历史下载<br>`census.gov/hfp/btos/api`、`/data_downloads` | HTTP 拉取官方 API 与历史文件；只接受 2025-11-17 起「any business function」新口径 | 免费、免鉴权 | 双周（调查波次） | `us_census_btos_weekly`（每周五） |
 | `rps_genai_adoption` | Real-Time Population Survey via FRED<br>`fredgraph.csv?id=`、`graph/api/series/` | 5 条白名单 FRED 系列的公开 CSV + 系列元数据交叉校验 | 免费、免鉴权 | 季度 | `rps_genai_adoption_weekly`（每周五） |
 | `anthropic_economic_index` | Anthropic Economic Index<br>`huggingface.co/datasets/Anthropic/EconomicIndex` | 先解析 HF 仓库解析到 commit SHA，再**按 commit 固定**下载；只持久化确定性 Global SOC/O*NET 查询切片 | 免费、免鉴权 | release_event（不定期发布） | `anthropic_economic_index_weekly`（每周五） |
-| `ramp_ai_index` | Ramp AI Index 公共图表<br>`ramp.com/data/ai-index` | 官方 `Get the data` 导出的 TSV（浏览器落盘到 `var/data/ramp_exports/<scope>.tsv`）；**不用截图/OCR/猜隐藏 URL** | 免费、免账户 | 月度 | `ramp_ai_index_p10d_probe`（每 10 天） |
+| `ramp_ai_index_fred` | FRED 上的 Ramp AI Index 序列（release rid=23）<br>`fredgraph.csv?id=RAMPAI*` | 14 条月度序列的公开 CSV + 序列元数据校验；纯 HTTP | 免费、免鉴权 | 月度 | `ramp_ai_index_fred_weekly`（每周五） |
+| `ramp_ai_index` | Ramp AI Index 公共图表<br>`ramp.com/data/ai-index` | 只采 FRED 没有的部分：无头浏览器 runner 点官方 `Get the data`，截获剪贴板原文并落盘到 `var/data/ramp_exports/<scope>.tsv`；**不用截图/OCR/猜隐藏 URL** | 免费、免账户 | 月度（token 份额为周度） | `ramp_ai_index_p10d_probe`（每 10 天） |
 | `sacra_public_company_profiles` | Sacra 公开公司页<br>`sacra.com/c/openai/`、`sacra.com/c/anthropic/` | 每轮每页**只探测一次**，原始 HTML 存为 constrained snapshot；后续解析/入库/报告离线复用该 artifact。静态 HTML 缺 Revenue 段时允许单次受控 browser snapshot 回退 | 免费、免登录；**明令禁止**付费 API 与 MCP | 每 7 天 | `frontier_ai_labs_revenue_p7d_refresh` |
 | `tickertrends_public_research` | TickerTrends 公开研究文<br>`blog.tickertrends.io/api/v1/posts/anthropic-vs-openai-arr-tracking` | 每周期一次公开 Substack post API；判变依据是准入数值的**语义指纹**而非页面字节（`body_html` 每次重新序列化）。离线路线仍保留冻结 seed `tests/fixtures/.../tickertrends_anthropic_vs_openai_arr_tracking.json` | 免费、免鉴权；**禁止**付费 API 与 MCP | 每 7 天（与 Sacra 同一研究对象，共用发现组） | `frontier_ai_labs_revenue_p7d_refresh`（每 7 天，组 `frontier_ai_labs_revenue`） |
 | `openrouter_rankings` | OpenRouter Rankings Data API<br>`openrouter.ai/api/v1/datasets/rankings-daily` | 文档化的每日 token 数据集；14 天重叠窗口回补；不抓页面、不推 request share | 需免费 bearer key `OPENROUTER_API_KEY`；数据许可 CC BY 4.0 | 上游日更，**我方每 7 天**（2026-09-19 起） | `openrouter_rankings_p7d_ingest`（每 7 天） |
@@ -109,7 +111,8 @@
 | `openrouter_rankings` | 日 | 每 7 天 08:00 UTC | `freshness_slo_days: 10`（2026-09-19 由 3 放宽） | 2026-09-14 |
 | `frontier_ai_capability` | 事件驱动（新模型/新成绩） | 每 7 天；4 个 job 分别 07:20 / 07:25 / 07:27 / 07:35 UTC；**热度分级已取消** | — | 2026-09-18 |
 | `sacra_public_company_profiles` | 不定期更新页面 | 每 7 天 07:50 UTC | `freshness_hours_max: 336`（14 天） | 2026-07（月）+ 2026-Q2 |
-| `ramp_ai_index` | 月 | 每 10 天 07:30 UTC | — | 2026-08 |
+| `ramp_ai_index_fred` | 月 | 每周五 08:25 UTC（`ramp_ai_index_fred_weekly`） | `freshness_slo_days: 10` | 见 FRED |
+| `ramp_ai_index` | 月（token 份额为周） | 每 10 天 07:30 UTC | `freshness_slo_days: 35`（过期报 `export_stale`） | v1 停在 2026-08；v2 首采后更新 |
 | `us_census_btos` | 双周 | 每周五 08:10 UTC（`us_census_btos_weekly`） | `freshness_slo_days: 10` | 参考窗至 2026-08-23 |
 | `anthropic_economic_index` | 不定期发布 | 每周五 08:20 UTC（`anthropic_economic_index_weekly`） | `freshness_slo_days: 10` | 2026-06-26 |
 | `rps_genai_adoption` | 季度 | 每周五 08:15 UTC（`rps_genai_adoption_weekly`） | `freshness_slo_days: 10` | 2026-Q2 |
@@ -148,10 +151,18 @@
 - **必须注意**：`Usage Share` 是某职业/任务占 1P API 公开产品流量的份额，**不是该职业有多少人在使用 AI**；官网所称 Industry 是 SOC 职业大类，不是 NAICS/GICS 行业；职业与任务是同一流量的两种切法，不可相加或取平均。
 - **时效性**：不定期发布，库内仅 3 期且最新为 `2026-06-26`；对趋势而言必然落在 `insufficient_history`。
 
-### 3.4 `ramp_ai_index` — 真实付费采购（补充轴）
+### 3.4 `ramp_ai_index_fred` + `ramp_ai_index` — 真实付费采购（补充轴，v2）
 
-- **观察对象**：仅五个白名单 scope——`adoption_overall`、`adoption_overall_models`、`adoption_sector`、`spend_per_employee_overall`、`model_market_share_overall`。
-- **准确性保障**：来源仅为官方 `Get the data` 导出的 TSV，不使用截图/OCR/猜测隐藏 URL；`business_size` 与 `geographies` 明确排除发布（仅做发现）；百分比值域 `0–100`；`spend_nonnegative`；分位数顺序固定为 `median, top10, top1`；`vendor_shares_may_overlap: true` 说明 vendor 份额不要求合计 100%。
+- **观察对象（v2，2026-11-12 起）**：七个 scope——`adoption_overall`、`adoption_overall_models`、`adoption_sector`、`adoption_business_size`、`spend_per_employee_overall`、`token_spend_share_by_maker`、`token_spend_share_by_model`。
+  - 总体、3 家供应商、7 个行业、3 档规模来自 FRED；其余来自网页 runner。
+  - v1 的 `model_market_share_overall` 已停止更新，由周度 token 花费份额取代。
+  - 详见 [RAMP_AI_INDEX.md](RAMP_AI_INDEX.md)。
+- **准确性保障**：
+  - 网页部分只用官方 `Get the data` 导出的原文，不使用截图/OCR/猜测隐藏 URL；FRED 已有的序列不从网页入库，只做交叉核对。
+  - `geographies` 等图表仅做发现。
+  - 质量门：百分比值域 `0–100`；`spend_nonnegative`；分位数顺序固定为 `median, top10, top1`；`vendor_shares_may_overlap: true` 说明 vendor 份额不要求合计 100%；token 份额拒收 Volumes 指数。
+  - v1 与 v2 是不同序列，读取方默认只读 v2。
+  - 网页部分失败（被拦、没装浏览器、35 天无新数据）时只标记网页部分，FRED 部分照常更新。
 - **必须注意**：样本只覆盖 **Ramp 客户**，会漏掉免费、捆绑与个人账户使用，因此不能读成全市场采用率；`model share` 不是全 Ramp 企业采用率；公开导出**没有 Top 30% 字段**，不得把 Top 1% 改名或插值；浏览器导出失败会走 `export_unreadable`（历史上确曾出现）。
 - **边界**：Ramp 是 `ai_paid_business_adoption_diffusion` 这一**独立补充命题**的证据，不改变三轴主命题状态；`reference_period`（图表所属月份）与 `fetched_at`（探测时间）**不得混用**。
 

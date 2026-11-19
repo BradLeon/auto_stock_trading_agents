@@ -319,3 +319,12 @@ def test_an_event_trigger_dropped_during_a_pause_is_skipped_not_missing(world):
          "identity": {"event_id": "earnings:TSM:FY2027Q3:release", "event_version": "1"}, "paths": ["dispatcher"]}]}
     status = {row["key"]: row["status"] for row in rt.compare_triggers(event)["rows"]}
     assert status == {"ev": rt.SKIPPED_BY_PAUSE, "ev-unseen": "missing"}
+
+
+def test_a_research_workflow_added_after_initialization_is_registered_on_its_first_resume(world):
+    """event-impact-routing 9.3: fundamental-material has no owner row in an authority initialized before it existed."""
+    assert owners("fundamental-material") == set()
+    entry = go(workflow="fundamental-material")
+    assert entry["from_owner"] == "legacy" and entry["to_owner"] == "dispatcher"
+    assert owners("fundamental-material") == {("*", "dispatcher", 2)}
+    assert json.loads(rt.owner_log("fundamental-material")[0]["health"])["consumer"] == "fundamental"

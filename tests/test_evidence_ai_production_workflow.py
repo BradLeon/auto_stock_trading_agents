@@ -265,8 +265,9 @@ def test_l1_v3_promotes_ramp_to_fourth_primary_axis_without_cross_source_averagi
         def ramp_spend_per_employee_series(self, **kwargs):
             return {"status": "no_coverage", "scope": "spend_per_employee_overall", "rows": []}
 
-        def ramp_model_market_share_series(self, **kwargs):
-            return {"status": "no_coverage", "scope": "model_market_share_overall", "rows": []}
+        # v2 (2026-11-12): weekly token-spend shares replace the monthly model API share.
+        def ramp_token_spend_share_series(self, *, scope, **kwargs):
+            return {"status": "no_coverage", "scope": scope, "rows": []}
 
     packet = observe_ai_production_penetration(
         products=Products(), workflow_scope={"sector": "ai_hardware", "layer": "L1_app"})

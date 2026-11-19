@@ -78,6 +78,12 @@ class ResearchSnapshot:
     built_at: str
     items: list[SnapshotItem] = field(default_factory=list)
     requirements: dict[str, Any] = field(default_factory=dict)
+    # Optional categories (event-impact-routing: `fundamental_material`). Frozen with the snapshot when valid,
+    # never a gap when absent, and outside `items` so completeness and the strict fixed-basis validation are
+    # exactly what they were. `optional_excluded` names each one left out and why (expired, broken lineage).
+    optional_items: list[SnapshotItem] = field(default_factory=list)
+    optional_excluded: list[dict[str, Any]] = field(default_factory=list)
+    optional_detail: list[dict[str, Any]] = field(default_factory=list, repr=False)   # payloads, not serialized
 
     def gaps(self) -> list[SnapshotItem]:
         return [item for item in self.items if not item.reusable]
@@ -93,6 +99,8 @@ class ResearchSnapshot:
             "built_at": self.built_at,
             "items": [vars(item) for item in self.items],
             "requirements": self.requirements,
+            **({"optional_items": [vars(item) for item in self.optional_items]} if self.optional_items else {}),
+            **({"optional_excluded": list(self.optional_excluded)} if self.optional_excluded else {}),
         }
 
 

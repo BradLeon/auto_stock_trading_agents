@@ -485,8 +485,13 @@ def _refresh_review(repo, app, cycle_id: str, rev, previous, values: dict) -> st
     pf = risk_inputs.account()
     if pf is None:
         raise ApprovalRefused("取不到新的账户快照，不能批准（批准必须基于 60 秒内的快照）")
+    from ..workflow.decision_requirements import uncovered_fundamental, uncovered_technical
+
+    frozen = (values.get("research_snapshot") or {}).get("requirements")
     review = risk_checks.review_revision(decisions, pf, event_data=values.get("event_data") or None,
-                                         cycle_id=cycle_id)
+                                         cycle_id=cycle_id,
+                                         uncovered_fundamental=uncovered_fundamental(frozen),
+                                         uncovered_technical=uncovered_technical(frozen))
     before = _approved_set(values["risk_review"], decisions) if values.get("risk_review") else set()
     after = _approved_set(review, decisions)
     if review.verdict != "approved" or after != before:

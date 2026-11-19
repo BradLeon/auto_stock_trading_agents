@@ -11,6 +11,8 @@ import pytest
 
 from ats.data.runtime import market_data
 
+_PRODUCTION_DELAYS = market_data._RETRY_DELAYS   # captured before the autouse fixture zeroes them
+
 
 def _frame(columns: dict[str, list[float | None]]) -> pd.DataFrame:
     return pd.DataFrame(columns, index=pd.to_datetime(["2026-11-10", "2026-11-11"]))
@@ -107,13 +109,32 @@ def test_download_is_serial_on_the_shared_session_and_maps_transport_failures(mo
     monkeypatch.setattr("ats.data.base.yf_symbol",
                         lambda symbol: {"HY9H": "HY9H.F"}.get(symbol, symbol))
 
-    _frame_out, normalized, failed = market_data._download_close_frame(["HY9H", "^VIX", "AAPL"], "1y")
+    _frame_out, normalized, failed, errors = market_data._download_close_frame(["HY9H", "^VIX", "AAPL"], "1y")
 
     assert seen["threads"] is False
     assert seen["session"] is market_data._tracking_session()
     assert normalized == ["HY9H.F", "^VIX", "AAPL"]
     assert failed == {"HY9H", "^VIX"}
+    assert set(errors) == {"HY9H", "^VIX"} and "Connection closed abruptly" in errors["HY9H"]
 
     # The next call starts with a clean record on the same session.
     monkeypatch.setattr(yf, "download", lambda tickers, **kwargs: pd.DataFrame({"Close": [1.0]}))
-    assert market_data._download_close_frame(["AAPL"], "1y")[2] == set()
+    assert market_data._download_close_frame(["AAPL"], "1y")[2:] == (set(), {})
+
+
+def test_each_retry_starts_a_new_session_and_logs_the_exception_text(monkeypatch, caplog):
+    resets: list[int] = []
+    monkeypatch.setattr(market_data, "_reset_session", lambda: resets.append(1))
+    failing = (_frame({"GOOG": [None, None]}), ["GOOG"], {"GOOG"}, {"GOOG": "SSLError: curl: (35) reset"})
+    _scripted(monkeypatch, [failing, failing, failing])
+
+    with caplog.at_level("WARNING", logger=market_data.__name__):
+        rows = market_data.fetch_close_history_many(["GOOG"])
+
+    assert len(resets) == 2                      # before the 2nd and 3rd attempt, not before the 1st
+    assert rows["GOOG"].reason == "transport_error"
+    assert "GOOG (SSLError: curl: (35) reset)" in caplog.text
+
+
+def test_production_retry_window_outlasts_a_half_minute_burst():
+    assert sum(_PRODUCTION_DELAYS) >= 45

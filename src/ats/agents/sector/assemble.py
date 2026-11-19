@@ -431,6 +431,8 @@ def layer_claim_lines(cfg: SectorConfig, layer, assessments=None, *,
         claim = by_id.get(a.claim_id)
         if claim is None:
             continue
+        if claim.kind == "risk":
+            continue        # rendered with the event components (agents/layer/event_inputs.py), not as demand
         if claim.kind == "relative":
             pricing_lines.extend(_pricing_lines(layer, claim, a, STANDING_CN, BASIS_CN))
         else:

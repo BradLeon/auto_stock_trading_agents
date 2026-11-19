@@ -93,9 +93,14 @@ def fetch_many(tickers: list[Ticker], **kw) -> dict[str, MarketSnapshot]:
 # lost about half its symbols; yfinance reports those as "possibly delisted".
 # Serial requests over a reused session keep one connection alive instead, and the
 # lock stops the dispatcher's parallel task workers from interleaving downloads.
+#
+# 2026-11-19: the resets come in bursts of about half a minute (11-13 and 11-17: the first two symbols of the
+# 08:30 technical run each failed three times within ~30 s, every later symbol succeeded within 1-2 s). The retry
+# waits therefore span ~50 s, and each retry starts from a new session so it opens fresh connections instead of
+# reusing a pool the proxy has already dropped.
 _DOWNLOAD_LOCK = threading.Lock()
 _SESSION = None
-_RETRY_DELAYS = (1.0, 3.0)   # seconds before the 2nd and 3rd attempt of failed symbols
+_RETRY_DELAYS = (5.0, 15.0, 30.0)   # seconds before each further attempt of the symbols that failed in transport
 
 
 def _tracking_session():
@@ -106,26 +111,44 @@ def _tracking_session():
 
         class _TrackingSession(curl_requests.Session):
             transport_failed: set[str]
+            transport_errors: dict[str, str]
 
             def request(self, method, url, *args, **kwargs):
                 try:
                     return super().request(method, url, *args, **kwargs)
-                except Exception:
+                except Exception as exc:
                     path = urlsplit(str(url)).path
                     if "/v8/finance/chart/" in path:
-                        self.transport_failed.add(unquote(path.rsplit("/", 1)[-1]).upper())
+                        symbol = unquote(path.rsplit("/", 1)[-1]).upper()
+                        self.transport_failed.add(symbol)
+                        # yfinance swallows the exception; keep its text (curl error code) for the log.
+                        self.transport_errors[symbol] = f"{type(exc).__name__}: {exc}"[:300]
                     raise
 
         _SESSION = _TrackingSession(impersonate="chrome")
         _SESSION.transport_failed = set()
+        _SESSION.transport_errors = {}
     return _SESSION
+
+
+def _reset_session() -> None:
+    """Drop the shared session so the next download opens new connections."""
+    global _SESSION
+    with _DOWNLOAD_LOCK:
+        old, _SESSION = _SESSION, None
+    if old is not None:
+        try:
+            old.close()
+        except Exception:  # noqa: BLE001 - a dead session may fail to close; it is discarded either way
+            pass
 
 
 def _download_close_frame(symbols: list[str], period: str):
     """One serial yfinance request; exposed separately to make the boundary testable.
 
-    Returns ``(frame, normalized, transport_failed)`` where ``transport_failed``
-    holds the original symbols whose request died before any HTTP response.
+    Returns ``(frame, normalized, transport_failed, transport_errors)`` where ``transport_failed``
+    holds the original symbols whose request died before any HTTP response and ``transport_errors``
+    maps each of them to the exception text.
     """
     import yfinance as yf
     from ..base import yf_symbol
@@ -134,11 +157,14 @@ def _download_close_frame(symbols: list[str], period: str):
     with _DOWNLOAD_LOCK:
         session = _tracking_session()
         session.transport_failed = set()
+        session.transport_errors = {}
         frame = yf.download(normalized, period=period, progress=False, threads=False,
                             auto_adjust=True, group_by="column", session=session)["Close"]
         failed = set(session.transport_failed)
+        errors = dict(session.transport_errors)
     by_yahoo = {yf_symbol(symbol).upper(): symbol for symbol in symbols}
-    return frame, normalized, {by_yahoo[item] for item in failed if item in by_yahoo}
+    return (frame, normalized, {by_yahoo[item] for item in failed if item in by_yahoo},
+            {by_yahoo[item]: text for item, text in errors.items() if item in by_yahoo})
 
 
 def _frame_columns(frame, requested: list[str]) -> dict[str, object]:
@@ -175,13 +201,18 @@ def fetch_close_history_many(
     queried_at = datetime.now(timezone.utc)
     rows: dict[str, object] = {}
     transport_failed: set[str] = set()
+    transport_errors: dict[str, str] = {}
     any_response = False
     pending = list(requested)
     # Only symbols whose request died in transport are retried: a symbol Yahoo
     # answered with no data would answer the same way again.
-    for delay in (0.0, *_RETRY_DELAYS):
-        if delay:
-            time.sleep(delay)
+    for attempt, delay in enumerate((0.0, *_RETRY_DELAYS)):
+        if attempt:
+            log.info("runtime-market-batch: retry %d for %s in %.0f s on a new session",
+                     attempt, ", ".join(pending), delay)
+            _reset_session()
+            if delay:
+                time.sleep(delay)
         downloaded = safe_fetch(
             lambda: _download_close_frame(pending, period),
             source="runtime-market-batch")
@@ -190,6 +221,8 @@ def fetch_close_history_many(
         any_response = True
         frame, _normalized, *extra = downloaded
         failed = set(extra[0]) if extra else set()
+        if len(extra) > 1:
+            transport_errors.update(extra[1])
         for symbol, series in _frame_columns(frame, pending).items():
             if symbol not in rows or _has_closes(series):
                 rows[symbol] = series
@@ -203,7 +236,9 @@ def fetch_close_history_many(
             break
     if transport_failed:
         log.warning("runtime-market-batch: transport failed after %d attempt(s) for %s",
-                    1 + len(_RETRY_DELAYS), ", ".join(sorted(transport_failed)))
+                    1 + len(_RETRY_DELAYS), "; ".join(
+                        f"{symbol} ({transport_errors.get(symbol, 'no exception text')})"
+                        for symbol in sorted(transport_failed)))
 
     if not any_response:
         return {

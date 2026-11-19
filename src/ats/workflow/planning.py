@@ -29,6 +29,9 @@ TASK_ROLE: dict[str, AgentRole] = {
     "sector-review": "sector_allocation",
     "fundamental-routine": "fundamental_expectation_update",
     "fundamental-event": "fundamental_event_review",
+    # event-impact-routing (2026-11-13): a material, non-earnings event for one company. Read ALONGSIDE the
+    # earnings-anchored Fundamental view, so it is deliberately not in FUNDAMENTAL_TASKS (the per-target choice).
+    "fundamental-material": "fundamental_material_review",
     "macro-review": "macro_review",
     "technical-review": "technical_review",
 }
@@ -36,6 +39,7 @@ ALLOWED_CROSS_ANALYST_EDGES = {
     ("layer_analysis", "sector_allocation"),
     ("information_brief", "fundamental_expectation_update"),
     ("information_brief", "fundamental_event_review"),
+    ("information_brief", "fundamental_material_review"),
 }
 TASK_POLICIES: dict[str, dict[str, Any]] = {
     "layer-review": {"trigger_modes": ("manual", "schedule", "event"), "resource_group": "llm"},
@@ -45,6 +49,7 @@ TASK_POLICIES: dict[str, dict[str, Any]] = {
     "fundamental-routine": {"trigger_modes": ("manual", "schedule", "event"),
                              "resource_group": "llm"},
     "fundamental-event": {"trigger_modes": ("manual", "event"), "resource_group": "pead"},
+    "fundamental-material": {"trigger_modes": ("manual", "event"), "resource_group": "llm"},
     "macro-review": {"trigger_modes": ("manual", "schedule", "event"),
                       "resource_group": "llm"},
     "technical-review": {"trigger_modes": ("manual", "schedule", "event"),
@@ -55,6 +60,7 @@ TASK_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "sector-review": ("layer-review",),
     "fundamental-routine": ("information-brief",),
     "fundamental-event": ("information-brief",),
+    "fundamental-material": ("information-brief",),
     "macro-review": (), "technical-review": (),
 }
 FRESHNESS_SECONDS: dict[str, int] = {
@@ -69,6 +75,7 @@ FRESHNESS_SECONDS: dict[str, int] = {
     "layer-review": 7 * 86_400, "information-brief": 120 * 3_600,
     "sector-review": 7 * 86_400, "fundamental-routine": 72 * 3_600,
     "fundamental-event": 4 * 86_400, "macro-review": 7 * 86_400,
+    "fundamental-material": 14 * 86_400,   # a material review is valid 14 days; a new development re-publishes it
     "technical-review": 24 * 3_600,   # with its market-session vintage: reused within one session (2026-10-16)
 }
 # A model-service outage (connection reset, rate limit) rarely clears in one second. Information fans out one
@@ -79,7 +86,7 @@ TIMEOUT_SECONDS: dict[str, int] = {
     # 52 adjudications, one rotation). At the old 1200 s the Dispatcher would cancel the attempt and retry the whole
     # review while the first worker kept calling the model, doubling the requests (10.5, 2026-10-17).
     "layer-review": 900, "information-brief": 900, "sector-review": 3_600,
-    "fundamental-routine": 900, "fundamental-event": 1_200,
+    "fundamental-routine": 900, "fundamental-event": 1_200, "fundamental-material": 900,
     "macro-review": 900, "technical-review": 600,
 }
 
@@ -184,6 +191,46 @@ RISK_LEGACY_DIGESTS = {
 }
 
 
+# Every other YAML config is hashed by its parsed content, not its bytes. A comment-only edit is not new input: on
+# 2026-11-12 one comment line in sectors/ai_hardware.yaml (Ramp v2, c0c5ce1) made all eight Layer reviews and the
+# sector review look built from different rules, and that evening's chief-daily refused to assemble its context.
+# Exception: config/pead/<SYMBOL>.yaml keeps the byte hash — its comments are data (the curated signal-chain notes
+# such as "HBM 主供" are read back off the raw file by the evidence observer).
+#
+# Same rule as RISK_LEGACY_DIGESTS: a content hash verified equal to the content behind a recorded byte digest answers
+# with that digest, so projections already built stay valid. Key = content hash now; value = byte digest recorded.
+# Verified 2026-11-13 (parsed YAML equal as data):
+#   sectors/ai_hardware.yaml — current file vs c0c5ce1^ (438828…, the digest the 11-07/11-12 Layer reviews recorded);
+#   technical.yaml, macro.yaml — current file vs itself (the digest the newest projections recorded).
+# Add nothing here without that check; it states the analysis inputs did not change, it does not silence a mismatch.
+CONFIG_LEGACY_DIGESTS = {
+    "a79d51d94177a406c001d7653d33d37fb705291751b5ac7395e57e84c80b4b67":   # sectors/ai_hardware.yaml
+        "438828883b7b708941f1596840032b848b7685738e05d2d60826edb5674e32c6",
+    "e16c1689698e5a8638b56ec93bd511cb77ed9ad136e4c0edc8671498c09b5c51":   # technical.yaml
+        "565e32e14d8a70b4815304eb8fd720e33d6bab14b554c1fff6e232e54248c5e8",
+    "11110de3eb1c84466f1965554e8d7783ab19b51e68d7c888ccd98d5d618fc4a5":   # macro.yaml
+        "360596556e12ea1c77c03e824be2ae8ae21f76594d4dd88d834c246f94803ab8",
+}
+
+
+def _effective_sector_doc(doc: dict) -> dict:
+    """The sector config as `load_sector_config` will see it: `kind: risk` claims only while the layer switch is on.
+
+    event-impact-routing adds risk claims to the sector YAML before they go live. Hashing the file as written would
+    make every Layer review and the sector review look built from different rules the moment the claim is committed
+    (the 2026-11-12 failure again), although nothing they read changed. Lineage follows what is loaded.
+    """
+    from ..config import risk_claims_enabled
+
+    if risk_claims_enabled() or not isinstance(doc.get("layers"), list):
+        return doc
+    out = dict(doc)
+    out["layers"] = [{**layer, "claims": [c for c in layer.get("claims") or [] if c.get("kind") != "risk"]}
+                     if isinstance(layer, dict) and "claims" in layer else layer
+                     for layer in doc.get("layers") or []]
+    return out
+
+
 def _file_hash(path: Path) -> str:
     if path.name == "risk.yaml":
         try:
@@ -200,6 +247,16 @@ def _file_hash(path: Path) -> str:
             doc = None
         if isinstance(doc, dict):
             return _hash({k: v for k, v in doc.items() if k not in ROSTER_KEYS})
+    if path.suffix in {".yaml", ".yml"} and path.parent.name != "pead":
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - an unreadable file is hashed as it is, and fails where it is read
+            doc = None
+        if doc is not None:
+            if path.parent.name == "sectors" and isinstance(doc, dict):
+                doc = _effective_sector_doc(doc)
+            content = _hash(doc)
+            return CONFIG_LEGACY_DIGESTS.get(content, content)
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -265,11 +322,56 @@ def _targets(config_dir: Path) -> list[str]:
     return list(dict.fromkeys(targets))
 
 
+def _chain_observe(config_dir: Path) -> list[str]:
+    """Observe-list names that sit in a chain layer, for light briefs (event-impact-routing 2.4).
+
+    Empty unless the event-component switch is on: a light brief exists only to carry rated event components, so
+    with the switch off nothing changes. A name counts when it is a layer member or a declared witness of a layer
+    claim (ORCL, INTC and NBIS speak to chain claims without being members).
+    """
+    try:
+        switch = _load_yaml(config_dir / "workflow" / "event_impact.yaml")
+    except Exception:  # noqa: BLE001 - no switch file = switched off
+        return []
+    if not bool((switch.get("components") or {}).get("enabled", False)):
+        return []
+    pead = _load_yaml(config_dir / "pead.yaml")
+    observe = [str(item).upper() for item in pead.get("observe", [])]
+    members: set[str] = set()
+    for path in sorted((config_dir / "sectors").glob("*.yaml")):
+        for layer in _load_yaml(path).get("layers", []):
+            members |= {str(t.get("symbol", "")).upper() for t in layer.get("tickers", [])}
+            for claim in layer.get("claims") or []:
+                members |= {str(w.get("entity", "")).upper() for w in claim.get("witnesses") or []}
+                for concept in claim.get("concepts") or []:
+                    members |= {str(e).upper() for e in concept.get("expect_from") or []}
+    targets = set(_targets(config_dir))
+    return [symbol for symbol in dict.fromkeys(observe) if symbol in members and symbol not in targets]
+
+
 FUNDAMENTAL_TASKS = ("fundamental-routine", "fundamental-event")
 
 # A routine cycle may leave this many targets without a usable Fundamental (stated, and barred from new exposure by the
 # risk review) rather than refuse to run. More than this is a research outage, not a gap, and still blocks the cycle.
 MAX_UNCOVERED_FUNDAMENTAL = 4
+
+
+def _technical_uncovered(task_inputs: dict[str, Any] | None) -> set[str]:
+    """Entities a decision plan states as having no fresh Technical reading (2026-11-19, user ruling B).
+
+    One symbol's price download failing must not stop the whole book: the name is left out of the plan's
+    Technical tasks, stated in the snapshot, and the risk review rejects every order on it this cycle.
+    """
+    return {str(e).upper() for e in (task_inputs or {}).get("technical_uncovered") or []}
+
+
+def _check_technical_coverage(uncovered: set[str], scopes: list[ProjectionScope]) -> None:
+    entities = {item.id.upper() for item in scopes}
+    if uncovered - entities:
+        raise ContractError("technical_uncovered names entities outside the Technical scope: "
+                            + ", ".join(sorted(uncovered - entities)))
+    if entities and uncovered >= entities:
+        raise ContractError("every Technical entity is uncovered: an outage blocks as missing, not a gap")
 
 
 def _fundamental_modes(task_inputs: dict[str, Any] | None) -> dict[str, str] | None:
@@ -309,9 +411,14 @@ def _scopes(task_id: str, requested_scope: ProjectionScope, config_dir: Path) ->
             raise ContractError(f"sector {requested_scope.id!r} has no configured layers")
         return [ProjectionScope(kind="layer", id=layer) for layer in layers]
     if task_id in {"information-brief", "fundamental-routine", "fundamental-event",
-                   "technical-review"}:
+                   "fundamental-material", "technical-review"}:
         symbols = ([requested_scope.id.upper()] if requested_scope.kind == "entity"
                    else _targets(config_dir))
+        if (task_id == "information-brief" and requested_scope.kind == "portfolio"
+                and requested_scope.id == "pead-targets"):
+            # The daily brief run also covers chain-layer observe names when event components are on (light briefs:
+            # no Fundamental follows them, and decision plans resolve briefs from the sector scope, not from here).
+            symbols = [*symbols, *_chain_observe(config_dir)]
         if not symbols:
             raise ContractError(f"{task_id} has an empty entity scope")
         return [ProjectionScope(kind="entity", id=symbol) for symbol in symbols]
@@ -334,7 +441,7 @@ def _config_paths(task_ids: Iterable[str], scope_id: str,
     if task_ids & {"layer-review", "sector-review"}:
         paths |= {f"sectors/{scope_id}.yaml", "risk.yaml"}
     if task_ids & {"information-brief", "fundamental-routine", "fundamental-event",
-                   "technical-review"}:
+                   "fundamental-material", "technical-review"}:
         paths.add("pead.yaml")
     if "technical-review" in task_ids:
         paths.add("technical.yaml")
@@ -342,7 +449,26 @@ def _config_paths(task_ids: Iterable[str], scope_id: str,
         paths.add("macro.yaml")
     if "information-brief" in task_ids:
         paths |= {f"pead/{entity.upper()}.yaml" for entity in brief_entities}
+    # event-impact-routing: the event config joins a task's lineage only once the switch that makes the task read
+    # it is on. While every switch is off nothing reads it, and adding it would make every existing brief and Layer
+    # review look built from different rules (the chief-daily failure of 2026-11-12).
+    switches = _event_impact_switches()
+    if switches.get("components") and "information-brief" in task_ids:
+        paths.add("workflow/event_impact.yaml")
+    if switches.get("layer") and task_ids & {"layer-review", "sector-review"}:
+        paths.add("workflow/event_impact.yaml")
     return paths
+
+
+def _event_impact_switches() -> dict[str, bool]:
+    import os
+
+    root = Path(os.environ.get("ATS_CONFIG_DIR", REPO_ROOT / "config"))
+    try:
+        doc = _load_yaml(root / "workflow" / "event_impact.yaml") or {}
+    except Exception:  # noqa: BLE001 - an unreadable file switches nothing on
+        return {}
+    return {name: bool((doc.get(name) or {}).get("enabled", False)) for name in ("components", "layer", "routing")}
 
 
 def task_config_hashes(plan: WorkflowPlan, task_id: str,
@@ -389,6 +515,9 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
 
     root = _config_dir(config_dir)
     modes = _fundamental_modes(task_inputs)
+    technical_uncovered = _technical_uncovered(task_inputs)
+    if technical_uncovered and "technical-review" in ordered_task_ids:
+        _check_technical_coverage(technical_uncovered, _scopes("technical-review", scope, _config_dir(config_dir)))
     if modes is not None:
         # A mode no target uses has no instance in this plan.
         ordered_task_ids = [task_id for task_id in ordered_task_ids
@@ -441,6 +570,8 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         task_instances: list[TaskInstance] = []
         for item_scope in _scopes(task_id, scope, root):
             if modes is not None and task_id in FUNDAMENTAL_TASKS and modes.get(item_scope.id) != task_id:
+                continue
+            if task_id == "technical-review" and item_scope.id.upper() in technical_uncovered:
                 continue
             key = f"{namespace}:{task_id}:{item_scope.key}:{config_version_hash[:12]}"
             dependencies: list[str] = []

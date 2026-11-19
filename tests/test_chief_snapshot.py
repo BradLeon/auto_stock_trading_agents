@@ -422,7 +422,8 @@ def test_a_change_to_a_tasks_own_config_still_refuses_its_projection(chief_env, 
 
     _seed(chief_env)
     path = tmp_path / "config" / "technical.yaml"
-    path.write_text(path.read_text() + "\n# changed after the projection was produced\n")
+    # A real value change: since 495c0db a comment-only edit is, correctly, not a config change.
+    path.write_text(path.read_text() + "\n_lineage_probe: changed after the projection was produced\n")
     with pytest.raises(ReadUnavailable, match="lineage differs: .*technical-review"):
         assemble_context(_state())
 
@@ -432,7 +433,8 @@ def test_a_change_to_another_tasks_config_does_not_refuse_technical(chief_env, t
 
     _seed(chief_env)
     path = tmp_path / "config" / "macro.yaml"
-    path.write_text(path.read_text() + "\n# changed after the projections were produced\n")
+    # A real value change: since 495c0db a comment-only edit is, correctly, not a config change.
+    path.write_text(path.read_text() + "\n_lineage_probe: changed after the projections were produced\n")
     with pytest.raises(ReadUnavailable) as refused:
         assemble_context(_state())
     # Only Macro, whose own config changed, is refused.

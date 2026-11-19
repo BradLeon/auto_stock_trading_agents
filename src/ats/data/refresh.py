@@ -39,10 +39,12 @@ _SAFE_UNSTRUCTURED_ACTIONS = {"article-ingest", "document-ingest", "fixed-ingest
 # reads that have no ingestion-run record (chain evidence extraction). They are scheduled
 # and ledgered like the others but have no structured/unstructured catalog source.
 _SAFE_DERIVED_ACTIONS = {"evidence-observe", "chain-source-collect", "macro-news-collect", "calendar-refresh",
-                         "calendar-finalize", "factset-semantic-refresh"}
+                         "calendar-finalize", "factset-semantic-refresh", "article-evidence-observe"}
 # Calendar refreshes report `partial` when one source's batch carries a quarantined or conflicting candidate;
 # the other candidates were published, so the run counts as succeeded and the reason names what was held back.
-_PARTIAL_OK_DERIVED = {"calendar-refresh", "calendar-finalize"}
+# Article evidence extraction reports `partial` when its per-run request cap left relevant articles for the next
+# run: expected, and the packet's reason names how many remain (article-witness-observations 2.3).
+_PARTIAL_OK_DERIVED = {"calendar-refresh", "calendar-finalize", "article-evidence-observe"}
 
 
 def _resolve_command(command: tuple[str, ...], window: str) -> tuple[str, ...]:
@@ -741,7 +743,9 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 # The command's own packet is the record: it names the reason a run did
                 # nothing (`no_change`) or what it wrote (`succeeded`); `failed` is retried.
                 if code == 0 and packet_status == "partial" and job.command[2] in _PARTIAL_OK_DERIVED:
-                    status, reason = "succeeded", "partial_sources_held_back"
+                    status, reason = "succeeded", (
+                        str(packet.get("reason") or "partial_budget_deferred")
+                        if job.command[2] == "article-evidence-observe" else "partial_sources_held_back")
                 elif code == 0 and packet_status in {"succeeded", "no_change"}:
                     status, reason = packet_status, str(packet.get("reason") or "")
                 else:

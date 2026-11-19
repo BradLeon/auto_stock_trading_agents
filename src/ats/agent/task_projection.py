@@ -64,12 +64,15 @@ AgentRole = Literal[
     "fundamental_event_review",
     "macro_review",
     "technical_review",
+    "fundamental_material_review",
+    "fundamental_risk_register",
 ]
 
 AGENT_ROLES: tuple[AgentRole, ...] = (
     "layer_analysis", "information_brief", "sector_allocation",
     "fundamental_expectation_update", "fundamental_event_review",
     "macro_review", "technical_review",
+    "fundamental_material_review", "fundamental_risk_register",
 )
 
 ScopeKind = Literal["entity", "sector", "layer", "portfolio"]
@@ -150,6 +153,53 @@ class DivergentEvidence(_Item):
     note: str = ""
 
 
+class RiskClaimState(_Item):
+    """A layer-wide risk claim (`kind: risk`) and where it stands, counted by independent sources."""
+
+    claim_id: str = Field(min_length=1)
+    status: Literal["dormant", "emerging", "pressured", "realized", "resolved"]
+    independent_sources: int = Field(default=0, ge=0)
+    authoritative_sources: int = Field(default=0, ge=0)
+    sources: list[str] = Field(default_factory=list)
+    component_refs: list[str] = Field(default_factory=list)
+    materiality_review: str = ""       # on the components it cites: agree / higher / lower, with a reason
+    rationale: str = ""
+
+
+class OffThesisShock(_Item):
+    """A layer-level event component no thesis or risk claim can absorb."""
+
+    shock_id: str = Field(min_length=1)
+    component_refs: list[str] = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    materiality: Materiality
+    direction: Direction = "unclear"
+    role: Literal["direct", "contagion"] = "direct"
+    status: Literal["ongoing", "concluded"] = "ongoing"
+    touched_claims: list[str] = Field(default_factory=list)
+    proposed_claim: str = ""        # a suggestion for the user; the model never edits config
+    expires_at: str = ""            # 14 days without a new development -> background only
+    materiality_review: str = ""       # agree / higher / lower, with a reason
+
+
+class CrossScopeClaim(_Item):
+    """A component tagged company-only that the layer analyst claims a layer-wide transmission for."""
+
+    component_ref: str = Field(min_length=1)
+    from_entity: str = ""
+    transmission: str = Field(min_length=1)
+    materiality_review: str = ""
+
+
+class UtilizationAdvice(_Item):
+    """Down-only advice on the layer's budget utilisation; the sector step applies and clamps it."""
+
+    direction: Literal["down", "none"] = "none"
+    notches: int = Field(default=0, ge=0)
+    reasons: list[str] = Field(default_factory=list)     # risk claim ids / shock ids it rests on
+    rationale: str = ""
+
+
 class LayerAnalysisPayload(_Payload):
     """One industry layer read end to end."""
 
@@ -170,15 +220,54 @@ class LayerAnalysisPayload(_Payload):
     common_evidence: list[EvidenceItem] = Field(default_factory=list)
     divergent_evidence: list[DivergentEvidence] = Field(default_factory=list)
     gaps: list[str] = Field(default_factory=list)
+    # --- event-impact-routing (2026-11-13), additive ---
+    risk_claims: list[RiskClaimState] = Field(default_factory=list)
+    off_thesis_shocks: list[OffThesisShock] = Field(default_factory=list)
+    cross_scope_claims: list[CrossScopeClaim] = Field(default_factory=list)
+    utilization_advice: UtilizationAdvice | None = None
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
         "cycle_position", "has_claims", "reversal_triggers", "entities", "cross_section",
-        "cross_section_basis", "cross_section_coverage", "common_evidence", "divergent_evidence", "gaps")
+        "cross_section_basis", "cross_section_coverage", "common_evidence", "divergent_evidence", "gaps",
+        "risk_claims", "off_thesis_shocks", "cross_scope_claims", "utilization_advice")
 
     @field_validator("findings", mode="before")
     @classmethod
     def _non_empty_findings(cls, value: object) -> object:
         return _as_list(value)
+
+
+Materiality = Literal["minor", "moderate", "major", "critical"]
+MATERIALITY_ORDER: dict[str, int] = {"minor": 0, "moderate": 1, "major": 2, "critical": 3}
+Direction = Literal["positive", "negative", "mixed", "unclear"]
+
+
+class EventComponent(_Item):
+    """One part of an event, rated by the information analyst (event-impact-routing, 2026-11-13).
+
+    An event is split into components because one story usually has a company part and an industry part (the
+    NVDA CEO probe vs the export-control push it set off): each is routed to the analyst that owns it.
+    `novelty` first/follow_up is decided by code from the cluster ledger; only "escalation" is the model's call.
+    """
+
+    component_id: str = Field(min_length=1)
+    cluster_key: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    scope: Literal["entity", "layer", "cross_layer"]
+    entities: list[str] = Field(default_factory=list)
+    layers: list[str] = Field(default_factory=list)
+    # How much it can change expectations or the thesis, in EITHER direction (a contract covering a third of
+    # revenue to 2030 is major). Renamed from a harm-only "severity" after the 2026-11-15 benchmark.
+    materiality: Materiality
+    direction: Direction = "unclear"
+    role: Literal["direct", "contagion"] = "direct"
+    status: Literal["ongoing", "concluded"] = "ongoing"
+    novelty: Literal["first", "escalation", "follow_up"] = "first"
+    fact_indices: list[int] = Field(default_factory=list)  # the brief's facts it rests on (audit, benchmark)
+    citations: list[str] = Field(default_factory=list)      # document_ref (+ span) that can be traced back
+    rationale: str = ""
+    downgraded_from: Materiality | None = None                 # set by the publication contract, with the reason
+    downgrade_reason: str = ""
 
 
 class InformationBriefPayload(_Payload):
@@ -217,6 +306,8 @@ class InformationBriefPayload(_Payload):
     # Articles whose extraction failed for this target and are therefore not covered by the brief (2026-11-02):
     # {"document_ref", "article_id", "status": "retrying" | "quarantined", "attempts", "reason"}.
     extraction_gaps: list[dict[str, Any]] = Field(default_factory=list)
+    # Event components with their ratings (event-impact-routing). Additive: absent from every earlier brief.
+    event_components: list[EventComponent] = Field(default_factory=list)
 
     def payload_json(self) -> str:
         # Additive evidence must not change hashes of historical v1 payloads
@@ -226,6 +317,8 @@ class InformationBriefPayload(_Payload):
             body.pop("source_evidence")
         if not body["extraction_gaps"]:
             body.pop("extraction_gaps")
+        if not body["event_components"]:
+            body.pop("event_components")
         return json.dumps(body, ensure_ascii=False, sort_keys=True)
 
     @field_validator("sources", "fact_changes", "impact_candidates", "entities",
@@ -244,6 +337,9 @@ class LayerAllocation(_Item):
     cycle_position: str = ""
     projection_ref: str = ""            # the LayerAnalysis projection this rests on
     gaps: list[str] = Field(default_factory=list)
+    # Down-only adjustments from risk claims / off-thesis shocks, each citing what it rests on, including advice
+    # the clamp cut short (event-impact-routing). Omitted from the dump when empty so old hashes hold.
+    downgrade_reasons: list[str] = Field(default_factory=list)
 
 
 class NameAllocation(_Item):
@@ -289,6 +385,15 @@ class SectorAllocationPayload(_Payload):
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
         "layers", "names", "fact_refs", "rotation_available", "rotation_advice", "missing_layers",
         "cross_section_divergence")
+
+    def payload_json(self) -> str:
+        # `LayerAllocation.downgrade_reasons` is nested, so the class-level omission cannot reach it: an empty list
+        # is dropped here, keeping every allocation published before the field existed on its old hash.
+        body = json.loads(super().payload_json())
+        for layer in body.get("layers") or []:
+            if not layer.get("downgrade_reasons"):
+                layer.pop("downgrade_reasons", None)
+        return json.dumps(body, ensure_ascii=False, sort_keys=True)
 
     @field_validator("drivers", mode="before")
     @classmethod
@@ -503,6 +608,91 @@ class FundamentalEventReviewPayload(_Payload):
         return self
 
 
+class _NonExecutableView(_Payload):
+    """Shared guard for fundamental views: a direction, never an action or a size."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_sizing_fields(cls, data: object) -> object:
+        if isinstance(data, Mapping):
+            present = sorted(_SIZING_FIELD_NAMES & set(data))
+            if present:
+                raise ValueError(
+                    f"{cls.role_schema_name()} must not carry sizing/action fields: {', '.join(present)}")
+        return data
+
+    @model_validator(mode="after")
+    def _reject_action_values(self):
+        for name, value in self.__dict__.items():
+            if isinstance(value, str) and value.strip().lower() in EVENT_REVIEW_ACTION_VOCAB:
+                raise ValueError(f"field {name!r} carries an action-vocabulary value {value!r}")
+        return self
+
+
+class FundamentalMaterialReviewPayload(_NonExecutableView):
+    """What a material, non-earnings event means for one company (event-impact-routing, 2026-11-13).
+
+    Read by the Chief ALONGSIDE the earnings-anchored view (Routine update or earnings event review), never instead
+    of it. Judges only the company-specific part of the components it claims; the layer-wide part belongs to the
+    layer analyst. Valid for 14 days; a new development on the same cluster publishes a new version.
+    """
+
+    schema_name: str = "FundamentalMaterialReview"
+    entity: str = Field(min_length=1)
+    event: str = Field(min_length=1)                       # the event cluster key
+    component_refs: list[str] = Field(min_length=1)       # "<brief projection id>#<component id>"
+    thesis_status: Literal["stable", "pressured", "falsified"]
+    hit_items: list[str] = Field(default_factory=list)    # thesis lines, risk items or falsifiers it touches
+    expectation_effect: Literal["quarterly_numbers", "risk_premium", "none"]
+    direction: Literal[-1, 0, 1]
+    magnitude: float = Field(ge=0.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    narrative: str = ""
+    unverified: list[str] = Field(default_factory=list)
+    valid_until: str = Field(min_length=1)
+    materiality_review: str = ""
+    no_baseline: bool = False
+
+    @field_validator("magnitude", "confidence", mode="before")
+    @classmethod
+    def _float_from_string(cls, value: object) -> object:
+        return _as_float(value)
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _direction_from_string(cls, value: object) -> object:
+        return _as_int(value)
+
+    @field_validator("component_refs", "hit_items", "unverified", mode="before")
+    @classmethod
+    def _lists(cls, value: object) -> object:
+        return _as_list(value)
+
+    @model_validator(mode="after")
+    def _cap_confidence_without_baseline(self) -> "FundamentalMaterialReviewPayload":
+        if self.no_baseline and self.confidence > 0.3:
+            raise ValueError("a material review without a thesis baseline is capped at confidence 0.3")
+        return self
+
+
+class CompanyRiskItem(_Item):
+    key: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    kind: str = ""                  # key_person / governance / customer_concentration / regulatory_case / ...
+    falsifier: str = Field(min_length=1)
+    rationale: str = ""
+
+
+class FundamentalRiskRegisterPayload(_NonExecutableView):
+    """Company-specific risks with their falsifiers, kept all year (a baseline exists only around earnings)."""
+
+    schema_name: str = "FundamentalRiskRegister"
+    entity: str = Field(min_length=1)
+    items: list[CompanyRiskItem] = Field(min_length=1)
+    refreshed_with: str = ""        # the baseline projection it was refreshed with, when any
+    previous_ref: str = ""          # the register it replaces
+
+
 class MacroTransmission(_Item):
     theme: str = Field(min_length=1)
     label: str = ""
@@ -612,6 +802,8 @@ PAYLOAD_SCHEMA_BY_ROLE: dict[AgentRole, type[_Payload]] = {
     "fundamental_event_review": FundamentalEventReviewPayload,
     "macro_review": MacroReviewPayload,
     "technical_review": TechnicalReviewPayload,
+    "fundamental_material_review": FundamentalMaterialReviewPayload,
+    "fundamental_risk_register": FundamentalRiskRegisterPayload,
 }
 
 

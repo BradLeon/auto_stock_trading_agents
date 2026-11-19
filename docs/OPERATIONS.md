@@ -42,6 +42,17 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 日志在 `var/logs/`：`dispatcher.{out,err}.log`、`data-refresh.*.log`、`serve.*.log`。
 
+**每周看一次事件评级校准报告**（event-impact-routing；事件成分开关打开后才有内容）：周六行业评审之后自动写到行业报告目录，
+文件名 `事件评级校准-<日期>.md`。看四件事：
+
+- **评级分布**：一周里各档重要性的成分数。重大、极重大突然增多或长期为零，都值得翻一下原文。
+- **下游复核分歧**：基本面重大事件评审与层次分析对成分重要性的复核，不以"一致 / agree"开头的都算分歧，逐条列出。
+- **层面补认领**：层次分析认为"标为本公司、其实有整层传导"的成分，是信息岗影响面漏判的记录；多了说明评级口径要调。
+- **事后对照**：各档重要性对应的事发后 1–3 个交易日平均|超额收益|（相对所在层其他成员的等权篮子）。应随重要性单调上升；
+  只用来校准评级，不改写历史评级。行情取不到时报告会写明。
+
+报告最后是当周重要性最高的几个成分，供抽检。生成代码在 `workflow/event_calibration.py`，纯代码、不调用模型。
+
 ## 3. 研究调度
 
 ### 3.1 时间表与事件
@@ -50,7 +61,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 | 工作流 | 时间 | 范围 |
 |---|---|---|
-| `information-brief` | 周一至周五 08:00 纽约 | `portfolio:pead-targets` |
+| `information-brief` | 周一至周五 08:00 纽约 | `portfolio:pead-targets`；事件成分开关（`config/workflow/event_impact.yaml`）打开后，另含 observe 名单中的产业链成员与命题证人 9 家（轻量简报，不触发基本面） |
 | `fundamental-routine` | 周一至周五 08:30 纽约（依赖当天的信息简报） | `portfolio:pead-targets` |
 | `technical-review` | 周一至周五 08:30 纽约 | `portfolio:portfolio` |
 | `macro-review` | 周六 09:00 台北 | `portfolio:portfolio` |
@@ -58,9 +69,15 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 
 日历事件的路由在 `config/workflow/event_routes.yaml`，常驻进程每 30 分钟（每小时 :05、:35 UTC）消费已发布的事件，重复消费不会重复派发：
 
-- 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（例行模式在财报前 `prep_days_before`＝3 天内建立基线）。
+- 财报**计划**（前 14 天内）→ 信息简报 + 基本面例行（例行模式在财报前 `prep_days_before`＝3 个交易日内建立基线，缺则每个交易日补建）。
 - 财报**已发布**且已准入公告或申报材料 → 信息简报 + 基本面事件评审（冻结基线、打分）。
 - FOMC、CPI、PCE、NFP、GDP 发布 → 宏观评审。
+
+- 简报里评级为**重大及以上**、且首发或升级的**事件成分**（`material_development`，`config/workflow/event_impact.yaml`
+  的 `routing.enabled` 打开后才生效，现为关闭）→ 本公司成分：该公司的重大事件评审（`fundamental-material`）；
+  本层/跨层成分，以及产业链成员的重大本公司成分：所涉层的层次分析，随后一次行业评审（临时复审，单次最多下调一档）。
+  同一节拍内同一任务与范围只跑一次（带上全部合格成分），当天出现升级或新成分可再触发；不启动 Chief。上线前须在调度负责人表里
+  登记 `fundamental-material` 为 dispatcher（`ats dispatch` 的负责人切换，需批准）。
 
 两类事件唤醒的开关在研究时间表配置的 `event_triggers`：`earnings`（财报事件，现为 `true`）、
 `macro_sector`（宏观数据发布，现为 `false`，宏观只按周跑）。
@@ -80,6 +97,7 @@ ats events candidates                # 来源冲突、被挡住等你裁决的�
 | 行业报告、层级报告、层分析页面 | 行业评审任务内，每周六 | `行业分析-…`、`层分析-…-<层>-<日期>.md`、`层分析-…-<日期>.html` |
 | 产业链证据周报 | 行业评审**之后**，每周六 | `产业链证据-<标签>-<日期>.md` |
 | 基本面（PEAD）报告 | 基本面例行 / 事件评审内 | `基本面分析-<标的>-<期次>.md` |
+| 事件评级校准 | 行业评审**之后**，每周六；本周没有事件成分时不写 | `事件评级校准-<日期>.md` |
 
 本次运行只复用了已有投影、没有新发布时，不会再生成一份重复的报告。技术面报告的数据来自当次发布的投影，所以不显示 VIX 与 VIX3M 的具体数值，只显示是否触发恐慌层。
 
@@ -99,6 +117,11 @@ ats workflow retry --trigger-key <key> --actor <谁> --reason <为什么>   # �
 - 依赖的数据版本未变、投影仍在有效期内时直接复用，**不重复请求模型**。要在数据没变时强制重算，
   用 `--inputs-json '{"<task_id>": {"force_recompute": true}}'`。
 - 旧手动入口（`ats macro review`、`ats pead prep`、`ats analyst information` 等）已退役，会提示对应的 `ats workflow run` 写法。
+- 某只票的重大事件评审要手动补跑：`ats workflow run --task fundamental-material --scope-kind entity --scope-id <SYM>
+  --inputs-json '{"fundamental-material": {"component_refs": ["<简报投影 id>#<成分编号>"]}}'`（成分编号在简报的 `event_components` 里）。
+- 公司风险项初始化（event-impact-routing 4.1，一次性）：`python -m ats.agents.fundamental.material --init` 先列出缺风险项的
+  target 与请求数，确认后加 `--apply` 执行；之后每次建财报基线时自动刷新。要让已有清单立刻吸收近期简报里的新风险，
+  加 `--rebuild`（全部重建一版，保留上一版引用；每个标的 1 次请求）。
 - 某只票要手动刷新财报前基线：`ats workflow run --task fundamental-routine --scope-kind entity --scope-id <SYM>
   --inputs-json '{"fundamental-routine": {"refresh_baseline": true}}'`。
 
@@ -314,6 +337,7 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 | 日历消费日志里出现 `IdentityConflict` | 同一场财报的“计划事件”记录与“财报日到了仍缺材料”的等待记录共用触发键；已改为保留旧记录并跳过，不再整批中断。事件升版（材料入库）后换新键 |
 | 基本面报告第一、二节为空或“无比较依据” | 同一财季曾被存成两份档案（`FY2027Q1` 与 `Q1 FY2027`），已统一写法；基线读财报前已发布的记录。仍出现时先看 `ats pead show <代码>` 的阶段与预期维度 |
 | 定时任务没跑 | 看 `dispatcher.err.log` 是否有 `misfire_grace_exceeded`；或该工作流被停用（`ats dispatch owner-log`） |
+| 想知道一个事件成分触发了什么 | 查 `var/ats.sqlite` 的 `material_event_ledger`：`SELECT at,component_id,workflow_id,scope,outcome,reason,run_id FROM material_event_ledger WHERE cluster_key='<簇>' ORDER BY seq DESC`（代码里是 `material_events.ledger_rows(cluster_key=...)`）。`deduplicated` = 后续报道或同一成分；`rejected` = 引用了未登记的层或标的；`failed` 会在下一个节拍重试。`run_id` 可接着查工作流运行记录 |
 
 ## 10. 数据与备份
 

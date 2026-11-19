@@ -25,11 +25,31 @@ structured:
       timezone: UTC
       command: ats data release-check --source ramp_ai_index --ingest-new --force-check
       concurrency: 1
-      freshness_slo_days: 14
+      # 2026-11-12 (upgrade-ramp-ai-index-v2): this job is now the page runner for what FRED does not publish.
+      # Monthly data plus one 10-day probe cycle: no new accepted page data for 35 days is `export_stale`.
+      freshness_slo_days: 35
       retry:
         attempts: 3
         backoff_seconds: [60, 300, 900]
       semantics: compare reference_period/methodology_fingerprint/payload_sha256; append new periods or revisions, never overwrite
+    ramp_ai_index_fred_weekly:
+      # 2026-11-12 (upgrade-ramp-ai-index-v2): the 14 Ramp adoption series FRED publishes (overall, three
+      # vendors, seven sectors, three business sizes). Plain HTTP, independent of the page runner above, so a
+      # blocked browser never stops the trend axis.
+      enabled: true
+      source: ramp_ai_index_fred
+      datasets: [ramp_ai_adoption]
+      schedule: weekly
+      weekday: friday
+      at: "08:25"
+      timezone: UTC
+      command: ats data release-check --source ramp_ai_index_fred --ingest-new --force-check
+      concurrency: 1
+      freshness_slo_days: 10
+      retry:
+        attempts: 2
+        backoff_seconds: [300, 1800]
+      semantics: monthly FRED series; a new month or a revision appends a vintage, an unchanged series is no_change
     # 2026-11-12 (user): the other three L1 production-adoption sources had no job at all, so the L1 observer kept
     # reading the one manual load of 2026-09-10. All three discover the newest upstream release over the network
     # (Census BTOS API, FRED series metadata, the Hugging Face repository listing) and only download on a new
@@ -791,3 +811,47 @@ derived:
       request_budget: {requests_per_run: 3}
       retry: {attempts: 3, backoff_seconds: [900, 3600, 21600]}
       semantics: the final FactSet Earnings Insight of the month, ingested once and read by Macro, Sector and Layer; nothing is scored
+    # 2026-11-13 (article-witness-observations): the three publisher witnesses (DOWJONES via IBKR News, SEMIANALYSIS,
+    # TRENDFORCE) stopped on 2026-08-18/08-30: the article jobs above kept ingesting, but the step that turns an
+    # ingested article into chain observations (`chain.articles`) lost its caller in the platform cutover. These
+    # jobs read ADMITTED article versions only (no network), each version once, and skip articles outside the
+    # claims the publisher witnesses (L5 for DOWJONES/SEMIANALYSIS, L4–L8 for TRENDFORCE; derived from
+    # config/sectors/ai_hardware.yaml, not pinned to a layer). Each runs after its ingestion job.
+    article_evidence_ibkr_news_daily:
+      enabled: true               # 2026-11-13 user approved go-live after the 3.2 backfill
+      source: ibkr_news
+      schedule: daily
+      at: "17:30"                 # ibkr_news_daily 16:30 New York + 1 h
+      timezone: America/New_York
+      command: ats data article-evidence-observe --source ibkr_news --lookback-days 7 --max-requests 20
+      concurrency: 1
+      freshness_slo_days: 3
+      request_budget: {requests_per_run: 20}   # flash extraction windows; the rest waits for the next run (partial)
+      retry: {attempts: 2, backoff_seconds: [600, 1800]}
+      semantics: Dow Jones articles already ingested -> neutral chain observations for the claims DOWJONES witnesses; each version read once; nothing is scored or traded
+    article_evidence_semianalysis_weekly:
+      enabled: true               # 2026-11-13 user approved go-live after the 3.2 backfill
+      source: semianalysis
+      schedule: weekly
+      weekday: monday
+      at: "12:15"                 # semianalysis_newsletter_weekly 10:15 New York + 2 h
+      timezone: America/New_York
+      command: ats data article-evidence-observe --source semianalysis --lookback-days 14 --max-requests 20
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 20}
+      retry: {attempts: 2, backoff_seconds: [600, 1800]}
+      semantics: SemiAnalysis articles already ingested -> neutral chain observations for the claims SEMIANALYSIS witnesses; read in full (no keyword filter); each version read once
+    article_evidence_trendforce_weekly:
+      enabled: true               # 2026-11-13 user approved go-live after the 3.2 backfill
+      source: trendforce_news
+      schedule: weekly
+      weekday: monday
+      at: "12:00"                 # trendforce_news_weekly 10:00 UTC + 2 h
+      timezone: UTC
+      command: ats data article-evidence-observe --source trendforce_news --lookback-days 14 --max-requests 20
+      concurrency: 1
+      freshness_slo_days: 10
+      request_budget: {requests_per_run: 20}
+      retry: {attempts: 2, backoff_seconds: [600, 1800]}
+      semantics: TrendForce articles already ingested -> neutral chain observations for the claims TRENDFORCE witnesses (L4–L8); each version read once

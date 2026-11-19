@@ -70,6 +70,9 @@ def build(*, projection_manifest=None, query_plan=None, account=None,
     if not snapshot.complete:
         raise ReadUnavailable("required Chief projections unavailable: " + gap_report(snapshot, detail))
     ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail, focus=fundamental_focus)
+    if snapshot.optional_detail or snapshot.optional_excluded:
+        ctx.blocks["重大事件评审（可选类别）"] = material_block(snapshot)
+    ctx.blocks["事件簇对齐"] = event_alignment_block(store, detail, snapshot.optional_detail)
     ctx.blocks["战绩反馈"] = _track_record_block(store, history)
     return ctx
 
@@ -533,7 +536,171 @@ def build_chief_snapshot(store, *, at=None,
     covered = {item.category for item in items}
     items.extend(item for item in snapshot.items if item.category not in covered)
     snapshot.items = items
+    if "fundamental_material" in optional_categories():
+        entities = sorted({sc.id for role in ("information_brief", "fundamental_expectation_update",
+                                              "fundamental_event_review")
+                           for sc in plan.get(role, {"scopes": []})["scopes"] if sc.kind == "entity"})
+        included, excluded = material_reviews(store, at=at, entities=entities)
+        snapshot.optional_items = [SnapshotItem(
+            task_id=MATERIAL_ROLE, agent_role=MATERIAL_ROLE, category="fundamental_material",
+            projection_id=d["projection_id"], content_hash=d["content_hash"], as_of=d["as_of"],
+            reusable=True, reason="reusable", scope_kind="entity", scope_id=d["scope"].partition(":")[2])
+            for d in included]
+        snapshot.optional_excluded = excluded
+        snapshot.optional_detail = included
     return snapshot, detail
+
+
+MATERIAL_ROLE = "fundamental_material_review"
+
+
+def optional_categories(profile_id: str = "ai_hardware") -> dict[str, str]:
+    """Optional decision categories declared in config/workflow/decision_profiles.yaml (category -> role)."""
+    from ...config import REPO_ROOT
+    from ...workflow.yaml_cache import load_yaml
+
+    try:
+        doc = load_yaml(REPO_ROOT / "config" / "workflow" / "decision_profiles.yaml") or {}
+    except Exception:  # noqa: BLE001 - no profile, no optional category
+        return {}
+    # Top-level, not inside the profile: the plan hashes the profile dict (see the YAML comment).
+    return dict((doc.get("optional_categories") or {}).get(profile_id) or {})
+
+
+def _brief_components(store, brief_id: str) -> dict[str, dict] | None:
+    """component_id -> component of one information brief, or None when the brief is not a published brief."""
+    row = store.get_task_projection(brief_id)
+    if row is None or row.get("status") != "published" or row.get("agent_role") != "information_brief":
+        return None
+    payload = row.get("payload") or {}
+    if isinstance(payload, str):
+        import json
+
+        payload = json.loads(payload or "{}")
+    return {str(c.get("component_id")): c for c in payload.get("event_components") or []}
+
+
+def material_reviews(store, *, at=None, entities=()) -> tuple[list[dict], list[dict]]:
+    """Valid material-event reviews for the snapshot, and the ones left out with the reason.
+
+    Valid = published, reusable at `at`, inside the task's 14-day freshness, and every component it cites still
+    readable in a published brief. A broken one is dropped and named; it never blocks the cycle.
+    """
+    from datetime import datetime, timezone
+
+    from ...agent.task_projection import ProjectionScope, reuse_decision
+    from ...workflow.planning import FRESHNESS_SECONDS
+    from ...workflow.read_scope import ReadUnavailable
+
+    included, excluded = [], []
+    for entity in entities:
+        scope = ProjectionScope(kind="entity", id=entity)
+        try:
+            row = _latest_row(store, role="fundamental_material_review", scope=scope)
+        except (ReadUnavailable, PermissionError) as exc:
+            excluded.append({"scope": scope.key, "projection_id": "", "reason": f"unreadable: {exc}"})
+            continue
+        if row is None:
+            continue
+        envelope = _envelope_from_row(row, scope)
+        stamp = at or datetime.now(timezone.utc)
+        ok, reason = reuse_decision(envelope, scope=scope, at=stamp)
+        age = (stamp - datetime.fromisoformat(envelope.as_of)).total_seconds()
+        if not ok or age > FRESHNESS_SECONDS["fundamental-material"]:
+            excluded.append({"scope": scope.key, "projection_id": envelope.projection_id,
+                             "reason": reason if not ok else "expired"})
+            continue
+        broken = []
+        for ref in envelope.payload.get("component_refs") or []:
+            brief_id, _, component_id = str(ref).partition("#")
+            components = _brief_components(store, brief_id)
+            if components is None or (component_id and component_id not in components):
+                broken.append(str(ref))
+        if broken:
+            excluded.append({"scope": scope.key, "projection_id": envelope.projection_id,
+                             "reason": "lineage: cited components unavailable " + ", ".join(broken)})
+            continue
+        included.append({"task_id": MATERIAL_ROLE, "role": MATERIAL_ROLE, "scope": scope.key,
+                         "status": "fresh", "projection_id": envelope.projection_id,
+                         "content_hash": envelope.content_hash, "as_of": envelope.as_of,
+                         "payload": envelope.payload})
+    return included, excluded
+
+
+def event_alignment_block(store, detail: list[dict], material: list[dict]) -> str:
+    """One heading per event cluster: the material reviews, layer risk claims / shocks / cross-scope claims, and
+    the sector downgrade reasons that cite the same cluster's components (event-impact-routing D9).
+
+    Grouped in code so the Chief does not have to — and cannot miss — that several assessments are parts of
+    one event. Empty when nothing in the snapshot cites a component.
+    """
+    cache: dict[str, dict | None] = {}
+
+    def component(ref: str) -> dict:
+        brief_id, _, component_id = str(ref).partition("#")
+        if brief_id not in cache:
+            cache[brief_id] = _brief_components(store, brief_id)
+        return (cache[brief_id] or {}).get(component_id) or {}
+
+    clusters: dict[str, list[str]] = {}
+    titles: dict[str, str] = {}
+    layer_ids: dict[str, set[str]] = {}       # cluster -> risk claim / shock ids that cite it
+
+    def add(ref: str, line: str, ids: tuple[str, ...] = ()) -> None:
+        comp = component(ref)
+        key = str(comp.get("cluster_key") or f"未解析:{ref}")
+        titles.setdefault(key, str(comp.get("content") or ""))
+        clusters.setdefault(key, [])
+        if line not in clusters[key]:
+            clusters[key].append(line)
+        layer_ids.setdefault(key, set()).update(ids)
+
+    for d in material:
+        p = d.get("payload") or {}
+        refs = list(p.get("component_refs") or [])
+        for ref in refs:
+            add(ref, f"- 基本面重大事件评审 {d['scope']}（成分 {', '.join(refs)}）：论点 {p.get('thesis_status')} · "
+                     f"影响 {p.get('expectation_effect')} · 方向 {p.get('direction')} · {str(p.get('narrative') or '')[:160]}")
+    for d in detail:
+        if d.get("status") != "fresh":
+            continue
+        p = d.get("payload") or {}
+        if d["role"] == "layer_analysis":
+            layer = p.get("layer") or d["scope"]
+            for r in p.get("risk_claims") or []:
+                for ref in r.get("component_refs") or []:
+                    add(ref, f"- {layer} 风险命题 {r.get('claim_id')}：{r.get('status')}（独立来源 "
+                             f"{r.get('independent_sources')}，权威 {r.get('authoritative_sources')}；成分 "
+                             f"{', '.join(r.get('component_refs') or [])}）", (str(r.get("claim_id")),))
+            for sh in p.get("off_thesis_shocks") or []:
+                for ref in sh.get("component_refs") or []:
+                    add(ref, f"- {layer} 论点外冲击 {sh.get('shock_id')}：{sh.get('materiality')}/{sh.get('direction')}"
+                             f" · {sh.get('summary')}（至 {str(sh.get('expires_at'))[:10]}；成分 "
+                             f"{', '.join(sh.get('component_refs') or [])}）", (str(sh.get("shock_id")),))
+            for c in p.get("cross_scope_claims") or []:
+                add(c.get("component_ref"), f"- {layer} 补认领 {c.get('from_entity')} 的公司事件（成分 "
+                                            f"{c.get('component_ref')}）：{c.get('transmission')}")
+    for d in detail:
+        if d.get("status") != "fresh" or d["role"] != "sector_allocation":
+            continue
+        for layer in (d.get("payload") or {}).get("layers") or []:
+            for reason in layer.get("downgrade_reasons") or []:
+                # Only the ids the downgrade RESTS ON ("依据 a、b）"), not ids its rationale merely mentions — the replay's
+                # rationale named two shocks as "not a basis" and the line landed under their clusters too.
+                cited = reason.split("依据 ", 1)[1].split("）", 1)[0] if "依据 " in reason else reason
+                for key, ids in layer_ids.items():
+                    if any(i and i in {x.strip() for x in cited.split("、")} for i in ids):
+                        line = f"- 行业配置下调 {reason}"
+                        if line not in clusters[key]:
+                            clusters[key].append(line)
+    if not clusters:
+        return ""
+    out = ["> 同一事件簇下的多份评估是**同一件事的不同部分**：基本面评估公司特有部分，层次分析评估整层共同部分，"
+           "行业配置的下调是层次分析建议的执行结果。**不得重复计算**——不要把它们当作三条独立的利空或利多。"]
+    for key in sorted(clusters):
+        out.append(f"\n### 事件簇 {key}" + (f" — {titles[key][:80]}" if titles.get(key) else ""))
+        out += clusters[key]
+    return "\n".join(out)
 
 
 def projection_context_block(detail: list[dict], focus: dict | None = None) -> str:
@@ -615,6 +782,9 @@ def projection_context_block(detail: list[dict], focus: dict | None = None) -> s
     if focus.get("fundamental_uncovered"):
         lines.append("- 无新近基本面研究（例行与事件评审均已过期或本轮未产出；本轮不阻断，不得当作“没有意见”；这些标的只允许持有或减仓，买入/加仓会被风控驳回）："
                      + "、".join(focus["fundamental_uncovered"]))
+    if focus.get("technical_uncovered"):
+        lines.append("- 技术面缺失（本轮行情拉取失败或读数已过期；本轮不阻断，不得当作“没有意见”；这些标的本轮不出任何订单，买卖都会被风控驳回）："
+                     + "、".join(focus["technical_uncovered"]))
     lines += [
         line("layer_analysis", "层级分析"),
         line("sector_allocation", "行业配置"),
@@ -634,6 +804,18 @@ def projection_context_block(detail: list[dict], focus: dict | None = None) -> s
             {k: v for k, v in (d.get("payload") or {}).items() if k not in _BOOKKEEPING},
             ensure_ascii=False)
         for d in detail if d["task_id"] not in NOT_RENDERED)
+    return "\n".join(lines)
+
+
+def material_block(snapshot) -> str:
+    """The optional material-event reviews in the snapshot, and the ones left out (never a gap)."""
+    import json
+
+    lines = [f"- {d['role']} [{d['scope']}] fresh · {d['projection_id']} sha256={d['content_hash']} · "
+             + json.dumps({k: v for k, v in (d.get("payload") or {}).items() if k not in _BOOKKEEPING},
+                          ensure_ascii=False)
+             for d in snapshot.optional_detail]
+    lines += [f"- 未纳入 {x['scope']} {x.get('projection_id') or ''}：{x['reason']}" for x in snapshot.optional_excluded]
     return "\n".join(lines)
 
 

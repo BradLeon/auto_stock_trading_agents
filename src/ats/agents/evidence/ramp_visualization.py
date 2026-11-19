@@ -225,19 +225,22 @@ def _plot_spend(rows: list[dict[str, Any]], *, path: Path, manifest, scope: str)
                              "missing_source_series": missing, "scale": "log10"})
 
 
-def _plot_market_share(rows: list[dict[str, Any]], *, path: Path, manifest, scope: str) -> dict[str, Any]:
-    """Render the overall model market share as a compact 100% stacked chart."""
+def _plot_market_share(rows: list[dict[str, Any]], *, path: Path, manifest, scope: str,
+                       title: str = "Ramp 模型市场份额（Overall）", y_label: str = "模型 API 支出份额（%）",
+                       period_width: int = 7, period_label: str = "期间",
+                       cohort_text: str = "Token Spend Management 连接企业的模型归因 API spend share") -> dict[str, Any]:
+    """Render a share series as a compact 100% stacked chart (monthly v1 API share or weekly v2 token share)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import seaborn as sns
 
     source_rows = [row for row in rows if row.get("value") is not None]
-    periods = sorted({str(row.get("period", ""))[:7] for row in source_rows})
+    periods = sorted({str(row.get("period", ""))[:period_width] for row in source_rows})
     if not source_rows or not periods:
-        return _plot(rows, path=path, title="Ramp 模型市场份额（Overall）",
-                     y_label="模型 API 支出份额（%）", group_field="series_label", scope=scope,
-                     manifest=manifest, definition="Token Spend Management cohort 的模型 API spend share。")
+        return _plot(rows, path=path, title=title,
+                     y_label=y_label, group_field="series_label", scope=scope,
+                     manifest=manifest, definition=f"{cohort_text}。")
     for row in source_rows:
         row.setdefault("series_label", f"{row.get('provider', '')}/{row.get('model', '')}".strip("/"))
     latest = periods[-1]
@@ -246,7 +249,7 @@ def _plot_market_share(rows: list[dict[str, Any]], *, path: Path, manifest, scop
     for row in source_rows:
         label = str(row.get("series_label", "Other"))
         history_values[label] = history_values.get(label, 0.0) + float(row.get("value") or 0.0)
-        if str(row.get("period", ""))[:7] == latest:
+        if str(row.get("period", ""))[:period_width] == latest:
             latest_values[label] = latest_values.get(label, 0.0) + float(row.get("value") or 0.0)
     # Preserve long-lived models as well as newly dominant models. Selecting
     # only the latest month would make the earlier history collapse into
@@ -257,7 +260,7 @@ def _plot_market_share(rows: list[dict[str, Any]], *, path: Path, manifest, scop
     display_labels = keep + ["Other"]
     matrix = {label: [0.0] * len(periods) for label in display_labels}
     for row in source_rows:
-        period = str(row.get("period", ""))[:7]
+        period = str(row.get("period", ""))[:period_width]
         label = str(row.get("series_label", "Other"))
         if period not in periods:
             continue
@@ -271,17 +274,17 @@ def _plot_market_share(rows: list[dict[str, Any]], *, path: Path, manifest, scop
     _sparse_period_ticks(axis, periods)
     axis.set_xlim(-0.5, len(periods) - 0.5)
     axis.set_ylim(0, 100)
-    axis.set_title("Ramp 模型市场份额（Overall）")
-    axis.set_xlabel("期间")
-    axis.set_ylabel("模型 API 支出份额（%）")
+    axis.set_title(title)
+    axis.set_xlabel(period_label)
+    axis.set_ylabel(y_label)
     axis.legend(title="代表模型（历史与最新期，其余合并）", loc="upper left", bbox_to_anchor=(1.01, 1),
                 fontsize=8)
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
-    definition = ("Token Spend Management 连接企业的模型归因 API spend share；保留历史累计份额靠前且"
-                  "最新期仍有代表性的模型（最多 8 个），其余模型合并为 Other，合计仍为该 cohort 的 100%。")
-    return _sidecar(path, title="Ramp 模型市场份额（Overall）", definition=definition,
+    definition = (f"{cohort_text}；保留历史累计份额靠前且最新期仍有代表性的序列（最多 8 个），"
+                  "其余合并为 Other，合计仍为该 cohort 的 100%。")
+    return _sidecar(path, title=title, definition=definition,
                     unit="percent", source="Ramp AI Index", rows=rows, manifest=manifest, scope=scope,
                     display={"series": display_labels, "latest_period": latest,
                              "top_n": len(keep), "aggregation": "history_top4_plus_latest_top8_capped8_plus_other"})
@@ -300,15 +303,23 @@ def render_ramp_charts(*, packet: dict[str, Any], output_dir: str | Path) -> dic
         adoption = list((slices.get("adoption_overall") or {}).get("rows") or [])
         models = list((slices.get("adoption_overall_models") or {}).get("rows") or [])
         sectors = list((slices.get("adoption_sector") or {}).get("rows") or [])
+        sizes = list((slices.get("adoption_business_size") or {}).get("rows") or [])
         spend = list((slices.get("spend_per_employee_overall") or {}).get("rows") or [])
+        makers = list((slices.get("token_spend_share_by_maker") or {}).get("rows") or [])
+        token_models = list((slices.get("token_spend_share_by_model") or {}).get("rows") or [])
+        # v1 replay packets still carry the monthly API share scope.
         shares = list((slices.get("model_market_share_overall") or {}).get("rows") or [])
         # Keep provider-published pp deltas in tables, but never plot them as
         # extra level observations.
         adoption = [row for row in adoption if row.get("metric_id", "").endswith("adoption_share") or not row.get("metric_id")]
         models = [row for row in models if row.get("metric_id", "").endswith("adoption_share") or not row.get("metric_id")]
         sectors = [row for row in sectors if row.get("metric_id", "").endswith("adoption_share") or not row.get("metric_id")]
+        sizes = [row for row in sizes if row.get("metric_id", "").endswith("adoption_share") or not row.get("metric_id")]
         for name, rows in (("ramp_adoption_overall", adoption), ("ramp_adoption_models", models),
-                           ("ramp_adoption_sector", sectors), ("ramp_spend_per_employee", spend),
+                           ("ramp_adoption_sector", sectors), ("ramp_adoption_business_size", sizes),
+                           ("ramp_spend_per_employee", spend),
+                           ("ramp_token_spend_share_by_maker", makers),
+                           ("ramp_token_spend_share_by_model", token_models),
                            ("ramp_model_market_share", shares)):
             if rows:
                 tables.append(_write_table(output, name, rows))
@@ -328,11 +339,31 @@ def render_ramp_charts(*, packet: dict[str, Any], output_dir: str | Path) -> dic
                 title="Ramp 付费企业 AI 采用率（NAICS 行业）", y_label="付费企业占比（%）",
                 group_field="segment", scope="adoption_sector", manifest=(slices.get("adoption_sector") or {}).get("manifest"),
                 definition="按 Ramp/NAICS 行业 segment 的 source-native adoption rate；不与 Overall 相加。"))
+        if sizes:
+            descriptors.append(_plot(sizes, path=output / "ramp_adoption_business_size.png",
+                title="Ramp 付费企业 AI 采用率（企业规模）", y_label="付费企业占比（%）",
+                group_field="segment", scope="adoption_business_size",
+                manifest=(slices.get("adoption_business_size") or {}).get("manifest"),
+                definition="按 Ramp 企业规模档（小型、中型、大型）的付费采用率；各档分母不同，不能相加。"))
         if spend:
             descriptors.append(_plot_spend(
                 spend, path=output / "ramp_spend_per_employee.png",
                 scope="spend_per_employee_overall",
                 manifest=(slices.get("spend_per_employee_overall") or {}).get("manifest")))
+        for scope_name, rows, label_of, title in (
+                ("token_spend_share_by_maker", makers, lambda row: str(row.get("maker") or row.get("segment") or ""),
+                 "Ramp token 花费份额（按厂商，周）"),
+                ("token_spend_share_by_model", token_models,
+                 lambda row: f"{row.get('model') or row.get('segment') or ''} ({row.get('maker') or ''})",
+                 "Ramp token 花费份额（按模型，周）")):
+            if not rows:
+                continue
+            rows = [dict(row, series_label=label_of(row)) for row in rows]
+            descriptors.append(_plot_market_share(
+                rows, path=output / f"ramp_{scope_name}.png", scope=scope_name,
+                manifest=(slices.get(scope_name) or {}).get("manifest"), title=title,
+                y_label="token 花费份额（%）", period_width=10, period_label="周（起始日）",
+                cohort_text="Token Spend Management 连接企业按周的 token 花费份额"))
         if shares:
             shares = [dict(row, series_label=(f"{row.get('provider', '')}/{row.get('model', '')}".strip("/")))
                       for row in shares]

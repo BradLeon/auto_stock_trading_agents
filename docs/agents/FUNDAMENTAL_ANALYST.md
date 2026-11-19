@@ -16,7 +16,7 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
 |---|---|
 | 读什么 | 公司研究包（财务、一致预期、公告、纪要、指引、期权隐含波动等市场预期）、产业链共享事实、**信息分析师的简报**（唯一允许读的其他分析师产出） |
 | 不读什么 | 行业、宏观、技术面的观点；不调用组合 pre-trade check |
-| 产出 | 例行：`fundamental_expectation_update` 投影；事件：`fundamental_event_review` 投影 |
+| 产出 | 例行：`fundamental_expectation_update` 投影；事件：`fundamental_event_review` 投影；重大事件：`fundamental_material_review`；公司风险项：`fundamental_risk_register` |
 | 谁读它 | Chief |
 | 代码 | `src/ats/agents/fundamental/`（`routine.py`、`event.py`、`baseline_view.py`）；打分、单位与报告在 `src/ats/agents/pead/`；财报事件流程用 LangGraph（`graph/pead.py`） |
 | 单票设置 | `config/pead/<SYM>.yaml` 合并在 `config/pead/_defaults.yaml` 之上（打分维度、权重、阈值、上下游） |
@@ -25,8 +25,10 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
 
 工作日 09:00（纽约时间）运行，依赖当天同一标的的信息简报。
 
-1. **建立预期基线。** 下一次财报在 `config/pead.yaml` 的 `schedule.prep_days_before`（现为 3）天以内时，
-   如果这一期还没有基线，就建一份：保守/中性/乐观三档预期、市场隐含预期（一致预期、期权隐含波动、
+1. **建立预期基线。** 下一次财报在 `config/pead.yaml` 的 `schedule.prep_days_before`（现为 3）个**交易日**以内时
+   （按纽交所日历数从今天到财报日前一天的交易日；周二财报即上周四、周五、本周一），每次例行运行都检查这一期
+   有没有基线，没有就建一份——某天失败，下一个交易日会补建。2026-11-16 之前按自然日数，周初财报只剩一两次机会。
+   基线内容：保守/中性/乐观三档预期、市场隐含预期（一致预期、期权隐含波动、
    是否已提前抢跑）、核心叙事、关注的 KPI 与可证伪条件。盘前（bmo）财报最晚在前一天建。
    基线以 `[基线 vN]` 的版本化投影发布，带完整明细（`baseline` 字段）。
 2. **归类新的事实变化。** 读当天简报的每条 `fact_changes`，归为 **确认 / 否定 / 新增 / 待验证** 之一
@@ -55,6 +57,23 @@ PEAD（财报后漂移）是它的分析框架，不是一个单独的角色：�
 
 `FundamentalEventReviewPayload` 主要字段：`direction`（-1/0/1）、`magnitude`、`confidence`、`scorecard`、
 `guidance`、`narrative`、`falsifiable_conditions`、`actuals`、`baseline_ref`、`baseline_as_of`、`comparison_basis`。
+
+## 重大事件评审与公司风险项（event-impact-routing）
+
+除了例行与事件两种模式，还有第三种产出：**重大事件评审**（`FundamentalMaterialReview`，任务 `fundamental-material`）。
+
+- **什么时候跑**：信息简报里某个"本公司"事件成分被评为重大及以上、且是首发或升级时，由事件路由触发（路由开关见
+  `config/workflow/event_impact.yaml`，默认关闭）。
+- **回答什么**：碰到了论点、风险项或证伪条件里的哪一条；论点状态（稳定 / 承压 / 被证伪）；预期影响是改季度数字（`quarterly_numbers`）
+  还是只改风险溢价（`risk_premium`）；方向、幅度、信心；还有什么待核验；对信息岗评的重要性是否同意（`materiality_review`，以
+  agree / higher / lower 开头）。
+- **边界**：只评公司特有的部分；整层共同的影响（出口规则、同行连带）归层次分析。不输出动作、数量或风控结论。
+- **和另外两种产出的关系**：Chief 对每个标的仍按"有效的财报事件评审优先，否则例行更新"读一份财报口径的基本面，**另外**读有效期内
+  的重大事件评审（14 天，有新进展时重新发布）。没有财报基线时照样评审，信心上限 0.3。
+- **公司风险项**（`FundamentalRiskRegister`）：全年有效的公司特有风险清单，每项带可核对的证伪条件。生成时读财报基线叙事、
+  上一版清单，以及该标的近 14 天简报里的事实（最多 40 条），所以财报之后才出现的风险（比如 CEO 被调查）也会进清单。上线时初始化一次
+  （`python -m ats.agents.fundamental.material --init`，加 `--apply` 才执行），之后每次建财报基线时刷新；重大事件评审读最新一版。
+- 代码 `src/ats/agents/fundamental/material.py`；提示词 `skills/fundamental-material-review`、`skills/fundamental-risk-register`。
 
 ## 没有基线时
 

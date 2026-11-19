@@ -328,6 +328,9 @@ class LayerVerdict(BaseModel):
     rationale: str = ""
     # Report-only (design D19): never feeds a verdict, a rank or a weight.
     candidate_claims: list[CandidateClaim] = Field(default_factory=list)
+    # event-impact-routing (2026-11-16): risk_claims / off_thesis_shocks / cross_scope_claims /
+    # utilization_advice, already checked by agents/layer/event_inputs.apply. Empty while the switch is off.
+    event_fields: dict = Field(default_factory=dict)
 
     def is_valid(self) -> bool:
         return self.layer_status in LAYER_STATUSES

@@ -147,7 +147,8 @@ def read_projection(store, *, consumer, role, scope, at=None, projection_id="", 
 
     owners = {"information_brief": "information", "layer_analysis": "layer",
               "sector_allocation": "sector", "fundamental_expectation_update": "fundamental",
-              "fundamental_event_review": "fundamental", "macro_review": "macro",
+              "fundamental_event_review": "fundamental", "fundamental_material_review": "fundamental",
+              "macro_review": "macro",
               "technical_review": "technical"}
     manifest = load_yaml(REPO_ROOT / "config/data/target_dataflow_coverage.yaml")
     contract = next(row for row in manifest["consumers"] if row["id"] == consumer)

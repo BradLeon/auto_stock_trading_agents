@@ -54,8 +54,11 @@ ROLE_BY_PATH_PREFIX: tuple[tuple[str, str], ...] = (
 ALLOWED_CROSS_ROLE_READS: dict[str, tuple[str, ...]] = {
     "sector_analyst": ("layer_analyst", "layer_analysis"),      # 行业分析师读层次分析师
     "fundamental_analyst": ("information_analyst", "information_brief"),  # 基本面读信息简报
+    # event-impact-routing D6: 层次分析读信息简报里的事件成分（本层/跨层成分与成员公司的重大成分）
+    "layer_analyst": ("information_analyst", "information_brief"),
     "chief": ("layer_analysis", "information_brief", "sector_allocation",
               "fundamental_expectation_update", "fundamental_event_review",
+              "fundamental_material_review",          # event-impact-routing: optional category
               "macro_review", "technical_review"),
 }
 
@@ -66,7 +69,8 @@ OWNED_PROJECTION_ROLES: dict[str, tuple[str, ...]] = {
     "information_analyst": ("information_brief",),
     "layer_analyst": ("layer_analysis",),
     "sector_analyst": ("sector_allocation",),
-    "fundamental_analyst": ("fundamental_expectation_update", "fundamental_event_review"),
+    "fundamental_analyst": ("fundamental_expectation_update", "fundamental_event_review",
+                            "fundamental_material_review", "fundamental_risk_register"),   # event-impact-routing
     "macro_analyst": ("macro_review",),
     "technical_analyst": ("technical_review",),
 }

@@ -118,7 +118,7 @@ def _claim_section(cfg, store, assessments_by_layer, rows_by_id) -> list[str]:
         lines += [f"### {layer.label}", ""]
         for a in assessments:
             claim = next((c for c in layer.claims if c.id == a.claim_id), None)
-            kind = "截面比较" if (claim and claim.kind == "relative") else "共同需求"
+            kind = {"relative": "截面比较", "risk": "风险命题"}.get(claim.kind if claim else "", "共同需求")
             subj = f" · 比较 {', '.join(claim.entities)}" if claim and claim.entities else ""
             lines += [
                 f"**{verdict_mark(a)}｜{claim.statement if claim else a.claim_id}**",

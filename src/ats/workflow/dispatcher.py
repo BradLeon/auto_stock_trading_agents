@@ -864,6 +864,8 @@ class Dispatcher:
             "scope": snapshot.scope.key, "built_at": snapshot.built_at,
             "complete": snapshot.complete,
             "items": [vars(item) for item in snapshot.items],
+            "optional_items": [vars(item) for item in snapshot.optional_items],
+            "optional_excluded": list(snapshot.optional_excluded),
             "detail": detail, "manifest": manifest, "chief_result": chief_payload,
             "requirements": snapshot.requirements,
         }
@@ -920,6 +922,7 @@ def default_adapters() -> dict[str, TaskAdapter]:
         "sector-review": _sector_adapter,
         "fundamental-routine": _fundamental_routine_adapter,
         "fundamental-event": _fundamental_event_adapter,
+        "fundamental-material": _fundamental_material_adapter,
         "macro-review": _macro_adapter,
         "technical-review": _technical_adapter,
     }
@@ -973,9 +976,12 @@ def _sector_adapter(context: TaskContext) -> TaskAdapterResult:
     }
     if not layer_inputs:
         raise DependencyUnavailable("sector-review received no declared LayerAnalysis inputs")
+    # event-impact-routing D7: a review triggered by a material development is ad hoc and lowers a layer by at
+    # most one notch; the routine Saturday review is not clamped. The route sets `trigger_source` (group 7).
     review = run(
         context.task.scope.id, use_llm=_use_llm(context), live_data=True,
-        layers=True, write_reports=True, upstream_layer_projections=layer_inputs)
+        layers=True, write_reports=True, upstream_layer_projections=layer_inputs,
+        trigger_source=str(context.task_inputs.get("trigger_source") or "scheduled"))
     if not review.layer_verdicts:
         raise ProjectionMissing("Sector Analyst produced no allocation projection")
     # The sector report, the per-layer reports and the html dashboard are written by `run` itself, from the
@@ -1027,6 +1033,21 @@ def _fundamental_event_adapter(context: TaskContext) -> TaskAdapterResult:
                "data_vintage_refs": list(context.data_vintage_refs)})
     result = run_fundamental_pass(request)
     return TaskAdapterResult(detail=str(result.get("summary", "event review completed")))
+
+
+def _fundamental_material_adapter(context: TaskContext) -> TaskAdapterResult:
+    """event-impact-routing: a material, non-earnings event for one company, from the brief's rated components."""
+    from ..agents.fundamental.entry import material_request, run_fundamental_pass
+
+    refs = [str(ref) for ref in context.task_inputs.get("component_refs", []) or []]
+    if not refs:
+        raise DependencyUnavailable("Fundamental material review requires component_refs from a brief")
+    request = material_request(
+        context.task.scope.id, component_refs=refs, use_llm=_use_llm(context),
+        extra={"input_refs": [*_information_dependency_refs(context), *refs],
+               "data_vintage_refs": list(context.data_vintage_refs)})
+    result = run_fundamental_pass(request)
+    return TaskAdapterResult(detail=str(result.get("summary", "material review completed")))
 
 
 def _macro_adapter(context: TaskContext) -> TaskAdapterResult:

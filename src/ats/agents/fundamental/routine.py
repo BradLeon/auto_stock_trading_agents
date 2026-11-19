@@ -320,7 +320,8 @@ def publish_expectation_update(store, payload: dict, *, as_of: str = "",
 # Pre-earnings baseline (PEAD prep) inside routine mode (Phase F, 2026-10-16)
 # --------------------------------------------------------------------------- #
 # User ruling: PEAD is Fundamental's analysis framework. Routine mode builds the pre-earnings baseline once
-# when the next print is within `schedule.prep_days_before` (config/pead.yaml); a manual run may rebuild it
+# when the next print is within `schedule.prep_days_before` TRADING days (config/pead.yaml); every run inside the
+# window rebuilds it if still missing (a failed day is made up the next session); a manual run may rebuild it
 # from the latest Information. There is no "material change" auto-refresh. After the print the baseline is
 # frozen for event mode (§9.3). Each build publishes its own versioned narrative projection.
 
@@ -343,11 +344,35 @@ def baseline_window(symbol: str, *, now: datetime | None = None) -> dict:
     label, _source = calendar.resolve_fiscal_label(symbol, upcoming,
                                                    config_label=load_pead_config(symbol).fiscal_label)
     days_to = (event["date"] - point.date()).days
+    # `prep_days_before` counts TRADING days (2026-11-16). As calendar days, "3 days" in front of a Tuesday print
+    # was Sat/Sun/Mon, and the routine runs on weekdays only: NVDA (Tue 11-17 amc) got exactly one chance, the
+    # Monday run, and a failure there would have left no baseline at all. Counted in sessions, the window is the
+    # three sessions before the print (Thu, Fri, Mon for a Tuesday print); every routine run inside it builds the
+    # baseline if it is still missing, so a failed day is made up the next session.
     before = int((load_pead_global().get("schedule") or {}).get("prep_days_before", 3))
+    sessions_to = trading_days_until(point.date(), event["date"])
     # Same rule as the legacy scheduler: a bmo print has opened the market before a same-day run.
     earliest = 1 if session == "bmo" else 0
-    return {"symbol": symbol, "label": label, "open": earliest <= days_to <= before, "days_to": days_to,
-            "date": event["date"].isoformat(), "session": session, "cutoff_passed": days_to < earliest}
+    cutoff_passed = days_to < earliest
+    return {"symbol": symbol, "label": label, "open": not cutoff_passed and 0 <= sessions_to <= before,
+            "days_to": days_to, "trading_days_to": sessions_to,
+            "date": event["date"].isoformat(), "session": session, "cutoff_passed": cutoff_passed}
+
+
+def trading_days_until(today, print_day) -> int:
+    """NYSE sessions from `today` (inclusive) up to `print_day` (exclusive); negative once the print has passed."""
+    from datetime import timedelta
+
+    if print_day <= today:
+        return -1 if print_day < today else 0
+    try:
+        import pandas_market_calendars as mcal
+
+        schedule = mcal.get_calendar("XNYS").schedule(start_date=today.isoformat(),
+                                                      end_date=(print_day - timedelta(days=1)).isoformat())
+        return int(len(schedule))
+    except Exception:  # noqa: BLE001 - without the exchange calendar, weekdays are the conservative proxy
+        return sum(1 for i in range((print_day - today).days) if (today + timedelta(days=i)).weekday() < 5)
 
 
 def _brief_facts(store, symbol: str) -> tuple[list[str], str]:
@@ -423,7 +448,18 @@ def ensure_baseline(store, request) -> dict:
     except Exception as exc:  # noqa: BLE001 - the baseline itself is saved; the record of it is refused
         log.warning("baseline projection for %s %s refused: %s", symbol, label, exc)
         projection = ""
-    return {"baseline": "built", "reason": reason, "projection_id": projection, **window}
+    register = ""
+    if request.use_llm:
+        # event-impact-routing 4.1: the company risk register is refreshed with every new baseline. A failure is
+        # logged and leaves the previous register in force; it never fails the baseline.
+        from .material import build_register
+
+        try:
+            register = build_register(store, symbol, refreshed_with=refs[0])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("risk register refresh for %s %s failed: %s", symbol, label, exc)
+    return {"baseline": "built", "reason": reason, "projection_id": projection, "risk_register": register,
+            **window}
 
 
 from ...workflow.runtime_reads import scoped_read  # noqa: E402

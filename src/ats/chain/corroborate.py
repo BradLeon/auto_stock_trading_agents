@@ -286,6 +286,8 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     """
     if claim.kind == "relative":
         return cross_section(claim, rows, cfg=cfg, as_of=as_of, judge=judge)
+    if claim.kind == "risk":
+        return risk_claim(claim, rows, cfg=cfg, as_of=as_of, judge=judge)
     cfg = cfg or {}
     min_clusters = cfg.get("min_clusters", 2)
     min_stances = cfg.get("min_stance_classes", 2)
@@ -439,6 +441,82 @@ def corroborate(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
     if unjudged:
         assessment.note += (f" · ⚠️ {unjudged}/{len(judgements)} 簇未获判读"
                             f"（判读器本轮未返回，已按中性处理——这是缺口不是中性结论）")
+    return assessment
+
+
+def risk_claim(claim: ClaimDef, rows: list[dict], *, cfg: dict | None = None,
+               as_of: datetime | None = None, judge=None) -> ClaimAssessment:
+    """A `kind: risk` claim: same hygiene and per-cluster judgement as `common`, different counting.
+
+    `supportive` means the risk is corroborated as live: the supporting clusters come from at least two
+    independent SOURCES, at least one first-hand or authoritative (chain/risk_sources.py). Company-speaker
+    count and stance diversity do not apply — the companies a risk hits are rarely the ones reporting it. The
+    layer analyst turns this, together with the event components it reads, into one of five states; the
+    verdict here is only the ledger's half of that.
+    """
+    from . import risk_sources
+
+    cfg = cfg or {}
+    min_clusters = cfg.get("min_clusters", 2)
+    as_of = as_of or datetime.now(timezone.utc)
+    expected = claim.expected_witnesses()
+    assessment = ClaimAssessment(claim_id=claim.id, layer=claim.layer, as_of=as_of,
+                                 witnesses_expected=len(expected))
+    clusters = build_clusters(claim, rows, cfg=cfg)
+    spoke = {c.speaker for c in clusters} & expected
+    assessment.witnesses_reported = len(spoke)
+    assessment.silent_witnesses = sorted(expected - spoke)
+    if not clusters:
+        assessment.note = "无适用证据 —— 风险命题保持 unknown（取不到数据不等于风险解除）"
+        return assessment
+
+    if judge is None:
+        from ..agents.evidence.adjudicator import judge as _default_judge
+
+        judge = _default_judge
+    judgements = judge(claim, clusters)
+    assessment.judgements = judgements
+    by_key = {c.key: c for c in clusters}
+    support = [by_key[j.cluster_key] for j in judgements if j.polarity == "support" and j.cluster_key in by_key]
+    refute = [by_key[j.cluster_key] for j in judgements if j.polarity == "refute" and j.cluster_key in by_key]
+    assessment.support_score = float(len(support))
+    assessment.refute_score = float(len(refute))
+    assessment.evidence_clusters = len(clusters)
+    assessment.observation_ids = [i for c in clusters for i in c.observation_ids]
+    assessment.speakers = sorted({c.speaker for c in support + refute if c.speaker})
+    counted = risk_sources.gate(risk_sources.cluster_sources(support))
+    assessment.independent_sources = counted["independent"]
+    assessment.authoritative_sources = counted["authoritative"]
+
+    if len(support) + len(refute) < min_clusters:
+        assessment.note = f"独立证据簇 {len(support) + len(refute)} < {min_clusters}，证据不足"
+        return assessment
+    minority = min(support, refute, key=len) if (support and refute) else []
+    majority = max(support, refute, key=len) if (support and refute) else (support or refute)
+    if minority:
+        assessment.dissenters = sorted({c.speaker for c in minority})
+    if minority and len(majority) < DECISIVE_MAJORITY_RATIO * len(minority):
+        assessment.verdict = "mixed"
+        assessment.unresolved_reason = "dissent"
+        assessment.note = f"风险加剧 {len(support)} 簇 vs 缓和 {len(refute)} 簇，方向无法判定"
+        return assessment
+    if len(refute) > len(support):
+        assessment.verdict = "contradicted"
+        assessment.basis = "corroborated" if len(refute) >= 2 else "thin"
+        assessment.note = f"缓和 {len(refute)} 簇 vs 加剧 {len(support)} 簇"
+        return assessment
+    if not counted["ok"]:
+        assessment.verdict = "unknown"
+        assessment.basis = "thin"
+        assessment.unresolved_reason = "source_gate"
+        assessment.note = (f"加剧 {len(support)} 簇，但独立来源 {len(counted['independent'])} 个"
+                           f"（{','.join(counted['independent']) or '无'}）、一手或权威 "
+                           f"{len(counted['authoritative'])} 个，未达风险命题门槛")
+        return assessment
+    assessment.verdict = "supportive"
+    assessment.basis = "corroborated"
+    assessment.note = (f"风险加剧 {len(support)} 簇 · 独立来源 {','.join(counted['independent'])}"
+                       f" · 一手或权威 {','.join(counted['authoritative'])}")
     return assessment
 
 

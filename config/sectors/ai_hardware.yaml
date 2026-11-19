@@ -108,7 +108,7 @@ layers:
     # 它们是"理想情况下该问什么"，写的时候没有让取数可行性参与，证人与数据都对不上。
     # L1 现在问的，就是下面三个证据观察器（`evidence_observers`）本来就在回答的三个问题，用的是它们已经在读的
     # 受治理数据集——没有新取数：
-    #   生产化扩散  BTOS（ai_enterprise_adoption_us）· RPS（ai_worker_adoption_us）· Ramp（ramp_ai_adoption）·
+    #   生产化扩散  BTOS（ai_enterprise_adoption_us）· RPS（ai_worker_adoption_us）· Ramp（ramp_ai_adoption，v2：FRED 为主、网页补增量）·
     #               Anthropic Economic Index（ai_work_adoption）
     #   商业化      frontier_ai_labs_revenue（Sacra / TickerTrends）· OpenRouter 路由用量
     #   原始能力    frontier_ai_capability_benchmarks · frontier_ai_public_model_cards
@@ -786,11 +786,17 @@ layers:
     # 首轮判读后拆出来独立成命题——诊断与留痕写在 ④ 被删掉的那一维原位。
     #
     # **刻意不立的三条**（免得以后重复起草）：
-    #   ~~市场可达性 / 出口管制命题~~ —— 台账里只有 NVDA（7 条）与 AMD（1 条）说话，
-    #     **2 个说话人 < MIN_INDEPENDENT_SPEAKERS=3**，立了永远判 unknown。判据与 L6 那轮
-    #     否掉独立光刻命题完全一样。中国与主权敞口降为 ④ 的 xpu_account_and_customer_mix
-    #     里的客户结构一维 —— **在那里它反而有区分度**（NVDA 主权收入 +80%、中国 DC 收入
-    #     被排除在 outlook 外，对比 AVGO 只有三个客户）。
+    #   ~~市场可达性 / 出口管制的**经营**命题~~ —— 台账里只有 NVDA（7 条）与 AMD（1 条）说话，
+    #     **2 个说话人 < MIN_INDEPENDENT_SPEAKERS=3**，立成 common 永远判 unknown。判据与 L6 那轮
+    #     否掉独立光刻命题完全一样。中国与主权敞口作为**客户结构**仍留在 ④ 的
+    #     xpu_account_and_customer_mix 一维 —— **在那里它有区分度**（NVDA 主权收入 +80%、中国 DC
+    #     收入被排除在 outlook 外，对比 AVGO 只有三个客户）。
+    #     2026-11-16 改由**风险命题** l5_export_market_access_risk 承接政策本身（上线前暂存于
+    #     openspec/changes/event-impact-routing/pending/，上线时贴回本层 claims 末尾）
+    #     （event-impact-routing）。两者门槛不同，这正是能立的原因：经营命题数**独立公司说话人**
+    #     （出口限制不会由被限制的公司率先报道），风险命题数**独立来源**——同一出版方或同一原发
+    #     的转载算一个，至少 2 个且其中至少 1 个是一手或权威来源（规则见
+    #     config/workflow/event_impact.yaml 的 risk_claims 段、chain/risk_sources.py）。
     #   ~~L4 侧的 ASIC 替代 common 命题~~ —— L2 的 asic_substitution_delivering 已经在问
     #     「自研 ASIC 兑现了没有」（买方视角，common）。供给侧要问的是**订单在四家之间
     #     怎么转移**，那是截面、就是 ④，不是第二条 common。

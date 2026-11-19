@@ -309,3 +309,211 @@ def article_source_entities() -> set[str]:
     is what `observer.concept_menu` reads), not through a `concepts:` list of its own.
     """
     return {s.entity for s in load_article_sources()}
+
+
+# --- extraction over already-ingested articles (article-witness-observations, 2026-11-13) --------------------- #
+# `collect_articles` above discovers and fetches by itself. After the platform cutover the ingestion half moved to
+# `ats data article-ingest` (shared catalog, versions, dedup) and nothing called this module any more, so the three
+# publisher witnesses stopped on 2026-08-18/08-30 while their articles kept being ingested. The entry below reads
+# ONLY admitted article versions: one network fetch per article (by ingestion), a replayable extraction, and "not
+# collected" kept apart from "not extracted".
+
+PREFILTER_CONSUMER = "chain_prefilter"
+PREFILTER_VERSION = "witness-scope-v1"
+HEAD_CHARS = 3_000
+DEFAULT_MAX_REQUESTS = 20
+
+
+def witness_scope(source: ArticleSourceDef, sector: str = "ai_hardware") -> dict[str, set[str]]:
+    """What an article must touch to be worth a model call, derived from the witness declarations.
+
+    The publisher's claims are every claim, in any layer, that names it as a witness. An article is relevant
+    when it names one of those claims' companies (layer members, declared entities, expected speakers) or hits
+    the source's curated keyword list. Nothing is pinned to a layer: TrendForce witnesses L4–L8 and its scope
+    follows; registering a publisher on another layer widens it automatically.
+    """
+    from ..config import load_sector_config
+
+    publisher = source.entity.upper()
+    entities: set[str] = set()
+    claims: set[str] = set()
+    try:
+        cfg = load_sector_config(sector)
+    except Exception as exc:  # noqa: BLE001 - without the config there is no scope; read nothing rather than all
+        log.warning("articles: sector config unavailable (%s) — %s", sector, exc)
+        return {"claims": set(), "entities": set(), "keywords": set(source.match or [])}
+    publishers = {s.entity.upper() for s in load_article_sources()}
+    for layer in cfg.layers:
+        members = {t.symbol.upper() for t in layer.tickers}
+        for claim in layer.claims:
+            if publisher not in {w.entity.upper() for w in claim.witnesses}:
+                continue
+            claims.add(claim.id)
+            entities |= members | {e.upper() for e in claim.entities} | claim.expected_witnesses()
+    entities -= publishers          # other publishers are speakers, never the subject an article is about
+    return {"claims": claims, "entities": entities, "keywords": set(source.match or [])}
+
+
+def scope_fingerprint(scope: dict[str, set[str]]) -> str:
+    import hashlib
+    import json
+
+    blob = json.dumps({k: sorted(v) for k, v in scope.items()}, sort_keys=True)
+    return f"{PREFILTER_VERSION}:{hashlib.sha256(blob.encode()).hexdigest()[:12]}"
+
+
+def _keyword_hit(text: str, keywords: set[str]) -> bool:
+    hay = re.sub(r"[^a-z0-9]+", " ", (text or "").lower())
+    # A plain English plural counts ("chips", "orders"): the curated lists are singular nouns.
+    return any(re.search(rf"\b{re.escape(re.sub(r'[^a-z0-9]+', ' ', kw.lower()))}(?:s|es)?\b", hay)
+               for kw in keywords)
+
+
+def is_relevant(title: str, body: str, scope: dict[str, set[str]], *, read_all: bool) -> bool:
+    """Deterministic pre-filter. `read_all` (an empty keyword list in config) means every article is read.
+
+    Relevant when the HEADLINE hits a keyword, or when the headline names a company in the witness scope AND the
+    opening of the body hits a keyword. Measured 2026-11-13 on IBKR (Dow Jones), 160 articles in one week:
+      * a company named anywhere in the text: 160/160 — ingestion already picks issuer-linked stories, so it
+        filters nothing;
+      * keyword anywhere in the opening: 153/160 — words like "order" and "supply" are everywhere;
+      * keyword in the headline only (the August `_wanted` rule): 14/160 — misses "Jensen Huang Affair Revives
+        Push for Chip Restrictions", exactly the story the witness exists for;
+      * this rule: 115/160 (~16 a day), inside the 20-request cap of a daily run.
+    """
+    if read_all:
+        return True
+    from ..config import entity_meta
+    from ..data import admission
+
+    if _keyword_hit(title, scope["keywords"]):
+        return True
+    names_member = False
+    for symbol in scope["entities"]:
+        try:
+            company = str(entity_meta(symbol).get("name") or "")
+        except Exception:  # noqa: BLE001 - an unregistered witness is matched by ticker only
+            company = ""
+        if admission.locator_names_entity(title, symbol, company):
+            names_member = True
+            break
+    return names_member and _keyword_hit(f"{title}\n{(body or '')[:HEAD_CHARS]}", scope["keywords"])
+
+
+# Extraction "failures" come in two kinds. A call that errored or an empty body is transient and is retried. A
+# model that read the article and found nothing a claim can use ("market wrap, no operating figures") has done
+# its job: retrying it spends the same request for the same answer. Measured on the first backfill batch
+# (2026-11-13): 16 of 40 Dow Jones articles were market wraps answered that way.
+_TRANSIENT_FAILURE_MARKERS = ("调用失败", "文档为空", "未取到")
+
+
+def _transient(note: str) -> bool:
+    return any(marker in (note or "") for marker in _TRANSIENT_FAILURE_MARKERS)
+
+
+def _done_for_latest(store, document_id: str, consumer: str, version: str) -> bool:
+    latest = store.latest_document_version(document_id)
+    if not latest:
+        return True     # nothing admitted to read
+    for row in store.document_processing(document_id, consumer=consumer, processor_version=version, limit=20):
+        if row.get("version_id") != latest.get("version_id"):
+            continue
+        if row.get("status") == "succeeded":
+            return True
+        if row.get("status") == "failed" and not _transient(str(row.get("note") or "")):
+            return True     # read, and nothing extractable: not worth a second request
+    return False
+
+
+def observe_ingested_articles(store, *, source_id: str, since: str = "",
+                              max_requests: int = DEFAULT_MAX_REQUESTS, dry_run: bool = False,
+                              now: datetime | None = None) -> dict:
+    """Extract chain observations from admitted articles of one declared publisher witness.
+
+    Newest first. Each admitted version is read at most once per processor version; an article outside the
+    witness scope is recorded once as checked-and-irrelevant (per scope fingerprint) and never costs a call.
+    At most `max_requests` extraction windows run; the rest is left for the next run and the packet is a
+    `partial` naming how many remain. No network access.
+    """
+    from ..agents.evidence import observer
+    from ..data import document_assets
+
+    now = now or datetime.now(timezone.utc)
+    source = next((s for s in load_article_sources() if s.id == source_id), None)
+    if source is None:
+        return {"status": "failed", "reason": "unknown_article_source", "source_id": source_id}
+    scope = witness_scope(source)
+    if not scope["claims"]:
+        return {"status": "no_change", "reason": "publisher_witnesses_no_claim", "source_id": source_id,
+                "entity": source.entity}
+    fingerprint = scope_fingerprint(scope)
+    read_all = not source.match
+    rows = store.documents(entity=source.entity, ok_only=True, published_since=since or None, limit=5000)
+    rows = [r for r in rows if r.get("doc_type") in {"article", "research_article", source.doc_type}]
+    rows.sort(key=lambda r: str(r.get("published_at") or r.get("fetched_at") or ""), reverse=True)
+
+    packet = {"source_id": source_id, "entity": source.entity, "since": since, "dry_run": dry_run,
+              "claims": sorted(scope["claims"]), "scope_fingerprint": fingerprint,
+              "candidates": len(rows), "already_extracted": 0, "irrelevant": 0, "extracted": 0,
+              "observations": 0, "requests": 0, "deferred": 0, "failures": 0, "nothing_extractable": 0,
+              "titles": []}
+    for row in rows:
+        document_id = row["document_id"]
+        if _done_for_latest(store, document_id, "chain", PROCESSOR_VERSION):
+            packet["already_extracted"] += 1
+            continue
+        if _done_for_latest(store, document_id, PREFILTER_CONSUMER, fingerprint):
+            packet["irrelevant"] += 1
+            continue
+        body = document_assets.read_document(document_id, store=store)
+        title = str(row.get("title") or "")
+        if not is_relevant(title, body, scope, read_all=read_all):
+            packet["irrelevant"] += 1
+            if not dry_run:
+                version_id = store.begin_document_processing(document_id, PREFILTER_CONSUMER, fingerprint)
+                if version_id:
+                    store.finish_document_processing(version_id, PREFILTER_CONSUMER, fingerprint, ok=True,
+                                                     outputs=0, note="irrelevant to the witnessed claims")
+            continue
+        windows = len(observer._windows(body)) if body.strip() else 0
+        if not windows:
+            packet["failures"] += 1
+            continue
+        if packet["requests"] and packet["requests"] + windows > max_requests:
+            packet["deferred"] += 1
+            continue
+        if dry_run:
+            packet["requests"] += windows
+            packet["extracted"] += 1
+            packet["titles"].append(title[:120])
+            continue
+        version_id = store.begin_document_processing(document_id, "chain", PROCESSOR_VERSION,
+                                                     retry_failed=True)
+        if not version_id:
+            packet["already_extracted"] += 1
+            continue
+        packet["requests"] += windows
+        res = observer.observe_document(source.entity, document_id, body,
+                                        source_url=str(row.get("source_url") or ""), period="",
+                                        store=store, now=now)
+        failure = str(res.get("failure") or "")
+        failed = bool(failure) and _transient(failure)
+        nothing = bool(failure) and not failed
+        store.finish_document_processing(version_id, "chain", PROCESSOR_VERSION, ok=not failed,
+                                         outputs=res.get("new", 0),
+                                         note=(f"no_observations: {failure}" if nothing else failure))
+        packet["failures" if failed else "nothing_extractable" if nothing else "extracted"] += 1
+        packet["observations"] += res.get("new", 0)
+        packet["titles"].append(title[:120])
+    if packet["deferred"]:
+        packet["status"], packet["reason"] = "partial", (
+            f"partial_budget_deferred: {packet['deferred']} relevant articles left for the next run "
+            f"(request cap {max_requests})")
+    elif packet["failures"] and not (packet["extracted"] or packet["nothing_extractable"]):
+        packet["status"], packet["reason"] = "failed", "extraction_failed"
+    elif packet["extracted"] or packet["nothing_extractable"]:
+        packet["status"], packet["reason"] = "succeeded", ""
+    else:
+        packet["status"], packet["reason"] = "no_change", "nothing_new_in_scope"
+    log.info("articles: %s observe -> %s", source_id, {k: v for k, v in packet.items() if k != "titles"})
+    return packet

@@ -67,3 +67,16 @@ events:
     allowed_windows: [post_release]
     required_material_kinds: [official_release]
     enter_decision_cycle: false
+
+# event-impact-routing (2026-11-16): rated event components from information briefs → ad hoc reviews.
+# Consumed by workflow/material_events.py on the dispatcher's calendar-consume tick (every 30 min), only while
+# config/workflow/event_impact.yaml `routing.enabled` is on. Never enters a decision cycle: the Chief reads the
+# outputs in its next routine run.
+material_development:
+  - scope_resolver: component_entity      # the company part → that company's material-event review
+    workflow_ids: [fundamental-material]
+    enter_decision_cycle: false
+  - scope_resolver: component_layers      # layer / cross-layer parts, and a chain member's own major part (D2b)
+    workflow_ids: [layer-review]
+    then: sector-review                   # once per tick, after the layer reviews it triggered
+    enter_decision_cycle: false

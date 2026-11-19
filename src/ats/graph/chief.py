@@ -113,7 +113,8 @@ def assemble_context(state: ChiefDecisionState) -> dict:
     ctx = assemble.build(query_plan=selected_plan,
                          projection_manifest=snapshot.requirements["manifest"], account=account,
                          fundamental_focus={key: plan.task_inputs.get(key) or []
-                                            for key in ("event_entities", "fundamental_uncovered")})
+                                            for key in ("event_entities", "fundamental_uncovered",
+                                                        "technical_uncovered")})
     log.info("chief context: %s", ctx.stats())
     out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
                net_liquidation=ctx.net_liquidation, actionable_scores=[])
@@ -247,13 +248,14 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         cycle_id=state.cycle_id, orders=_orders_payload(decisions),
         rationale=_revision_rationale(state), parent_revision_no=state.parent_revision_no,
         revision_source="chief", created_at=_proposed_at(state), **_revision_versions(state))
-    from ..workflow.decision_requirements import uncovered_fundamental
+    from ..workflow.decision_requirements import uncovered_fundamental, uncovered_technical
 
+    frozen = (state.research_snapshot or {}).get("requirements")
     review = risk_checks.review_revision(decisions, pf,
                                          event_data=state.event_data or None,
                                          cycle_id=state.cycle_id,
-                                         uncovered_fundamental=uncovered_fundamental(
-                                             (state.research_snapshot or {}).get("requirements")))
+                                         uncovered_fundamental=uncovered_fundamental(frozen),
+                                         uncovered_technical=uncovered_technical(frozen))
     risk_notes = list(review.notes)
     approved = [d for d, ov in zip(decisions, review.order_verdicts)
                 if ov.verdict == "approved"]

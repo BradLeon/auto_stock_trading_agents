@@ -136,7 +136,15 @@ def _chief_daily(entry: dict) -> dict:
         outcome = "research_incomplete"
     else:
         outcome = str(result.get("cycle_status") or "ended")
-    return {"cycle_id": cycle_id, "outcome": outcome, "risk_report": _risk_daily()}
+    out = {"cycle_id": cycle_id, "outcome": outcome, "risk_report": _risk_daily()}
+    if outcome == "research_incomplete":
+        out["gap_report"] = str(result.get("gap_report") or "")[:4000]   # for the Boss alert
+    elif outcome == "manual_review":
+        # The loop stopped without an approval request (11-18: a quote did not arrive): say why in the alert.
+        reasons = list(result.get("normalization_errors") or []) or [
+            str(v.detail) for v in getattr(result.get("risk_review"), "violations", None) or []]
+        out["reason"] = "；".join(reasons)[:1500]
+    return out
 
 
 _RUNNERS = {"clerk-daily": _clerk_daily, "chief-daily": _chief_daily}

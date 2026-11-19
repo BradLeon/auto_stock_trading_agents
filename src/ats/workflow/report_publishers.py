@@ -107,9 +107,28 @@ def chain_evidence_report(outcomes: list[dict], *, store_path: str | None) -> di
     return {"report": "chain_evidence", "status": "written", "paths": written}
 
 
+def event_calibration_report(outcomes: list[dict], *, store_path: str | None) -> dict[str, Any]:
+    """Weekly calibration of event-component ratings (event-impact-routing 3.3), after the Saturday sector review."""
+    from . import event_calibration as calibration
+    from ..config import load_sector_config
+    from ..memory import task_store_scope
+
+    if not any(item.get("task_id") == "sector-review" and item.get("status") == "succeeded"
+               and not item.get("reused") for item in outcomes):
+        return {"report": "event_calibration", "status": "skipped", "reason": "no_new_sector_review"}
+    folder = load_sector_config("ai_hardware").output_dir
+    if not folder:
+        return {"report": "event_calibration", "status": "skipped", "reason": "output_dir_unset_or_missing"}
+    with task_store_scope(store_path) as memory:
+        path = calibration.write(memory, output_dir=folder)
+    if path is None:
+        return {"report": "event_calibration", "status": "skipped", "reason": "no_event_components_or_dir"}
+    return {"report": "event_calibration", "status": "written", "path": str(path)}
+
+
 PUBLISHERS: Mapping[str, tuple[Callable[..., dict[str, Any]], ...]] = {
     "technical-review": (technical_report,),
-    "sector-review": (chain_evidence_report,),
+    "sector-review": (chain_evidence_report, event_calibration_report),
 }
 
 

@@ -163,6 +163,39 @@ def fundamental_coverage(store, *, targets, at, event_cycle, event_entities=()):
     return modes, uncovered, triggers
 
 
+def technical_coverage(store, *, entities, at) -> list[str]:
+    """The entities with no fresh Technical reading (2026-11-19, user ruling B).
+
+    A reading counts when its projection is `fresh` and its `as_of` is inside the Technical window. A few names
+    missing (one symbol's price download failed) are returned and stated uncovered: the cycle runs and the risk
+    review rejects every order on them. When every name is missing nothing is returned, so the cycle still blocks
+    as missing: that is an outage, not a gap.
+    """
+    from ..agents.chief.assemble import scan_projection_scopes
+    from .planning import FRESHNESS_SECONDS
+
+    scopes = [ProjectionScope(kind="entity", id=entity) for entity in entities]
+    role = TASK_ROLE["technical-review"]
+    fresh: set[str] = set()
+    for row in scan_projection_scopes(store, at=at, query_plan={role: {"role": role, "scopes": scopes}}):
+        if row["status"] != "fresh" or not row.get("as_of"):
+            continue
+        source = datetime.fromisoformat(row["as_of"])
+        if source.tzinfo is None or source > at:
+            continue
+        if (at - source).total_seconds() > FRESHNESS_SECONDS["technical-review"]:
+            continue
+        fresh.add(row["scope"].partition(":")[2].upper())
+    missing = [entity for entity in entities if entity.upper() not in fresh]
+    return missing if len(missing) < len(entities) else []
+
+
+def uncovered_technical(requirements) -> frozenset[str]:
+    """The targets a frozen cycle states as having no fresh Technical reading (no orders on them this cycle)."""
+    inputs = ((requirements or {}).get("plan") or {}).get("task_inputs") or {}
+    return frozenset(str(e).upper() for e in inputs.get("technical_uncovered") or [])
+
+
 def uncovered_fundamental(requirements) -> frozenset[str]:
     """The targets a frozen cycle states as having no usable Fundamental research (no new exposure allowed)."""
     inputs = ((requirements or {}).get("plan") or {}).get("task_inputs") or {}
@@ -181,7 +214,7 @@ def standalone(state, store=None):
     if store is None:
         requested.insert(1, "fundamental-event" if event_cycle else "fundamental-routine")
     else:
-        from .planning import FUNDAMENTAL_TASKS, _config_dir, _targets
+        from .planning import FUNDAMENTAL_TASKS, _config_dir, _scopes, _targets
 
         modes, uncovered, triggers = fundamental_coverage(
             store, targets=_targets(_config_dir(None)), at=state.as_of, event_cycle=event_cycle,
@@ -191,6 +224,13 @@ def standalone(state, store=None):
         requested[1:1] = [task for task in FUNDAMENTAL_TASKS if task in modes.values()]
         task_inputs = {"fundamental_modes": modes, "fundamental_uncovered": uncovered,
                        "event_entities": triggers}
+        technical_missing = technical_coverage(
+            store, entities=[item.id for item in _scopes("technical-review", ProjectionScope(
+                kind="sector", id=state.decision_profile), _config_dir(None))], at=state.as_of)
+        if technical_missing:
+            log.warning("technical reading missing or stale for %s: stated uncovered, no orders on them",
+                        ", ".join(technical_missing))
+            task_inputs["technical_uncovered"] = technical_missing
     plan = build_plan(requested_tasks=tuple(requested),
         scope=ProjectionScope(kind="sector", id=state.decision_profile),
         trigger=TriggerContext(kind="manual", trigger_id=state.cycle_id),

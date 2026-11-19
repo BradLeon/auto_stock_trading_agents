@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from typing import Any, Sequence
 
@@ -38,6 +39,7 @@ _SAFE_COMMANDS = {
     "factset-semantic-refresh",
     "chain-source-collect", "calendar-refresh", "calendar-finalize",
     "evidence-observe", "macro-news-collect",
+    "article-evidence-observe",      # article-witness-observations 2.3 (2026-11-13)
 }
 
 
@@ -375,6 +377,10 @@ class PersistentIngestionQueue:
         # lets a command tell an operator's manual re-collection from a scheduled run
         env["ATS_PERSISTENT_QUEUE_TRIGGER"] = str(task.get("trigger_kind", ""))
         reported = ""
+        # Bound before the worker starts: the timeout branch below returns without ever parsing stdout, and an
+        # unbound `payload` there used to raise UnboundLocalError and hide the real reason (worker_timeout).
+        payload: dict[str, Any] = {}
+        started = time.monotonic()
         heartbeat_stop = threading.Event()
         lease_lost = threading.Event()
         try:
@@ -426,13 +432,16 @@ class PersistentIngestionQueue:
             if outcome == "failed":
                 result.update(self._keep_failure_output(task, stdout, stderr))
         except subprocess.TimeoutExpired:
-            outcome, error, result = "failed", "worker_timeout", {"exit_code": None}
+            waited = round(time.monotonic() - started, 1)
+            outcome, error = "failed", f"worker_timeout:waited={waited}s;limit={timeout_seconds}s"
+            result = {"exit_code": None, "timeout": True, "timeout_seconds": timeout_seconds,
+                      "waited_seconds": waited}
             result.update(self._keep_failure_output(task, stdout, stderr))
         status = self.finish(task["task_id"], worker_id, outcome=outcome,
                              result=result, error=error)
         return {"task_id": task["task_id"], "status": status, "attempt": task["attempts"],
                 "source_id": task["source_id"], "reported_status": reported,
-                "stdout": payload if "proc" in locals() else {},
+                "stdout": payload,
                 "exit_code": result.get("exit_code"), "result": result, "error": error}
 
 

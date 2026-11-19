@@ -171,6 +171,7 @@ feature_flags:
     us_census_btos: platform
     rps_genai_adoption: platform
     ramp_ai_index: platform
+    ramp_ai_index_fred: platform
     # L1 商业化与原始能力观察器的来源。
     openrouter_rankings: platform
     sacra_public_company_profiles: platform
@@ -355,6 +356,9 @@ sources:
     discovery_group: ai_adoption
     internal_request_budget: {concurrency: 1, requests_per_run: 10, timeout_seconds: 60, max_file_bytes: 10485760, retry_attempts: 3}
   ramp_ai_index:
+    # 2026-11-12 (upgrade-ramp-ai-index-v2): only the increments FRED does not publish come from the page
+    # (two more vendors, 13 more sectors, spend per employee, weekly token-spend shares). A page row whose
+    # (scope, entity) is in `ramp_ai_index_fred.fred_series` is cross-checked against FRED, never stored.
     catalog_status: current_partial
     persistence: persistent
     provider: Ramp AI Index
@@ -364,12 +368,44 @@ sources:
     cadence: monthly
     retention: query_slice
     discovery_group: ai_adoption
+    approved_methodology_regimes: [ramp_ai_index_v2]
     internal_request_budget:
       concurrency: 1
       requests_per_run: 5
       timeout_seconds: 30
       max_file_bytes: 52428800
       retry_attempts: 0
+  ramp_ai_index_fred:
+    # 2026-11-12: FRED publishes 14 Ramp AI Index monthly series (release rid=23, since 2026-10-05). They are the
+    # only source of every series listed here; the page runner fills in what FRED does not carry.
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Ramp AI Index via FRED
+    upstream: FRED Ramp AI Index release series (public fredgraph CSV + series metadata)
+    adapter: ramp_ai_index_fred
+    datasets: [ramp_ai_adoption]
+    cadence: monthly
+    retention: query_slice
+    discovery_group: ai_adoption
+    approved_methodology_regimes: [ramp_ai_index_v2]
+    internal_request_budget: {concurrency: 1, requests_per_run: 28, timeout_seconds: 60, max_file_bytes: 10485760, retry_attempts: 3}
+    # `page_segment`: the same series under the page's own name (values identical over 40 months, checked
+    # 2026-11-12), so the page runner recognises it as covered and only cross-checks it.
+    fred_series:
+      RAMPAIALL: {scope: adoption_overall, entity_id: RAMP_OVERALL, segment: Ramp Overall}
+      RAMPAIANTHROPIC: {scope: adoption_overall_models, entity_id: "RAMP_VENDOR:ANTHROPIC", segment: Anthropic}
+      RAMPAIOPENAI: {scope: adoption_overall_models, entity_id: "RAMP_VENDOR:OPENAI", segment: OpenAI}
+      RAMPAIXAI: {scope: adoption_overall_models, entity_id: "RAMP_VENDOR:XAI", segment: xAI}
+      RAMPAICONSTRUCTION: {scope: adoption_sector, entity_id: "NAICS:CONSTRUCTION", segment: Construction}
+      RAMPAIFINANCE: {scope: adoption_sector, entity_id: "NAICS:FINANCE_AND_INSURANCE", segment: Finance and insurance}
+      RAMPAIHEALTHCARE: {scope: adoption_sector, entity_id: "NAICS:HEALTH_CARE_AND_SOCIAL_ASSISTANCE", segment: Health care and social assistance, page_segment: Health care}
+      RAMPAIHOSPITALITY: {scope: adoption_sector, entity_id: "NAICS:ACCOMMODATION_AND_FOOD_SERVICES", segment: Accommodation and food services}
+      RAMPAIMANUFACTURING: {scope: adoption_sector, entity_id: "NAICS:MANUFACTURING", segment: Manufacturing}
+      RAMPAIRETAIL: {scope: adoption_sector, entity_id: "NAICS:RETAIL_TRADE", segment: Retail trade, page_segment: Retail}
+      RAMPAITECH: {scope: adoption_sector, entity_id: "NAICS:INFORMATION", segment: Information, page_segment: Technology and media}
+      RAMPAISMB: {scope: adoption_business_size, entity_id: "RAMP_SIZE:SMALL", segment: Small businesses}
+      RAMPAIMIDMARKET: {scope: adoption_business_size, entity_id: "RAMP_SIZE:MEDIUM", segment: Medium-sized businesses}
+      RAMPAIENTERPRISE: {scope: adoption_business_size, entity_id: "RAMP_SIZE:LARGE", segment: Large businesses}
   openrouter_rankings:
     catalog_status: current_partial
     persistence: persistent
@@ -792,26 +828,30 @@ datasets:
     acceptance_samples: [WORKER_POP:US:EMPLOYED_18_64]
   ramp_ai_adoption:
     catalog_status: current_partial
-    entities: [RAMP_OVERALL, RAMP_VENDOR, NAICS_GROUP]
+    entities: [RAMP_OVERALL, RAMP_VENDOR, NAICS_GROUP, RAMP_SIZE]
     expected_cadence: monthly
-    primary_sources: [ramp_ai_index]
+    primary_sources: [ramp_ai_index_fred, ramp_ai_index]
     fallback_sources: []
     core_metrics: [ai.ramp.paid_business_adoption_share, ai.ramp.vendor_adoption_share]
     quality:
-      scopes: [adoption_overall, adoption_overall_models, adoption_sector]
+      scopes: [adoption_overall, adoption_overall_models, adoption_sector, adoption_business_size]
       percentage_range: [0, 100]
       vendor_shares_may_overlap: true
-      exclude_scopes: [business_size, geographies]
+      exclude_scopes: [geographies]
+      methodology_regime: ramp_ai_index_v2
     acceptance_samples: [RAMP_OVERALL, RAMP_VENDOR:ANTHROPIC, NAICS:TECHNOLOGY_AND_MEDIA]
   ramp_ai_spend:
     catalog_status: current_partial
-    entities: [RAMP_QUANTILE, RAMP_MODEL]
+    entities: [RAMP_QUANTILE, RAMP_TOKEN_MAKER, RAMP_TOKEN_MODEL]
     expected_cadence: monthly
     primary_sources: [ramp_ai_index]
     fallback_sources: []
-    core_metrics: [ai.ramp.ai_spend_per_employee, ai.ramp.api_spend_share]
+    core_metrics: [ai.ramp.ai_spend_per_employee, ai.ramp.token_spend_share_by_maker,
+                   ai.ramp.token_spend_share_by_model]
     quality:
-      scopes: [spend_per_employee_overall, model_market_share_overall]
+      # model_market_share_overall (monthly API spend share) is v1 only and no longer updated.
+      scopes: [spend_per_employee_overall, token_spend_share_by_maker, token_spend_share_by_model]
+      methodology_regime: ramp_ai_index_v2
       percentage_range: [0, 100]
       spend_nonnegative: true
       quantile_order: [median, top10, top1]
@@ -1289,7 +1329,7 @@ metric_definitions:
   ai.worker_adoption.time_saved_hours: {value_type: number, unit_family: percent, cadence: quarterly, period_basis: calendar_quarter, description: Self-reported counterfactual time savings as a share of work hours.}
   ai.ramp.paid_business_adoption_share:
     {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
-     entity_scope: [ramp_overall, ramp_vendor, naics_group],
+     entity_scope: [ramp_overall, ramp_vendor, naics_group, ramp_size],
      required_dimensions: [scope, statistical_unit, denominator_scope, technology_scope, segment],
      description: Share of the relevant Ramp business cohort with a positive AI transaction in the month; not employee adoption.}
   ai.ramp.vendor_adoption_share:
@@ -1307,7 +1347,15 @@ metric_definitions:
   ai.ramp.api_spend_share:
     {value_type: number, unit_family: percent, cadence: monthly, period_basis: calendar_month,
      entity_scope: [ramp_model], required_dimensions: [scope, provider, model, spend_type, cohort, technology_scope],
-     description: Model-attributed API spend share among Token Spend Management connected businesses.}
+     description: Model-attributed API spend share among Token Spend Management connected businesses (v1 only; discontinued 2026-11).}
+  ai.ramp.token_spend_share_by_maker:
+    {value_type: number, unit_family: percent, cadence: weekly, period_basis: calendar_week,
+     entity_scope: [ramp_token_maker], required_dimensions: [scope, maker, cohort, technology_scope],
+     description: Weekly share of total token spend by model maker among Token Spend Management connected businesses.}
+  ai.ramp.token_spend_share_by_model:
+    {value_type: number, unit_family: percent, cadence: weekly, period_basis: calendar_week,
+     entity_scope: [ramp_token_model], required_dimensions: [scope, maker, model, cohort, technology_scope],
+     description: Weekly share of total token spend by model among Token Spend Management connected businesses.}
   ai.openrouter.total_tokens:
     {value_type: integer, unit_family: count, cadence: daily, period_basis: utc_day,
      entity_scope: [openrouter_model], required_dimensions: [model_permaslug, author, is_other, is_free_route, reference_date, methodology_regime],
@@ -1518,6 +1566,11 @@ provider_mappings:
     yearly_change_pp: ai.ramp.provider_yearly_change_pp
     ai_spend_per_employee: ai.ramp.ai_spend_per_employee
     api_spend_share_pct: ai.ramp.api_spend_share
+    token_spend_share_by_maker_pct: ai.ramp.token_spend_share_by_maker
+    token_spend_share_by_model_pct: ai.ramp.token_spend_share_by_model
+  ramp_ai_index_fred:
+    adoption_rate_pct: ai.ramp.paid_business_adoption_share
+    vendor_adoption_pct: ai.ramp.vendor_adoption_share
   openrouter_rankings:
     total_tokens: ai.openrouter.total_tokens
   frontier_ai_capability:

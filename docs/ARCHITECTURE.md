@@ -41,11 +41,13 @@ flowchart TB
         MANUAL["手动执行<br/>单 Agent / 子流程 / 完整流程"]
         CRON["定时执行<br/>日度 / 周度 / 自定义周期"]
         CALENDAR["自动刷新 Schedule 日历<br/>财报日 / FOMC / 宏观数据发布 / 自定义事件"]
+        MATERIAL["重大事件成分 material_development<br/>简报评级为重大及以上、首发或升级<br/>（event_impact 路由开关，默认关）"]
         DISPATCHER["Workflow Dispatcher<br/>解析任务范围 · 补齐依赖 · 异步调度"]
 
         MANUAL --> DISPATCHER
         CRON --> DISPATCHER
         CALENDAR --> DISPATCHER
+        MATERIAL -->|"本公司 → fundamental-material<br/>本层/跨层、成员的重大本公司事件 → layer-review → sector-review<br/>不进入决策周期"| DISPATCHER
     end
 
     subgraph P0["Phase 0 · 前置研究（可并行）"]
@@ -216,6 +218,7 @@ flowchart TB
         PRODUCTS -->|按需读取| WORKFLOW
         RUNTIME_API -->|按需查询| WORKFLOW
         WORKFLOW -->|写入自身隔离分区| MEMORY
+        MEMORY -.->|简报事件成分 → material_development 触发<br/>不作为共享事实| WORKFLOW
 
         MEMORY -->|已批准交易决策| TRADER
         TRADER -->|写订单| BROKER_EXT
@@ -262,6 +265,12 @@ flowchart TB
     class ISOLATION warning;
 ```
 
+**事件成分的数据流（event-impact-routing，开关默认关）。** 信息简报在 Memory 里携带 `event_components`：
+已准入文档 → 简报事实（`source_evidence` 原文定位）→ 一次评级请求拆成成分（影响面、重要性、方向、新颖度；引用由代码从
+`source_evidence` 取）→ 常驻进程 :05/:35 扫描合格成分，写触发台账 `material_event_ledger`，按影响面启动
+`fundamental-material` 或 `layer-review → sector-review`（§8.3）→ 各自的投影 → Chief 例行周期按事件簇对齐读取（§10.1）。
+成分是分析产出，只存在于 Memory，**不回写为共享事实**；层次分析读它们属于对信息简报的只读依赖（§4）。
+
 ## 4. Data 与 Agent 对接关系
 
 ```mermaid
@@ -277,7 +286,7 @@ flowchart LR
         HISTORY_DATA["交易与绩效包<br/>订单、成交、归因、历史决策与复盘结果"]
     end
 
-    subgraph ANALYSTS["分析师：除两条明确依赖外，互不读取彼此的观点"]
+    subgraph ANALYSTS["分析师：除三条明确依赖外，互不读取彼此的观点"]
         LAYER["层次分析师<br/>仅 AI 硬件产业链"]
         INTEL["信息分析师"]
         SECTOR["行业分析师"]
@@ -308,6 +317,7 @@ flowchart LR
 
     HIER_DATA --> LAYER
     DOC_DATA --> LAYER
+    INTEL_OUT -.->|唯一跨分析师依赖之三：事件成分<br/>event_impact 开关开启后| LAYER
     LAYER --> LAYER_OUT
 
     HIER_DATA --> SECTOR
@@ -382,6 +392,14 @@ flowchart LR
     class RULE note;
 ```
 
+**层次分析读事件成分（event-impact-routing，`config/workflow/event_impact.yaml` 的 `layer.enabled`，默认关）。**
+开启后，层次分析除产业链数据包外，还读信息简报里的**事件成分**——这是第三条、也是只读事实层的跨分析师依赖：
+它读的是简报对事件的拆分与重要性评级，不读信息分析师的结论。读取范围有两类：影响面为本层、或跨层且点名本层的
+成分；本层成员公司重要性在"重大"及以上的本公司成分（安全网，防止影响面判错时整层传导丢失）。同一开关还让
+`kind: risk` 风险命题生效（关闭时加载器直接滤掉，证据引擎、抽取菜单、报告都看不到它），风险命题按**独立来源**
+计数（`chain/risk_sources.py`）。层次分析据此产出风险命题状态、论点外冲击、补认领与只下调的使用率建议，代码核对
+门槛与方向（`agents/layer/event_inputs.py`）。细节见 [`agents/LAYER_ANALYST.md`](agents/LAYER_ANALYST.md)。
+
 ## 5. 主理人—风控主管多轮 Loop
 
 ### 5.1 状态机
@@ -451,7 +469,7 @@ stateDiagram-v2
       "entity": "NVDA",
       "limit": 0.10,
       "post_trade_value": 0.134,
-      "severity": "hard"
+      "materiality": "hard"
     }
   ],
   "allowed_boundary": {
@@ -508,10 +526,10 @@ TaskProjection
 
 | 角色 | 可读输入 | 目标输出 | 明确禁止 |
 |---|---|---|---|
-| Layer Analyst | 产业链知识、实体关系、行业横截面、命题证据 | `LayerAnalysis` | 不给出超配/低配/清仓结论 |
+| Layer Analyst | 产业链知识、实体关系、行业横截面、命题证据；本层成员与跨层的**事件成分**（来自 `InformationBrief.event_components`） | `LayerAnalysis` | 不给出超配/低配/清仓结论（只给"只下调"的使用率建议）；不评估公司特有部分 |
 | Information Analyst | 通过准入的新闻、公告、研报、文章、电话会材料 | `InformationBrief` | 不输出买卖、仓位或组合建议 |
 | Sector Analyst | 共享行业事实、`LayerAnalysis` | `SectorAllocation` | 不读取 Information、Fundamental、Macro、Technical 观点 |
-| Fundamental Analyst | 公司研究包、产业链事实、`InformationBrief` | `FundamentalExpectationUpdate` / `FundamentalEventReview` | 不读取 Sector 或 Macro 观点，不执行最终风控 |
+| Fundamental Analyst | 公司研究包、产业链事实、`InformationBrief`（含事件成分） | `FundamentalExpectationUpdate` / `FundamentalEventReview` / `FundamentalMaterialReview` / `FundamentalRiskRegister` | 不读取 Sector 或 Macro 观点，不执行最终风控；重大事件评审不评估整层共同部分 |
 | Macro Analyst | 宏观数据包、政策和地缘文档 | `MacroReview` | 不读取其他分析师观点 |
 | Technical Analyst | 实时市场包和量价派生指标 | `TechnicalReview` | 不读取其他分析师观点 |
 | Chief | 全部被要求的分析投影、组合、历史和绩效 | `ChiefDecisionRevision` | 不能越过 Risk 或 Boss 到 Trader |
@@ -521,11 +539,13 @@ TaskProjection
 
 ### 7.3 Payload
 
-- `LayerAnalysis`：产业链层级、实体关系、标的横截面排名、共同证据和差异证据。
-- `InformationBrief`：来源文档、事实变化、影响候选、关联实体、置信度、时效和待核验项。
-- `SectorAllocation`：行业、层次、标的三级配置及其事实引用。
+- `LayerAnalysis`：产业链层级、实体关系、标的横截面排名、共同证据和差异证据；`risk_claims`（整层风险命题状态：休眠 / 出现 / 承压 / 兑现 / 解除，按独立来源计数）、`off_thesis_shocks`（论点外冲击，14 天过期）、`cross_scope_claims`（标为"本公司"但有整层传导的补认领）、`utilization_advice`（只下调的使用率建议）。
+- `InformationBrief`：来源文档、事实变化、影响候选、关联实体、置信度、时效和待核验项；`event_components`：把一件事拆成成分，每个成分带影响面（本公司 / 本层 / 跨层）、涉及的层与成员、重要性（轻微 / 中等 / 重大 / 极重大，正负都算）、方向（正面 / 负面 / 混合 / 不明）、直接或连带、持续或了结、新颖度（首发 / 升级 / 后续）、引用与理由（event-impact-routing）。
+- `SectorAllocation`：行业、层次、标的三级配置及其事实引用；每层的 `downgrade_reasons` 记录由风险命题或冲击引起的下调及被截断的建议。
 - `FundamentalExpectationUpdate`：财报前预期、市场隐含预期、核心叙事和变化路径。
 - `FundamentalEventReview`：现实与预期差、Surprise Scorecard、指引变化、叙事更新和投资建议。
+- `FundamentalMaterialReview`：财报以外的重大事件对单个公司的影响——认领的成分、论点状态（稳定 / 承压 / 被证伪）、命中的风险项或证伪条件、预期影响（改季度数字 / 只改风险溢价）、方向、幅度、信心、待核验与有效期（14 天）。与财报口径的基本面**叠加**读取，不参与"例行 / 财报事件"二选一。
+- `FundamentalRiskRegister`：按标的维护的公司特有风险项（关键人、治理、客户集中度、监管个案等）及其证伪条件，全年有效，建财报基线时刷新。
 - `MacroReview`：regime、影响传导、情景、时间范围和主要风险。
 - `TechnicalReview`：量价读数、趋势状态、失效条件和建议敞口。
 - `ChiefDecisionRevision`：完整交易提案或 No Action、研究投影引用、决策理由和可验证假设。
@@ -582,6 +602,19 @@ WorkflowRunResult
 手动、定时和事件触发都转换为 `TriggerContext`。每个任务生成稳定 idempotency key，
 重启或 misfire 补偿不得重复产生同一逻辑任务。失败重试只重试该任务，不得无条件重跑已成功依赖。
 
+**重大事件成分的触发（event-impact-routing，`workflow/material_events.py`）。** 常驻进程在日历消费的同一节拍
+（每小时 :05、:35 UTC）扫描近 `lookback_hours` 小时发布的信息简报，取重要性在"重大"及以上的事件成分：
+
+- 只有新颖度为"首发"或"升级"的成分触发；"后续报道"记为去重拦下，不触发。
+- 同一节拍内，指向同一下游任务与范围的合格成分合并成**一次**运行（不论来自几个事件簇）。去重键 = 下游任务 + 范围 + UTC 日，作为
+  `TriggerContext.event_id`；版本 = 这组成分（重要性 + 内容指纹）的摘要，作为 `event_version`。同一组成分再次出现是触发台账里的
+  重复；当天晚些时候出现升级或新成分，换了版本，可以再触发。（2026-11-16 回放发现原按事件簇去重时同一节拍 L5 被触发 4 次。）
+- 路由只能指向 `event_routes.yaml` 的 `material_development` 段登记的任务，以及产业链配置里登记的层与标的；
+  未登记的层被拒并记原因。本节拍跑过层复盘后，接一次 `sector-review`（任务输入 `trigger_source:
+  material_development`，配置单次最多下调一档）。
+- 每个决定（triggered / deduplicated / rejected / failed）写入 `material_event_ledger`，带简报投影、成分编号与事件簇。
+- 这些任务**不进入决策周期**，Chief 在下一次例行运行中读取产出。
+
 ### 8.4 LangGraph 的使用边界
 
 - PEAD 财报事件流程保留 LangGraph，因为它具有分阶段状态、可恢复执行和延迟文档升级。
@@ -608,6 +641,13 @@ Information Analyst 处理的是多类信息资产，因此公开角色名不使
 实现在 `agents/information/`（抽取、材料性评估、文档识别与简报发布契约），角色说明见
 [`agents/INFORMATION_ANALYST.md`](agents/INFORMATION_ANALYST.md)。
 
+**事件成分（event-impact-routing，开关 `config/workflow/event_impact.yaml` 的 `components.enabled`，默认关闭）。**
+简报的事实汇总好之后，对该标的当期全部事实做一次评级请求（角色 `event_component_rating`），把事件拆成成分并评出影响面、
+重要性、直接或连带、持续或了结、是否升级；新颖度的"首发 / 后续"由代码按近 7 天的事件簇台账判定，引用由代码从简报的
+`source_evidence` 取。发布契约拒绝未登记的层与标的和含交易建议的成分，并把没有原文定位的"重大"成分降为"中等"。评级不改
+逐篇抽取（抽取缓存版本号不变），评级失败只让简报不带成分、不让简报失败。开关打开后，每日简报还会给 observe 名单里属于
+产业链层成员或命题证人的 9 家出**轻量简报**，只为事件成分服务，不触发基本面。
+
 ### 9.2 Fundamental 例行模式
 
 例行模式在新 InformationBrief、产业链事实或预期数据发生有效变化时运行：
@@ -630,6 +670,17 @@ Information Analyst 处理的是多类信息资产，因此公开角色名不使
 Fundamental 不读取 Sector 或 Macro 报告，也不调用最终组合 pre-trade check。
 上下游信号必须以共享事实或 Data Product 形式输入，不能通过另一个分析师的观点绕过依赖约束。
 
+### 9.4 Fundamental 重大事件评审与公司风险项（event-impact-routing）
+
+财报以外的重大事件另有第三种产出 `FundamentalMaterialReview`（任务 `fundamental-material`，模式 `material`，触发
+`material_development`）。它由简报里被评为重大及以上的"本公司"事件成分触发，回答：碰到了论点里的哪一条、哪个风险项或证伪
+条件；论点状态（稳定 / 承压 / 被证伪）；预期影响是改季度数字还是只改风险溢价；方向、幅度、信心；待核验项；对成分重要性的复核。
+它**只评估公司特有的部分**，整层共同影响归层次分析；有效期 14 天，同一事件有新进展时重新发布。Chief 读取时与例行更新或财报
+事件评审**并列**，不参与那两者的二选一。没有财报基线的标的照样评审，信心上限 0.3。
+
+公司风险项 `FundamentalRiskRegister` 是全年有效的公司特有风险清单（关键人、治理、客户集中度、监管个案等），每项带证伪条件。
+上线时为每个 target 初始化一次，此后每次建立财报基线时刷新；刷新失败只记日志，沿用上一版。实现见 `agents/fundamental/material.py`。
+
 ## 10. Chief—Risk—Boss—Trader 审批链
 
 ### 10.1 决策快照
@@ -637,6 +688,19 @@ Fundamental 不读取 Sector 或 Macro 报告，也不调用最终组合 pre-tra
 Chief 开始决策时必须固定一份 `research_snapshot`，其中列出每个被要求角色的
 projection ID、content hash、as-of 和新鲜度状态，以及这次决策读取的业务 scope（不再记录路由与资格状态）。Loop 默认不重跑分析师；若研究快照本身失效，
 当前 cycle 应转为 `superseded` 或人工处理，不在原 revision 中偷换研究输入。
+
+**可选类别：重大事件评审（event-impact-routing）。** 决策档案文件（`config/workflow/decision_profiles.yaml`）顶层的
+`optional_categories.ai_hardware` 登记 `fundamental_material: fundamental_material_review`（放在 `profiles` 之外：计划会哈希档案本身，放进去会让已冻结的周期恢复时报配置漂移）。快照构建时，对计划里的每个标的取最新
+一份重大事件评审：已发布、在 `valid_until` 内、距今不超过 14 天，且它引用的每个事件成分仍能在已发布的信息简报里
+找到，才冻结进快照的 `optional_items`；过期或血缘失效（简报已撤或成分不在）的不进入，原因写进 `optional_excluded`。
+可选类别**不计缺口**、**不进 `items`**，所以快照是否完整、严格的固定输入校验（`decision_requirements.validate`）
+与此前完全一致；单份失效只剔除该份，不阻断周期。财报口径的基本面（例行 / 事件评审，每个标的二选一）不受影响。
+没有评审时，快照的存储形状不变（不写这两个键）。
+
+**事件簇对齐。** Chief 上下文另有「重大事件评审（可选类别）」与「事件簇对齐」两块（`agents/chief/assemble.py` 的
+`material_block`、`event_alignment_block`）。对齐在代码里完成：按 `component_refs` 回查信息简报里的事件簇，把同一簇下的
+重大事件评审、层次分析的风险命题 / 论点外冲击 / 补认领、以及行业配置中引用这些命题或冲击编号的 `downgrade_reasons`
+归在一个「事件簇」标题下，并标明各自认领的成分编号。Chief skill 写明：同一事件簇的多份评估是一件事的不同部分，不得重复计算。
 
 ### 10.2 Revision 和风控
 
@@ -877,4 +941,10 @@ A–F 六阶段迁移（2026-09 至 2026-10）已完成并归档在 `openspec/ch
 8. Chief—Risk 自动修订默认最多 3 轮，超过后进入 `manual_review`。
 9. 执行前市场或账户快照默认超过 60 秒即失效，需重新风控和重新人工批准。
 10. 普通分析 Workflow 由 Dispatcher 编排；LangGraph 用于 PEAD 事件流和 Chief 审批链。
-11. 本文四张 Mermaid 图是正式架构图，不在其他章节用另一套图替换。
+11. 本文四张 Mermaid 图是正式架构图，不在其他章节用另一套图替换。12. 重大事件按影响面分发（event-impact-routing，2026-11-13 定）：公司层面交基本面重大事件评审，层与跨层交层次分析
+    再接行业配置，按事件启动；Chief 不临时启动，保持每日例行，并纳入"论点外冲击"。
+13. 风险命题（`kind: risk`）按**独立来源**计数：至少 2 个独立来源、其中至少 1 个一手或权威；经营命题门槛不变。
+14. 风险与冲击只能下调层的配置：临时复审单次最多下调一档，周六例行复审不限；`weight_cap` 与风控静态上限不变。
+15. observe 名单中的 9 家产业链成员出轻量简报，只为事件成分服务、不触发基本面。
+16. 只有"重大"及以上、首发或升级的成分触发临时复审；评级口径为"重要性 + 方向"，基准集由用户标注。
+17. 论点外冲击与重大事件评审的有效期均为 14 天；同簇有新进展时续期。

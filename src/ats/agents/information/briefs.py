@@ -116,6 +116,13 @@ def publish_information_brief(store, payload: dict, *, scope: ProjectionScope,
     violations — no partial or degraded row is ever written.
     """
     require_six_elements(payload)
+    if scope.kind == "entity":
+        # event-impact-routing: rated event components (switched off by default; no request when off).
+        from .event_components import attach
+
+        payload, component_refs = attach(store, payload, symbol=scope.id.upper())
+        if component_refs:
+            input_refs = [*(input_refs or []), *component_refs]
     facts = payload.get('fact_changes') or []
     source_indices = verified_source_fact_indices(payload)
     # Summary is a program-owned projection of exactly those facts, not an

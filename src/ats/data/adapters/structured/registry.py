@@ -134,7 +134,37 @@ def _ramp_ai_index():
     if not export_dir:
         from ....config import REPO_ROOT
         export_dir = str(REPO_ROOT / "var" / "data" / "ramp_exports")
-    return RampAIIndexAdapter(export_dir=export_dir)
+    return RampAIIndexAdapter(export_dir=export_dir, fred_values=_ramp_fred_values,
+                              browser=_ramp_browser(export_dir))
+
+
+def _ramp_fred_values() -> dict[tuple[str, str], float]:
+    """Latest accepted FRED value per (entity, month), for cross-checking page rows FRED already covers."""
+    import json
+
+    from ...runtime import get_platform_structured_repository
+
+    rows = get_platform_structured_repository().observations(
+        dataset_id="ramp_ai_adoption", source_id="ramp_ai_index_fred", latest_only=True,
+        accepted_only=True, limit=100_000)
+    values: dict[tuple[str, str], float] = {}
+    for row in rows:
+        if json.loads(row.get("dimensions_json") or "{}").get("methodology_regime") == "ramp_ai_index_v2":
+            values[(str(row["entity_id"]), str(row["period"])[:7])] = float(row["value"])
+    return values
+
+
+def _ramp_browser(export_dir: str):
+    """The headless runner, when its optional dependency is installed; otherwise no browser at all."""
+    from ...sources.ramp_browser_runner import browser_adapter_or_none
+
+    return browser_adapter_or_none(export_dir)
+
+
+def _ramp_ai_index_fred():
+    from ...sources.ramp_ai_index_fred import RampAIIndexFredAdapter
+
+    return RampAIIndexFredAdapter()
 
 
 def _openrouter_rankings():
@@ -179,6 +209,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "rps_genai_adoption": RuntimeSourceSpec("rps_genai_adoption", _rps_genai_adoption, discovery_group="ai_adoption"),
     "ramp_ai_index": RuntimeSourceSpec("ramp_ai_index", _ramp_ai_index,
                                        discovery_group="ai_adoption"),
+    "ramp_ai_index_fred": RuntimeSourceSpec("ramp_ai_index_fred", _ramp_ai_index_fred,
+                                            discovery_group="ai_adoption"),
     "openrouter_rankings": RuntimeSourceSpec(
         "openrouter_rankings", _openrouter_rankings,
         discovery_group="ai_commercialization"),

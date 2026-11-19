@@ -314,3 +314,59 @@ def test_official_body_revision_is_separate_from_index_metadata(tmp_path, monkey
         assert third["no_change"] == 1
     finally:
         store.close()
+
+
+def test_filing_without_earnings_release_is_not_applicable_and_never_retried(tmp_path, monkeypatch):
+    """An 8-K whose complete submission was read and carries no release is an answer, not a quarantine
+    (2026-11-19: AAOI / WDC 8-Ks kept a run `quarantined` and the dashboard red while nothing was wrong)."""
+    store = _store(tmp_path, monkeypatch)
+    monkeypatch.setattr(fixed_sources, "_hf_snapshot", lambda _policy: {
+        "revision": "a" * 40, "spec_sha256": "b" * 64,
+        "file_sha256": "c" * 64, "file_updated_at": NOW.isoformat(),
+        "source_url": "https://huggingface.co/example.parquet"})
+    filing = {"symbol": "AAOI", "cik": "1158114", "accession_number": "0001104659-26-129055",
+              "company_name": "APPLIED OPTOELECTRONICS, INC.", "form_type": "8-K", "filing_date": "2026-09-20",
+              "filing_url": "https://www.sec.gov/Archives/edgar/data/1158114/000110465926129055"}
+    monkeypatch.setattr(fixed_sources, "_query_hf", lambda *_a, **_k: [filing])
+    calls = []
+
+    def fetch(row, _transport):
+        calls.append(row["accession_number"])
+        return SecFetchResult(status="missing", stage="complete_submission"), "company_release"
+
+    monkeypatch.setattr(fixed_sources, "fetch_filing", fetch)
+    try:
+        fixed_sources.ingest_documents("defeatbeta_sec_filing_index", entity="AAOI", now=NOW, store=store)
+        first = fixed_sources.ingest_documents("sec_edgar_filing_body", entity="AAOI", now=NOW, store=store)
+        assert first["status"] == "no_change"
+        assert (first["not_applicable"], first["quarantined"], first["accepted"]) == (1, 0, 0)
+        outcome = store.conn.execute(
+            "SELECT outcome, reason FROM data_fixed_source_attempts WHERE natural_key=?",
+            (filing["accession_number"],)).fetchone()
+        assert tuple(outcome) == ("not_applicable", "sec_not_release:8-K")
+        later = fixed_sources.ingest_documents(
+            "sec_edgar_filing_body", entity="AAOI", now=NOW + timedelta(days=1), store=store)
+        assert later["discovered"] == 0 and calls == [filing["accession_number"]]
+    finally:
+        store.close()
+
+
+def test_missing_index_stage_is_still_a_quarantine(tmp_path, monkeypatch):
+    """Only a READ complete submission is conclusive; an index without the expected document keeps the retry rule."""
+    store = _store(tmp_path, monkeypatch)
+    monkeypatch.setattr(fixed_sources, "_hf_snapshot", lambda _policy: {
+        "revision": "a" * 40, "spec_sha256": "b" * 64,
+        "file_sha256": "c" * 64, "file_updated_at": NOW.isoformat(),
+        "source_url": "https://huggingface.co/example.parquet"})
+    filing = {"symbol": "GOOG", "cik": "1652044", "accession_number": "0001652044-26-000084",
+              "company_name": "Alphabet Inc.", "form_type": "10-Q", "filing_date": "2026-09-20",
+              "filing_url": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084"}
+    monkeypatch.setattr(fixed_sources, "_query_hf", lambda *_a, **_k: [filing])
+    monkeypatch.setattr(fixed_sources, "fetch_filing", lambda row, _t: (
+        SecFetchResult(status="missing", stage="filing_index"), "regulatory_filing"))
+    try:
+        fixed_sources.ingest_documents("defeatbeta_sec_filing_index", entity="GOOG", now=NOW, store=store)
+        first = fixed_sources.ingest_documents("sec_edgar_filing_body", entity="GOOG", now=NOW, store=store)
+        assert first["status"] == "quarantined" and first["not_applicable"] == 0
+    finally:
+        store.close()

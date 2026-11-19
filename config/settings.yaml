@@ -18,9 +18,13 @@ llm:
   max_retries: 3
   # 估算单价（美元 / 百万 token），只在供应商响应里没有费用时用来估算看板上的成本（标"估算"）。
   # OpenRouter 的响应自带费用，一般用不到；DeepSeek 直连（evidence_adjudicator）没有，需按官网价填写。
-  # 未填写的模型，看板费用显示"未知"，不按 0 计。示例：
-  #   deepseek-v4-flash: {input: 0.0, output: 0.0}
-  prices: {}
+  # 未填写的模型，看板费用显示"未知"，不按 0 计。
+  # 2026-11-19 用户提供：DeepSeek V4.1 Flash 输入 $0.035 / 输出 $0.15 每百万 token。
+  # 注意：同日 OpenRouter 实际计费约为此价的 3.3 倍（22 次调用 $0.0162 vs 估算 $0.0049），
+  # 所以 OpenRouter 调用一律以响应自带的费用为准，此价只在缺费用时兜底估算。
+  prices:
+    deepseek/deepseek-v4.1-flash-1017: {input: 0.035, output: 0.15}
+    deepseek-v4-flash: {input: 0.035, output: 0.15}   # DeepSeek 直连（evidence_adjudicator），按同一模型计
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
     # 2026-10-17 max_tokens / reasoning audit. Reasoning tokens are billed and counted INSIDE max_tokens on

@@ -28,6 +28,13 @@ ET = ZoneInfo("America/New_York")
 HEARTBEAT_JOB_ID = "heartbeat"
 HEARTBEAT_SECONDS = 30
 
+# A research workflow that ends `incomplete` is run again after these waits (seconds, one per retry), each wait
+# counted from the end of the previous run. Technical is code only (no model calls) and reuses every reading
+# already made in the session, so a retry re-downloads only the names that failed. 11-13 and 11-17 two names
+# lost their prices to a ~30 s proxy burst at 08:30 NY and the 09:45 Chief cycle stopped; two retries at
+# +10 and +15 minutes end well before it (2026-11-19).
+INCOMPLETE_RETRY_SECONDS: dict[str, tuple[int, ...]] = {"technical-review": (600, 900)}
+
 
 def _now_et() -> datetime:
     return datetime.now(ET)
@@ -131,6 +138,49 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
     resumed = {workflow_id: resumed_at(workflow_id) for workflow_id in trade_entries}
     policies = load_trigger_policies()
 
+    from . import alerts
+
+    retry_scheduler: dict = {}   # set once the scheduler exists; `run_once` has none and does not retry
+
+    def after_research(workflow_id: str, entry: dict, planned: datetime, result: dict, attempt: int) -> None:
+        """Retry an incomplete research run, or alert once its retries are used up."""
+        delays = INCOMPLETE_RETRY_SECONDS.get(workflow_id, ())
+        if result.get("status") != "incomplete" or not delays:
+            return
+        scheduler = retry_scheduler.get("scheduler")
+        if scheduler is not None and attempt < len(delays):
+            from datetime import timedelta
+            from apscheduler.triggers.date import DateTrigger
+
+            delay = delays[attempt]
+            log.warning("workflow %s incomplete (%s); retry %d in %d s", workflow_id, ", ".join(
+                str(item.get("scope")) for item in result.get("missing_requirements") or []), attempt + 1, delay)
+            scheduler.add_job(retry_research, DateTrigger(run_date=datetime.now(timezone.utc) + timedelta(
+                seconds=delay)), args=(workflow_id, entry, planned, attempt + 1),
+                id=f"retry:{workflow_id}:{planned.isoformat()}:{attempt + 1}", replace_existing=True,
+                misfire_grace_time=None)
+            return
+        alerts.research_incomplete(workflow_id, planned, result, attempts=attempt + 1)
+
+    def run_research(workflow_id: str, entry: dict, context, planned: datetime, attempt: int) -> None:
+        result = run_owned_workflow(
+            workflow_id, scope=entry["scope"], trigger=context,
+            request={"requested_tasks": list(entry["task_ids"]),
+                     "task_inputs": {"schedule_id": workflow_id}}, now=_now_et())
+        log.info("workflow %s -> %s%s", workflow_id, result.get("status"),
+                 f" (retry {attempt})" if attempt else "")
+        after_research(workflow_id, entry, planned, result, attempt)
+
+    def retry_research(workflow_id: str, entry: dict, planned: datetime, attempt: int) -> None:
+        # A manual trigger with a fixed id: the retry is a run of its own (the scheduled tick's key already
+        # holds the incomplete run), and a replay of the same retry finds that retry's run.
+        context = TriggerContext(kind="manual", workflow_id=workflow_id,
+                                 trigger_id=f"retry-incomplete:{workflow_id}:{planned.isoformat()}:{attempt}")
+        try:
+            run_research(workflow_id, entry, context, planned, attempt)
+        except Exception:  # noqa: BLE001
+            log.exception("workflow %s retry %d failed", workflow_id, attempt)
+
     def dispatch_tick(workflow_id: str, entry: dict, planned: datetime) -> None:
         context = TriggerContext(kind="schedule", workflow_id=workflow_id,
                                  schedule_id=workflow_id,
@@ -142,14 +192,16 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
             if workflow_id in trade_entries:
                 result = run_trade_workflow(workflow_id, entry, context, now=planned)
                 log.info("workflow %s -> %s", workflow_id, result.get("status") or result.get("outcome"))
+                if workflow_id == "chief-daily" and result.get("outcome") == "research_incomplete":
+                    alerts.chief_blocked(planned, result)
+                elif workflow_id == "chief-daily" and result.get("outcome") == "manual_review":
+                    alerts.chief_manual_review(planned, result)
                 return
-            result = run_owned_workflow(
-                workflow_id, scope=entry["scope"], trigger=context,
-                request={"requested_tasks": list(entry["task_ids"]),
-                         "task_inputs": {"schedule_id": workflow_id}}, now=_now_et())
-            log.info("workflow %s -> %s", workflow_id, result.get("status"))
-        except Exception:  # noqa: BLE001
+            run_research(workflow_id, entry, context, planned, 0)
+        except Exception as exc:  # noqa: BLE001
             log.exception("workflow %s failed", workflow_id)
+            if workflow_id in trade_entries:
+                alerts.trade_workflow_failed(workflow_id, planned, exc)
 
     if run_once:
         now = datetime.now(timezone.utc)
@@ -165,6 +217,7 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
     from apscheduler.triggers.cron import CronTrigger
 
     scheduler = BlockingScheduler(timezone="UTC", executors={"default": ThreadPoolExecutor(1)})
+    retry_scheduler["scheduler"] = scheduler
     _attach_job_logging(scheduler)
     _add_heartbeat(scheduler)
     job_to_workflow = {}

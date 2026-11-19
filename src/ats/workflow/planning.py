@@ -356,6 +356,24 @@ FUNDAMENTAL_TASKS = ("fundamental-routine", "fundamental-event")
 MAX_UNCOVERED_FUNDAMENTAL = 4
 
 
+def _technical_uncovered(task_inputs: dict[str, Any] | None) -> set[str]:
+    """Entities a decision plan states as having no fresh Technical reading (2026-11-19, user ruling B).
+
+    One symbol's price download failing must not stop the whole book: the name is left out of the plan's
+    Technical tasks, stated in the snapshot, and the risk review rejects every order on it this cycle.
+    """
+    return {str(e).upper() for e in (task_inputs or {}).get("technical_uncovered") or []}
+
+
+def _check_technical_coverage(uncovered: set[str], scopes: list[ProjectionScope]) -> None:
+    entities = {item.id.upper() for item in scopes}
+    if uncovered - entities:
+        raise ContractError("technical_uncovered names entities outside the Technical scope: "
+                            + ", ".join(sorted(uncovered - entities)))
+    if entities and uncovered >= entities:
+        raise ContractError("every Technical entity is uncovered: an outage blocks as missing, not a gap")
+
+
 def _fundamental_modes(task_inputs: dict[str, Any] | None) -> dict[str, str] | None:
     """Per-entity Fundamental mode frozen into a decision plan, or None (one mode for all)."""
     raw = (task_inputs or {}).get("fundamental_modes")
@@ -497,6 +515,9 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
 
     root = _config_dir(config_dir)
     modes = _fundamental_modes(task_inputs)
+    technical_uncovered = _technical_uncovered(task_inputs)
+    if technical_uncovered and "technical-review" in ordered_task_ids:
+        _check_technical_coverage(technical_uncovered, _scopes("technical-review", scope, _config_dir(config_dir)))
     if modes is not None:
         # A mode no target uses has no instance in this plan.
         ordered_task_ids = [task_id for task_id in ordered_task_ids
@@ -549,6 +570,8 @@ def build_plan(*, requested_tasks: Iterable[str], scope: ProjectionScope,
         task_instances: list[TaskInstance] = []
         for item_scope in _scopes(task_id, scope, root):
             if modes is not None and task_id in FUNDAMENTAL_TASKS and modes.get(item_scope.id) != task_id:
+                continue
+            if task_id == "technical-review" and item_scope.id.upper() in technical_uncovered:
                 continue
             key = f"{namespace}:{task_id}:{item_scope.key}:{config_version_hash[:12]}"
             dependencies: list[str] = []

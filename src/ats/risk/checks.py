@@ -140,6 +140,7 @@ def review_revision(
     llm_comment: str | None = None,
     cycle_id: str = "",
     uncovered_fundamental: frozenset[str] | set[str] = frozenset(),
+    uncovered_technical: frozenset[str] | set[str] = frozenset(),
 ) -> DecisionRiskReview:
     """Review one revision without modifying it. Deterministic fields decide.
 
@@ -227,6 +228,15 @@ def review_revision(
                 rule_id="action_vocabulary", entity=sym, actual=str(decision.action),
                 detail=str(exc)))
             _reject(sym, action, [str(exc)])
+            continue
+
+        # A name the cycle states as having no fresh Technical reading gets no order at all this cycle, in either
+        # direction (2026-11-19, user ruling B): the cycle ran without it rather than stopping the whole book.
+        if sym.upper() in uncovered_technical:
+            violations.append(RiskViolation(
+                rule_id="technical_uncovered", entity=sym, severity="hard",
+                detail="本轮该标的技术面读数缺失或过期，本轮不对它出任何订单"))
+            _reject(sym, action, ["technical_uncovered: 技术面缺失，本轮该标的不出单"])
             continue
 
         # A name the cycle states as having no current Fundamental research may be held or reduced, never opened or

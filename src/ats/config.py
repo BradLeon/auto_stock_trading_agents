@@ -126,6 +126,9 @@ class LLMConfig(BaseModel):
     timeout_seconds: int = 120
     max_retries: int = 3
     routing: dict[str, LLMRoleConfig] = Field(default_factory=dict)
+    # model -> {input, output} USD per million tokens. Only used to ESTIMATE a call's cost when the
+    # provider's response carries none (llm/telemetry.py); a model without a price shows cost "unknown".
+    prices: dict[str, dict[str, float]] = Field(default_factory=dict)
 
     def for_role(self, role: str) -> LLMRoleConfig:
         """Merge defaults with any per-role override."""

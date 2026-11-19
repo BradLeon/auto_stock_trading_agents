@@ -119,6 +119,10 @@ def build_app():
         yield
 
     app = FastAPI(title="ats approval webhook", lifespan=lifespan)
+    # Local read-only operations dashboard (ops-observability-dashboard); refuses tunnelled requests.
+    from .dashboard.routes import mount as mount_dashboard
+
+    mount_dashboard(app)
 
     @app.get("/health")
     def health():

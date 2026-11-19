@@ -16,6 +16,11 @@ llm:
   max_tokens: 4096
   timeout_seconds: 120
   max_retries: 3
+  # 估算单价（美元 / 百万 token），只在供应商响应里没有费用时用来估算看板上的成本（标"估算"）。
+  # OpenRouter 的响应自带费用，一般用不到；DeepSeek 直连（evidence_adjudicator）没有，需按官网价填写。
+  # 未填写的模型，看板费用显示"未知"，不按 0 计。示例：
+  #   deepseek-v4-flash: {input: 0.0, output: 0.0}
+  prices: {}
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
     # 2026-10-17 max_tokens / reasoning audit. Reasoning tokens are billed and counted INSIDE max_tokens on

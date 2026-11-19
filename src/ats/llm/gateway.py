@@ -74,7 +74,7 @@ def get_model(role: str, reasoning: Any = None) -> Any:
         timeout=cfg.app.llm.timeout_seconds,
         max_retries=cfg.app.llm.max_retries,
         # Logs id/usage/finish per call and flags output that reached max_tokens (see llm/telemetry.py).
-        callbacks=[UsageCallback(role, rc.max_tokens)],
+        callbacks=[UsageCallback(role, rc.max_tokens, model=rc.model, provider=_provider_label(rc, cfg))],
     )
 
     if rc.provider == "anthropic":
@@ -131,6 +131,13 @@ def get_model(role: str, reasoning: Any = None) -> Any:
                 if rc.structured_output_method == "json_schema" else value)
 
     raise ValueError(f"Unknown LLM provider {rc.provider!r} for role {role!r}")
+
+
+def _provider_label(rc, cfg) -> str:
+    """Who bills the call: the OpenAI-compatible wire is OpenRouter when its base URL says so."""
+    if rc.provider == "openai" and "openrouter" in (cfg.secrets.openai_base_url or ""):
+        return "openrouter"
+    return rc.provider
 
 
 def reset_model_cache() -> None:

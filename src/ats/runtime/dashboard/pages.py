@@ -62,7 +62,7 @@ font-size:12px;line-height:1.7;white-space:normal;max-width:640px}
 .cell{height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;
 text-decoration:none}
 .tree{margin:0;padding-left:18px}.tree li{margin:2px 0}
-.scroll{overflow-x:auto}table.wide{min-width:1100px}td,th{white-space:nowrap}td.wrap{white-space:normal}
+.scroll{overflow-x:auto}table.wide{min-width:1100px}td,th{white-space:nowrap}td.wrap{white-space:normal}table.inner{width:100%;border-collapse:collapse;margin:4px 0}table.inner td,table.inner th{padding:3px 6px;border-bottom:.5px solid var(--line);font-size:12px;white-space:normal;vertical-align:top}td.key{white-space:normal;word-break:break-all;max-width:220px}td.outcell{min-width:620px;white-space:normal}details.out{margin:2px 0}details.out>summary{cursor:pointer;white-space:normal}.outbox{background:var(--idlebg);border-radius:8px;padding:8px 12px;margin:4px 0 8px;font-size:12px;line-height:1.7;white-space:normal;max-width:900px}details.raw>summary{cursor:pointer;color:var(--acc);font-size:12px}pre.raw{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:420px;overflow:auto;background:var(--card);border-radius:6px;padding:8px}
 """
 
 _STATE_CLASS = {"complete": "green", "succeeded": "green", "incomplete": "yellow", "running": "grey",
@@ -73,16 +73,18 @@ _STRIP_COLOR = {"succeeded": "var(--ok)", "no_change": "#b4b2a9", "quarantined":
                 "failed": "var(--bad)", "discovery_only": "#b4b2a9"}
 
 
-def layout(title: str, active: str, body: str, *, now: datetime | None = None) -> str:
+def layout(title: str, active: str, body: str, *, now: datetime | None = None, refresh: bool = True) -> str:
     now = (now or datetime.now(timezone.utc)).astimezone(TZ)
     links = [("/dashboard", "总览", "overview"), ("/dashboard/sources", "数据源", "sources"),
              ("/dashboard/workflows", "流程", "workflows"), ("/dashboard/lineage", "决策溯源", "lineage")]
     nav = "".join(f'<a href="{h}" class="{"on" if k == active else ""}">{t}</a>' for h, t, k in links)
     return (f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
-            f'<meta http-equiv="refresh" content="60"><title>{escape(title)} · 运维看板</title>'
+            + ('<meta http-equiv="refresh" content="60">' if refresh else '') +
+            f'<title>{escape(title)} · 运维看板</title>'
             f'<style>{_CSS}</style></head><body><nav><b style="margin-right:8px">运维看板</b>{nav}'
-            f'<span class="t">{now:%m-%d %H:%M:%S} 台北 · 每 60 秒刷新</span></nav><main>{body}</main></body></html>')
+            f'<span class="t">{now:%m-%d %H:%M:%S} 台北 · {"每 60 秒刷新" if refresh else "已结束，不自动刷新"}</span>'
+            f'</nav><main>{body}</main></body></html>')
 
 
 def t(at: datetime | None, *, date_only: bool = False) -> str:
@@ -328,11 +330,18 @@ def run_page(d: dict, catalog: dict, now: datetime) -> str:
             f'<p>{label(n)}{note(n)} {pill(STATUS_CN.get(run["status"], run["status"]), _STATE_CLASS.get(run["status"], "grey"))}'
             f' · 开始 {escape((run.get("started_at") or "")[:19])} · 结束 {escape((run.get("ended_at") or "")[:19])}（UTC）'
             f' · 作用域 <span class="mono">{escape(str(req.get("scope") or ""))}</span></p>')
+    from .outputs import task_outputs
+
+    def detail(x) -> str:
+        if x["status"] == "succeeded":
+            return task_outputs(x)
+        code = f'<span class="mono">{escape(x.get("error_code") or "")}</span> ' if x.get("error_code") else ""
+        return code + escape((x.get("error_detail") or "")[:300]) + (task_outputs(x) if x.get("outputs") else "")
+
     tasks = "".join(
-        f"<tr><td class=mono>{escape(x['task_instance_key'] or x['task_id'])}</td><td>{x['attempt_no']}</td>"
+        f"<tr><td class='mono key'>{escape(x['task_instance_key'] or x['task_id'])}</td><td>{x['attempt_no']}</td>"
         f"<td>{pill(STATUS_CN.get(x['status'], x['status']), _STATE_CLASS.get(x['status'], 'yellow' if x['status'] in ('missing', 'blocked', 'stale') else 'grey'))}</td>"
-        f"<td>{_seconds(x['seconds'])}</td>"
-        f"<td class=mono>{escape(x.get('error_code') or '')}</td><td class=wrap>{escape((x.get('error_detail') or '')[:300])}</td></tr>"
+        f"<td>{_seconds(x['seconds'])}</td><td class=outcell>{detail(x)}</td></tr>"
         for x in d["tasks"])
     missing = "".join(f"<li><b>{escape(str(m.get('kind', '')))}</b> <span class=mono>{escape(str(m.get('scope', '')))}</span> "
                       f"{escape(str(m.get('detail', ''))[:400])}</li>" for m in d["missing"])
@@ -341,15 +350,18 @@ def run_page(d: dict, catalog: dict, now: datetime) -> str:
                   f"<td>{money(c['cost']) if not c['unknown'] else (money(c['cost']) + '（部分未知）' if c['cost'] else '未知')}"
                   f"{' 估算' if 'estimate' in (c['sources'] or '') else ''}</td></tr>" for c in d["llm"])
     body = [head,
-            f'<div class="card scroll"><h2 style="margin-top:0">任务</h2><table><tr><th>任务</th><th>尝试</th><th>状态</th>'
-            f'<th>耗时</th><th>错误码</th><th>说明</th></tr>{tasks}</table></div>']
+            f'<div class="card scroll"><h2 style="margin-top:0">任务</h2>'
+            f'<p class="muted">成功的任务点开看产出：摘要在前，再点“查看完整内容”看原始字段。标“复用”的是沿用此前生成的产出。</p>'
+            f'<table><tr><th>任务</th><th>尝试</th><th>状态</th>'
+            f'<th>耗时</th><th>产出 / 说明</th></tr>{tasks}</table></div>']
     if missing:
         body.append(f'<div class="card"><h2 style="margin-top:0">缺失的必需输入</h2><ul>{missing}</ul></div>')
     body.append('<div class="card scroll"><h2 style="margin-top:0">模型调用</h2>' +
                 (f'<table><tr><th>角色</th><th>模型</th><th>次数</th><th>输入 token</th><th>输出 token</th><th>推理 token</th>'
                  f'<th>费用</th></tr>{llm}</table>' if llm else
                  '<p class="muted">没有入账记录（入账上线前的运行，或本次运行没有调用模型）。</p>') + "</div>")
-    return layout(wid, "workflows", "".join(body), now=now)
+    finished = run.get("status") not in ("planned", "running")
+    return layout(wid, "workflows", "".join(body), now=now, refresh=not finished)
 
 
 # --------------------------------------------------------------------------- #

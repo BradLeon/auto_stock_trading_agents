@@ -245,3 +245,74 @@ def test_note_renders_as_click_to_open_and_missing_is_flagged():
     html = pages.note(n)
     assert "<details" in html and "<b>是什么：</b>HS8542" in html and "<b>坏了影响：</b>缺证人" in html
     assert "缺说明" in pages.note(None) and "缺说明" in pages.note(queries.Note())
+
+
+# --------------------------------------------------------------------------- #
+# task outputs on the run page
+# --------------------------------------------------------------------------- #
+def test_run_page_shows_what_each_task_produced(var):
+    ats = _db(var / "ats.sqlite", """
+        CREATE TABLE workflow_runs (run_id TEXT, request_json TEXT, status TEXT, started_at TEXT, created_at TEXT,
+          ended_at TEXT, result_json TEXT);
+        CREATE TABLE agent_runs (run_id TEXT, task_instance_key TEXT, task_id TEXT, scope_json TEXT, attempt_no INTEGER,
+          status TEXT, error_code TEXT, error_detail TEXT, started_at TEXT, ended_at TEXT, projection_refs_json TEXT);
+        CREATE TABLE workflow_run_status_history (run_id TEXT);
+        CREATE TABLE task_projection_envelopes (projection_id TEXT, agent_role TEXT, scope_id TEXT, as_of TEXT,
+          created_at TEXT, status TEXT, payload TEXT, data_vintage_refs TEXT);""")
+    ats.execute("INSERT INTO workflow_runs VALUES ('run-1', ?, 'complete', '2026-11-19T13:30:00+00:00', '', "
+                "'2026-11-19T13:36:43+00:00', '{}')", (json.dumps({"requested_tasks": ["fundamental-routine"]}),))
+    tasks = [
+        ("k:fundamental-routine:GOOG", "fundamental-routine", "succeeded", ["u1", "u2"]),
+        ("k:information-brief:GOOG", "information-brief", "succeeded", ["b1"]),
+        ("k:technical-review:AAPL", "technical-review", "succeeded", ["t1"]),
+        ("k:technical-review:MSFT", "technical-review", "blocked", []),
+    ]
+    for key, task_id, status, refs in tasks:
+        ats.execute("INSERT INTO agent_runs VALUES ('run-1',?,?,'{}',1,?,?,?,'2026-11-19T13:30:10+00:00',"
+                    "'2026-11-19T13:30:20+00:00',?)",
+                    (key, task_id, status, "data_product_unhealthy" if status == "blocked" else None,
+                     "no recent price bar" if status == "blocked" else None, json.dumps(refs)))
+    envelopes = [
+        ("u1", "fundamental_expectation_update", "GOOG", "2026-11-19T13:30:15+00:00",
+         {"change_class": "确认", "explanation": "TPU出货翻倍预期", "driver": "[确认] Ming-Chi Kuo：TPU 出货翻倍",
+          "period": "Q3 FY2026", "metric": "narrative"}, ["consensus:GOOG@2026-11-19T07:00:00+00:00"]),
+        ("u2", "fundamental_expectation_update", "GOOG", "2026-11-19T13:30:15+00:00",
+         {"change_class": "新增", "explanation": "HBM定价细节", "driver": "[新增] SemiAnalysis", "period": "Q3 FY2026",
+          "metric": "narrative"}, []),
+        # created before the task started: carried over, not produced by this run
+        ("b1", "information_brief", "GOOG", "2026-11-19T13:00:05+00:00",
+         {"headline": "GOOG 信息材料更新", "relevance": "high", "source_count": 3, "sources": ["semianalysis"],
+          "fact_changes": ["SK 海力士寻求切入 Google 下一代 TPU"], "event_time": "2026-11-16T00:00:00+00:00"}, []),
+        ("t1", "technical_review", "AAPL", "2026-11-19T13:30:18+00:00",
+         {"signal": "bullish", "score": 7, "suggested_exposure": 1.0, "previous_exposure": 1.0,
+          "levels": {"close": 352.45, "sma200": 302.08}, "vix": 22.35, "vix3m": 24.29,
+          "invalidation": ["收盘价跌破 200 日线 302.08"]}, ["market-session:AAPL:2026-11-18:before-close"]),
+    ]
+    for pid, role, scope, at, payload, vintages in envelopes:
+        ats.execute("INSERT INTO task_projection_envelopes VALUES (?,?,?,?,?, 'published', ?, ?)",
+                    (pid, role, scope, at, at, json.dumps(payload, ensure_ascii=False), json.dumps(vintages)))
+    ats.commit()
+    detail = queries.run_detail(_paths(var), "run-1")
+    by_key = {t["task_instance_key"]: t for t in detail["tasks"]}
+    assert [o["projection_id"] for o in by_key["k:fundamental-routine:GOOG"]["outputs"]] == ["u1", "u2"]
+    assert by_key["k:information-brief:GOOG"]["outputs"][0]["reused"] is True
+    assert by_key["k:technical-review:AAPL"]["outputs"][0]["reused"] is False
+
+    html = pages.run_page(detail, {"workflows": {}}, NOW)
+    assert "2 条预期更新 · 新增 1 / 确认 1" in html and "TPU出货翻倍预期" in html
+    assert "一致预期 GOOG · 采集 11-19 07:00" in html                       # vintages, as in the Chief report
+    assert "沿用 11-19 13:00 UTC 生成的产出" in html and "GOOG 信息材料更新" in html
+    assert "看多 · 评分 7/7 · 建议敞口上限 100%" in html and "收盘价跌破 200 日线 302.08" in html
+    assert "查看完整内容（原始字段）" in html
+    assert "data_product_unhealthy" in html and "no recent price bar" in html
+    assert 'http-equiv="refresh"' not in html                                 # a finished run does not reload
+
+
+def test_unknown_role_falls_back_to_a_field_list():
+    from ats.runtime.dashboard.outputs import task_outputs
+
+    html = task_outputs({"outputs": [{"projection_id": "x", "role": "new_role", "scope_id": "", "as_of": None,
+                                      "created_at": None, "payload": {"summary": "新角色的结论", "items": [1, 2]},
+                                      "vintages": [], "reused": False}]})
+    assert "新角色的结论" in html and "2 项" in html
+    assert "已不在库中" in task_outputs({"outputs": [{"projection_id": "gone", "missing": True}]})

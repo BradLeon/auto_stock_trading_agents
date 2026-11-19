@@ -509,8 +509,9 @@ def run_detail(paths: DashboardPaths, run_id: str) -> dict | None:
             return None
         run = found[0]
         tasks = _rows(ac, "SELECT task_instance_key, task_id, scope_json, attempt_no, status, error_code, "
-                          "error_detail, started_at, ended_at FROM agent_runs WHERE run_id = ? "
+                          "error_detail, started_at, ended_at, projection_refs_json FROM agent_runs WHERE run_id = ? "
                           "ORDER BY started_at, attempt_no", (run_id,))
+        _attach_outputs(ac, tasks)
         history = _rows(ac, "SELECT * FROM workflow_run_status_history WHERE run_id = ? ORDER BY rowid", (run_id,))
         calls = _rows(ac, "SELECT role, model, count(*) AS n, sum(input_tokens) AS input_tokens, "
                           "sum(output_tokens) AS output_tokens, sum(reasoning_tokens) AS reasoning_tokens, "
@@ -530,6 +531,41 @@ def run_detail(paths: DashboardPaths, run_id: str) -> dict | None:
         request = {}
     return {"run": run, "request": request, "tasks": tasks, "history": history, "llm": calls,
             "missing": result.get("missing_requirements") or []}
+
+
+def _attach_outputs(conn, tasks: list[dict]) -> None:
+    """Each task's projections (what it produced), oldest first, with vintages described and reuse marked.
+
+    A projection created before the task started was carried over, not produced by this run: the Dispatcher
+    reuses an unchanged projection instead of re-running the analyst, and the page must not present it as new.
+    """
+    from ...agents.provenance import describe_vintage_ref
+
+    for t in tasks:
+        refs = _json(t.pop("projection_refs_json", None)) or []
+        refs = [r for r in refs if isinstance(r, str)]
+        t["outputs"] = []
+        if not refs:
+            continue
+        marks = ",".join("?" * len(refs))
+        rows = _rows(conn, f"SELECT projection_id, agent_role, scope_id, as_of, created_at, status, payload, "
+                           f"data_vintage_refs FROM task_projection_envelopes WHERE projection_id IN ({marks})",
+                     tuple(refs))
+        by_id = {r["projection_id"]: r for r in rows}
+        started = parse_time(t.get("started_at"))
+        for pid in refs:
+            r = by_id.get(pid)
+            if r is None:
+                t["outputs"].append({"projection_id": pid, "missing": True})
+                continue
+            created = parse_time(r["created_at"])
+            vintages = [x for x in (describe_vintage_ref(v) for v in _json(r["data_vintage_refs"]) or []
+                                    if isinstance(v, str)) if x]
+            t["outputs"].append({
+                "projection_id": pid, "role": r["agent_role"], "scope_id": r["scope_id"],
+                "as_of": parse_time(r["as_of"]), "created_at": created, "status": r["status"],
+                "payload": _json(r["payload"]) or {}, "vintages": vintages,
+                "reused": bool(started and created and created < started - timedelta(seconds=1))})
 
 
 def llm_daily(paths: DashboardPaths, days: int = 14, now: datetime | None = None) -> list[dict]:

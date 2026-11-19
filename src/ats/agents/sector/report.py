@@ -154,7 +154,7 @@ def _cn():
 
 
 def render_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=None,
-                 rows=None) -> str:
+                 rows=None, source_stamps=None) -> str:
     """One layer's report. **Conclusions first** — evidence and reasoning come after.
 
     Section 1 must be enough to act on: how much this layer gets, and how it splits
@@ -174,8 +174,8 @@ def render_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=
 
     lines = [f"# 🤖 {layer.label}（{cfg.label}）— 层级分析（{verdict.as_of:%Y-%m-%d}）", ""]
     lines += _section_conclusion(verdict, layer, cfg, basket, pead)
-    lines += _section_claim_evidence(common, by_claim, verdict)
-    lines += _section_cross_section(layer, basket, relative, by_claim, rows)
+    lines += _section_claim_evidence(common, by_claim, verdict, source_stamps)
+    lines += _section_cross_section(layer, basket, relative, by_claim, rows, source_stamps)
     lines += _section_name_rationale(verdict, pead)
     lines += _section_candidates(verdict)
     lines += ["", "---",
@@ -248,7 +248,7 @@ def _budget_derivation(verdict, cap: float, budget: float | None) -> str:
     return base
 
 
-def _section_claim_evidence(common, by_claim, verdict) -> list[str]:
+def _section_claim_evidence(common, by_claim, verdict, source_stamps=None) -> list[str]:
     lines = ["## 二、议题证据链", ""]
     if not verdict.has_claims:
         return lines + ["⚠️ **本层没有任何命题** —— 这是**配置缺口**（该建的命题还没建），"
@@ -279,15 +279,18 @@ def _section_claim_evidence(common, by_claim, verdict) -> list[str]:
         lines.append("")
         judged = [j for j in a.judgements if j.polarity != "neutral" or j.reason]
         if judged:
-            lines += ["| | 说话人 | 维度 | 判读理由 |", "|---|---|---|---|"]
+            from ..provenance import stamp_cell
+
+            lines += ["| | 说话人 | 维度 | 判读理由 | 来源 · 信息时间 |", "|---|---|---|---|---|"]
             for j in judged:
                 lines.append(f"| {POLARITY_MARK.get(j.polarity, '・')} | {j.speaker or '—'} "
-                             f"| {j.concept or '—'} | {j.reason or '—'} |")
+                             f"| {j.concept or '—'} | {j.reason or '—'} "
+                             f"| {stamp_cell(j.observation_ids, source_stamps)} |")
             lines.append("")
     return lines
 
 
-def _section_cross_section(layer, basket, relative, by_claim, rows) -> list[str]:
+def _section_cross_section(layer, basket, relative, by_claim, rows, source_stamps=None) -> list[str]:
     lines = ["## 三、截面明细", ""]
     if basket is None or not basket.rows:
         return lines + ["（本轮未产出截面：取数失败或本层无可排序标的。）", ""]
@@ -331,11 +334,15 @@ def _section_cross_section(layer, basket, relative, by_claim, rows) -> list[str]
             lines += ["（本期无逐家读数）", ""]
             continue
         _, basis_cn, standing_cn = _cn()
-        lines += ["| 公司 | 位置 | 依据强度 | 说话人 | 判读理由 |", "|---|---|---|---|---|"]
+        from ..provenance import stamp_cell
+
+        lines += ["| 公司 | 位置 | 依据强度 | 说话人 | 判读理由 | 来源 · 信息时间 |",
+                  "|---|---|---|---|---|---|"]
         for r in a.entity_readings:
             lines.append(f"| **{r.entity}** | {standing_cn.get(r.standing, r.standing)} "
                          f"| {basis_cn.get(r.basis, r.basis)} | {'、'.join(r.speakers) or '—'} "
-                         f"| {r.reason or '—'} |")
+                         f"| {r.reason or '—'} "
+                         f"| {stamp_cell(r.key_observation_ids or r.observation_ids, source_stamps)} |")
         graded = [r for r in a.entity_readings if r.standing != "unknown"]
         if graded and all(r.basis == "self_reported" for r in graded):
             lines.append("")
@@ -409,7 +416,7 @@ def _section_candidates(verdict) -> list[str]:
 
 @publication_report
 def write_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=None,
-                rows=None) -> Path | None:
+                rows=None, source_stamps=None) -> Path | None:
     """Write one layer's report. A same-day rerun gets a new `-vN` file, never replaces the earlier one."""
     if not cfg.output_dir:
         log.info("layer report: output_dir unset — skipped")
@@ -421,7 +428,8 @@ def write_layer(verdict, layer, cfg: SectorConfig, *, basket=None, assessments=N
     safe = layer.label.replace("/", "／").replace(" ", "")
     path = unique_path(folder / f"层分析-{cfg.label}-{safe}-{verdict.as_of:%Y-%m-%d}.md")
     path.write_text(render_layer(verdict, layer, cfg, basket=basket,
-                                 assessments=assessments, rows=rows), encoding="utf-8")
+                                 assessments=assessments, rows=rows,
+                                 source_stamps=source_stamps), encoding="utf-8")
     return path
 
 

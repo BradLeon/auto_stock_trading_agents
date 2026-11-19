@@ -92,6 +92,7 @@ class ExpectationSet(BaseModel):
     consensus_rating_summary: str = ""            # e.g. "强买5/买12/持有2/卖0"
     consensus_recent_actions: list[str] = Field(default_factory=list)  # last 3 upgrades/downgrades
     consensus_note: str = ""                      # why the estimates are blank (period/freshness check), else ""
+    consensus_as_of: str = ""                     # when the consensus snapshot was taken (ISO), "" = not recorded
     valuation: str = ""                       # PE / fwd PE / ceiling-floor note
 
 

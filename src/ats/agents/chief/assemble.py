@@ -69,7 +69,8 @@ def build(*, projection_manifest=None, query_plan=None, account=None,
         query_plan=query_plan)
     if not snapshot.complete:
         raise ReadUnavailable("required Chief projections unavailable: " + gap_report(snapshot, detail))
-    ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail, focus=fundamental_focus)
+    ctx.blocks["研究快照（六类投影）"] = projection_context_block(detail, focus=fundamental_focus,
+                                                                 at=ctx.as_of)
     if snapshot.optional_detail or snapshot.optional_excluded:
         ctx.blocks["重大事件评审（可选类别）"] = material_block(snapshot)
     ctx.blocks["事件簇对齐"] = event_alignment_block(store, detail, snapshot.optional_detail)
@@ -703,7 +704,8 @@ def event_alignment_block(store, detail: list[dict], material: list[dict]) -> st
     return "\n".join(out)
 
 
-def projection_context_block(detail: list[dict], focus: dict | None = None) -> str:
+def projection_context_block(detail: list[dict], focus: dict | None = None,
+                             at: datetime | None = None) -> str:
     """The analysts' categories rendered FROM projections (7.4) — never from legacy tables.
 
     A category with no usable projection is listed as 缺失, never omitted and
@@ -726,8 +728,10 @@ def projection_context_block(detail: list[dict], focus: dict | None = None) -> s
             return f"- {label}: **缺失**（{', '.join(sorted(reasons))}；{len(rows)} 个作用域均不可用）"
         best = max(fresh, key=lambda r: r["as_of"])
         scopes, usable = {r["scope"] for r in rows}, {r["scope"] for r in fresh}
-        head = (f"- {label}: {len(usable)}/{len(scopes)} 个作用域可用 · 最新 "
-                f"{best['projection_id'][:18]}… @ {best['as_of']}")
+        # No id here: a truncated id was copied by the Chief and failed the reference audit
+        # (2026-11-16). The full id appears once, on the projection's own line below.
+        head = (f"- {label}: {len(usable)}/{len(scopes)} 个作用域可用 · 最新截至 "
+                f"{best['as_of']}{_age(best['as_of'], at)}")
         payload = best.get("payload") or {}
         if task_id == "layer_analysis":
             head += f" · status={payload.get('status')} · {payload.get('summary', '')[:80]}"
@@ -799,7 +803,8 @@ def projection_context_block(detail: list[dict], focus: dict | None = None) -> s
     # The information brief is the analysts' source material, not an opinion:
     # it stays in the frozen snapshot (lineage, freshness) but is not shown.
     lines.extend(
-        f"- {d['role']} [{d['scope']}] {d['status']} · {d['projection_id']} "
+        f"- {d['role']} [{d['scope']}] {d['status']} · as_of={d.get('as_of') or '—'}"
+        f"{_age(d.get('as_of'), at)} · {d['projection_id']} "
         f"sha256={d['content_hash']} · " + json.dumps(
             {k: v for k, v in (d.get("payload") or {}).items() if k not in _BOOKKEEPING},
             ensure_ascii=False)
@@ -817,6 +822,16 @@ def material_block(snapshot) -> str:
              for d in snapshot.optional_detail]
     lines += [f"- 未纳入 {x['scope']} {x.get('projection_id') or ''}：{x['reason']}" for x in snapshot.optional_excluded]
     return "\n".join(lines)
+
+
+def _age(as_of, at: datetime | None) -> str:
+    """`（距本轮 4.5 天）` — how old a projection is when the Chief reads it."""
+    from ..provenance import age_text, parse_time
+
+    stamp = parse_time(as_of)
+    if at is None or stamp is None:
+        return ""
+    return f"（距本轮 {age_text(stamp, at).removesuffix('前')}）"
 
 
 # Research the Chief does not read directly (see projection_context_block).

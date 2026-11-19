@@ -31,5 +31,11 @@
     - 映射到命题维度的：DOWJONES → L5 138 条；SEMIANALYSIS → L5 145 条；TRENDFORCE → L4 54、L5 123、L6 266、L7 131、L8 49 条。
     - 同一文章版本被抽取超过一次的：0。
     - 过程修复：队列白名单补登 `article-evidence-observe`（首次启动被拒，未发请求）；"读过但无可抽事实"不再记为待重试（首批 16 篇行情快讯）。记录与输出在 `var/manual_fixes/article-backfill-20261113/`。
-- [ ] 3.3 观察一次真实定时触发。验证：三个任务账本为成功（或成功的 partial）；相关层的报告出现这三个见证方的新观测。
+- [x] 3.3 观察一次真实定时触发。验证：三个任务账本为成功（或成功的 partial）；相关层的报告出现这三个见证方的新观测。
   - 2026-11-13（UTC 22:3x）`article_evidence_ibkr_news_daily` 首次真实运行：`succeeded / partial_budget_deferred: 2 relevant articles left for the next run (request cap 20)`，新增 DOWJONES 观测 115 条（7 条映射到命题维度）。TrendForce、SemiAnalysis 两个周任务待 11-16（周一）首次运行后再勾选。
+  - 2026-11-19 核对，三个任务都已有真实定时运行，账本为成功或无新内容：
+    - `article_evidence_trendforce_weekly` 11-16 `no_change / nothing_new_in_scope`；
+    - `article_evidence_semianalysis_weekly` 11-16 `succeeded`，新观测 12 条；
+    - `article_evidence_ibkr_news_daily` 11-13、11-14、11-16 `succeeded`（11-16 那次抽取 19 篇、143 条观测），11-15、11-17、11-18 `no_change`。
+  - 层报告：11-14 的命题评估里，TRENDFORCE 是 L4–L8 的说话人，DOWJONES、SEMIANALYSIS 是 L5 的说话人。
+  - 遗留（不在本 change 范围）：上游 `ibkr_news_daily` 在 11-14、11-15、11-17、11-18 以 `article_source_partial` 失败，11-16 之后没有新的道琼斯文章入库，所以 11-17、11-18 的证人任务无可抽内容。这是已登记的 ibkr_news 采集缺陷。

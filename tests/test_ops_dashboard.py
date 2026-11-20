@@ -45,6 +45,15 @@ def test_light_thresholds_follow_slo():
     assert queries.light_for(True, 4, NOW - timedelta(days=5), NOW) == "red"
     assert queries.light_for(True, 4, None, NOW) == "red"
     assert queries.light_for(False, 4, None, NOW) == "grey"
+    # 2026-11-21: a failure is never shown as normal, however fresh the last healthy run is
+    assert queries.assess(True, 5, NOW - timedelta(days=2.4), NOW, consecutive_failures=1) == (
+        "yellow", "最近一次运行失败")
+    assert queries.assess(True, 5, NOW - timedelta(days=2.4), NOW, consecutive_failures=2) == (
+        "red", "连续失败 2 次")
+    assert queries.assess(True, 4, NOW - timedelta(days=5), NOW)[1].startswith("已超 SLO")
+    # a weekly job on day 6.4 of a 10-day SLO is on schedule; on day 8.5 it missed a run
+    assert queries.assess(True, 10, NOW - timedelta(days=6.4), NOW, interval_days=7)[0] == "green"
+    assert queries.assess(True, 10, NOW - timedelta(days=8.5), NOW, interval_days=7)[0] == "yellow"
     assert queries.worst(["green", "yellow", "grey"]) == "yellow"
 
 
@@ -85,7 +94,8 @@ def test_source_rows_three_clocks_and_no_change_counts_as_healthy(var):
     assert sec.last_new_at.date().isoformat() == "2026-10-10"
     assert (sec.data_time.kind, sec.data_time.at.date().isoformat()) == ("入库", "2026-11-16")
     news = by_id["ibkr_news_daily"]
-    assert news.light == "yellow" and news.consecutive_failures == 2 and news.last_reason == "article_source_partial"
+    assert news.light == "red" and news.consecutive_failures == 2 and news.last_reason == "article_source_partial"
+    assert news.light_reason == "连续失败 2 次"
     assert (news.data_time.kind, news.data_time.at.astimezone(timezone.utc).date().isoformat()) == ("采集", "2026-11-16")
     assert news.history[-1] == ("2026-11-18", "failed")
     # a job with no runs in the window and no healthy run at all is red, never silently green
@@ -316,3 +326,28 @@ def test_unknown_role_falls_back_to_a_field_list():
                                       "vintages": [], "reused": False}]})
     assert "新角色的结论" in html and "2 项" in html
     assert "已不在库中" in task_outputs({"outputs": [{"projection_id": "gone", "missing": True}]})
+
+
+
+def test_sources_page_puts_problems_first_and_folds_the_full_list(var):
+    from types import SimpleNamespace
+
+    def row(job_id, light, failures=0, reason=""):
+        return SimpleNamespace(
+            job_id=job_id, group=job_id.split(".")[0], entity="", domain="derived", schedule="daily", slo_days=5,
+            enabled=True, sources=(), last_status="failed" if failures else "succeeded", last_reason="",
+            last_window="", last_at=None, last_healthy_at=NOW - timedelta(days=2), last_new_at=None,
+            consecutive_failures=failures, data_time=queries.DataTime(), light=light, light_reason=reason,
+            history=[])
+
+    rows = [row("calendar_bea_daily", "red", 2, "连续失败 2 次"), row("macro_series_daily", "green"),
+            row("calendar_fomc_daily", "yellow", 1, "最近一次运行失败")]
+    groups = [queries.SourceGroup(r.group, r.domain, [r]) for r in rows]
+    html = pages.sources_page(groups, {"jobs": {}}, NOW)
+    top, rest = html.split("全部 3 个采集点", 1)
+    assert "需要处理 2 项" in top and "calendar_bea_daily" in top and "calendar_fomc_daily" in top
+    assert top.index("calendar_bea_daily") < top.index("calendar_fomc_daily")      # 异常 before 注意
+    assert "macro_series_daily" not in top and "macro_series_daily" in rest           # healthy rows folded
+    assert "连续失败 2 次" in top and "异常" in top
+    only = pages.sources_page(groups, {"jobs": {}}, NOW, only="issues")
+    assert "macro_series_daily" not in only

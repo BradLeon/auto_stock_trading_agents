@@ -142,21 +142,42 @@ class SourceRow:
     consecutive_failures: int = 0
     data_time: DataTime = field(default_factory=DataTime)
     light: str = "grey"        # green / yellow / red / grey
+    light_reason: str = ""
     history: list[tuple[str, str]] = field(default_factory=list)   # (window_date, status), oldest first
 
 
-def light_for(enabled: bool, slo_days: int, last_healthy_at: datetime | None, now: datetime) -> str:
-    """Q3: older than the SLO is red, older than half of it yellow; disabled is grey."""
+def assess(enabled: bool, slo_days: int, last_healthy_at: datetime | None, now: datetime,
+           consecutive_failures: int = 0, interval_days: float = 0) -> tuple[str, str]:
+    """(light, reason). Freshness against the SLO (Q3) AND what the latest attempts did.
+
+    2026-11-21 (user): three calendar jobs showed 正常 next to a red 失败 because the light only looked at
+    the age of the last healthy run (2.4 days on a 5-day SLO). A failure is now never shown as normal:
+    - red: past the SLO, never healthy, or 2+ consecutive failures;
+    - yellow: the latest attempt failed, or a scheduled run is overdue — older than the job's own interval
+      plus one day, and never earlier than half of the SLO (a weekly job on day 6 of a 10-day SLO is on
+      schedule, not a warning: 17 weekly jobs sat yellow every week under the bare half-SLO line);
+    - green otherwise; a disabled job is grey.
+    """
     if not enabled:
-        return "grey"
+        return "grey", "已停用"
     if last_healthy_at is None:
-        return "red"
+        return "red", "从未正常运行"
     age = (now - last_healthy_at).total_seconds() / 86_400
     if age > slo_days:
-        return "red"
-    if age > slo_days / 2:
-        return "yellow"
-    return "green"
+        return "red", f"已超 SLO：距最近正常运行 {age:.1f} 天 > {slo_days} 天"
+    if consecutive_failures >= 2:
+        return "red", f"连续失败 {consecutive_failures} 次"
+    if consecutive_failures == 1:
+        return "yellow", "最近一次运行失败"
+    due = max(slo_days / 2, interval_days + 1) if interval_days else slo_days / 2
+    if age > due:
+        return "yellow", f"已错过计划运行：距最近正常运行 {age:.1f} 天（SLO {slo_days} 天）"
+    return "green", ""
+
+
+def light_for(enabled: bool, slo_days: int, last_healthy_at: datetime | None, now: datetime,
+              consecutive_failures: int = 0) -> str:
+    return assess(enabled, slo_days, last_healthy_at, now, consecutive_failures)[0]
 
 
 _LIGHT_ORDER = {"red": 0, "yellow": 1, "green": 2, "grey": 3}
@@ -257,7 +278,8 @@ def source_rows(paths: DashboardPaths, now: datetime | None = None, days: int = 
         row.last_healthy_at = parse_time((healthy.get(job.id) or {}).get("completed_at"))
         row.last_new_at = parse_time((new.get(job.id) or {}).get("completed_at"))
         row.data_time = _job_data_time(job, times, row)
-        row.light = light_for(job.enabled, job.freshness_slo_days, row.last_healthy_at, now)
+        row.light, row.light_reason = assess(job.enabled, job.freshness_slo_days, row.last_healthy_at, now,
+                                             row.consecutive_failures, _interval_days(job))
         out.append(row)
     return out
 
@@ -272,6 +294,20 @@ def _job_data_time(job, times: dict[str, DataTime], row: SourceRow) -> DataTime:
     if job.domain == "derived":
         return DataTime("产出", row.last_new_at)
     return DataTime()
+
+
+def _interval_days(job) -> float:
+    """How often the job is scheduled to run, in days (0 = unknown: fall back to the half-SLO line)."""
+    schedule = str(getattr(job, "schedule", "") or "")
+    if schedule == "daily":
+        return 1
+    if schedule == "weekly":
+        return 7
+    if schedule == "monthly":
+        return 31
+    if schedule.startswith("every_"):
+        return float(getattr(job, "interval_days", 0) or 0)
+    return 0
 
 
 @dataclass

@@ -30,8 +30,8 @@ ramp-browser = [
 ]
 # Installed as phases land; kept optional so Phase 1/2 stay lightweight.
 data = [
-    "yfinance>=0.2.40",
-    "curl_cffi>=0.15",   # browser TLS impersonation for yfinance (avoids Yahoo rate-limits)
+    "yfinance>=1.8.0",   # 1.8.0: Ticker.news moved to the GraphQL endpoint; 1.7.0's /xhr/ncp returns 404 (2026-11-20)
+    "curl_cffi>=0.17",   # browser TLS impersonation for yfinance (avoids Yahoo rate-limits); yfinance 1.8.0 needs >=0.17
     "edgartools>=3.0",
     "fredapi>=0.5",
     "praw>=7.7",

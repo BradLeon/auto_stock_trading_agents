@@ -23,7 +23,17 @@ STATUS_CN = {
     "approved": "已批准", "approved_not_executed": "批准未执行", "manual_review": "待人工复核",
     "superseded": "被取代", "approval_rejected": "已驳回", "executed": "已执行",
 }
-LIGHT_CN = {"green": "正常", "yellow": "临近", "red": "逾期", "grey": "停用"}
+LIGHT_CN = {"green": "正常", "yellow": "注意", "red": "异常", "grey": "停用"}
+_LIGHT_RANK = {"red": 0, "yellow": 1, "green": 2, "grey": 3}
+
+
+def _needs_attention(r) -> bool:
+    return r.enabled and r.light in ("red", "yellow")
+
+
+def _light_cell(r) -> str:
+    reason = getattr(r, "light_reason", "")
+    return f"{pill(LIGHT_CN[r.light], r.light)}" + (f'<div class="muted wrapcell">{escape(reason)}</div>' if reason else "")
 DOMAIN_CN = {"structured": "结构化", "unstructured": "非结构化", "derived": "派生"}
 
 _CSS = """
@@ -62,7 +72,7 @@ font-size:12px;line-height:1.7;white-space:normal;max-width:640px}
 .cell{height:28px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:11px;
 text-decoration:none}
 .tree{margin:0;padding-left:18px}.tree li{margin:2px 0}
-.scroll{overflow-x:auto}table.wide{min-width:1100px}td,th{white-space:nowrap}td.wrap{white-space:normal}table.inner{width:100%;border-collapse:collapse;margin:4px 0}table.inner td,table.inner th{padding:3px 6px;border-bottom:.5px solid var(--line);font-size:12px;white-space:normal;vertical-align:top}td.key{white-space:normal;word-break:break-all;max-width:220px}td.outcell{min-width:620px;white-space:normal}details.out{margin:2px 0}details.out>summary{cursor:pointer;white-space:normal}.outbox{background:var(--idlebg);border-radius:8px;padding:8px 12px;margin:4px 0 8px;font-size:12px;line-height:1.7;white-space:normal;max-width:900px}details.raw>summary{cursor:pointer;color:var(--acc);font-size:12px}pre.raw{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:420px;overflow:auto;background:var(--card);border-radius:6px;padding:8px}
+.scroll{overflow-x:auto}table.wide{min-width:1100px}td,th{white-space:nowrap}td.wrap{white-space:normal}.wrapcell{white-space:normal;max-width:180px}table.inner{width:100%;border-collapse:collapse;margin:4px 0}table.inner td,table.inner th{padding:3px 6px;border-bottom:.5px solid var(--line);font-size:12px;white-space:normal;vertical-align:top}td.key{white-space:normal;word-break:break-all;max-width:220px}td.outcell{min-width:620px;white-space:normal}details.out{margin:2px 0}details.out>summary{cursor:pointer;white-space:normal}.outbox{background:var(--idlebg);border-radius:8px;padding:8px 12px;margin:4px 0 8px;font-size:12px;line-height:1.7;white-space:normal;max-width:900px}details.raw>summary{cursor:pointer;color:var(--acc);font-size:12px}pre.raw{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:420px;overflow:auto;background:var(--card);border-radius:6px;padding:8px}
 """
 
 _STATE_CLASS = {"complete": "green", "succeeded": "green", "incomplete": "yellow", "running": "grey",
@@ -141,13 +151,13 @@ def overview_page(ov: dict, catalog: dict) -> str:
                                   f'<div class="v" style="color:{color}">{v}</div></div>')
     llm = (ov.get("llm_today") or [{}])[-1] if ov.get("llm_today") else {}
     parts = ['<h1>总览</h1><div class="kpis">',
-             kpi("数据源 正常", c.get("green", 0), "var(--ok)"), kpi("临近 SLO", c.get("yellow", 0), "var(--warn)"),
-             kpi("逾期", c.get("red", 0), "var(--bad)"), kpi("停用", c.get("grey", 0)),
+             kpi("数据源 正常", c.get("green", 0), "var(--ok)"), kpi("注意", c.get("yellow", 0), "var(--warn)"),
+             kpi("异常", c.get("red", 0), "var(--bad)"), kpi("停用", c.get("grey", 0)),
              kpi("今日模型调用", f'{llm.get("n") or 0} 次 · {money(llm.get("cost")) if llm.get("n") else "$0"}'),
              "</div>"]
     jobs = catalog.get("jobs", {})
     rows = "".join(
-        f"<tr><td>{pill(LIGHT_CN[r.light], r.light)}</td>"
+        f"<tr><td>{_light_cell(r)}</td>"
         f'<td><a class="mono" href="/dashboard/sources/{quote(r.job_id)}">{escape(r.job_id)}</a>'
         f"{label(jobs.get(r.group))}{note(jobs.get(r.group))}</td>"
         f"<td>{pill(STATUS_CN.get(r.last_status, r.last_status), _STATE_CLASS.get(r.last_status, 'grey'))} "
@@ -155,7 +165,7 @@ def overview_page(ov: dict, catalog: dict) -> str:
         f"<td>{t(r.last_healthy_at)}<div class=muted>{ago(r.last_healthy_at, now)}</div></td>"
         f"<td>{r.consecutive_failures or ''}</td></tr>"
         for r in ov["attention"])
-    parts.append('<div class="card"><h2 style="margin-top:0">需要处理（红、黄与最近一次失败的置顶）</h2>'
+    parts.append('<div class="card"><h2 style="margin-top:0">需要处理（异常在前，再按连续失败次数排序）</h2>'
                  + (f'<table><tr><th>灯</th><th>采集点</th><th>最近尝试</th><th>最近正常运行</th><th>连续失败</th></tr>'
                     f'{rows}</table>' if rows else '<p class="muted">没有需要处理的采集点。</p>') + "</div>")
     wf = catalog.get("workflows", {})
@@ -205,7 +215,7 @@ def _data_time(dt, now) -> str:
 def _source_row(r, now, jobs, *, indent=False, show_note=True) -> str:
     n = jobs.get(r.group)
     name = escape(r.entity if indent else r.job_id)
-    return (f"<tr><td>{pill(LIGHT_CN[r.light], r.light)}</td>"
+    return (f"<tr><td>{_light_cell(r)}</td>"
             f'<td style="{"padding-left:24px" if indent else ""}"><a class="mono" href="/dashboard/sources/{quote(r.job_id)}">{name}</a>'
             f'{(label(n) + note(n)) if show_note else ""}</td>'
             f"<td>{escape(DOMAIN_CN.get(r.domain, r.domain))}<div class=muted>{escape(r.schedule)}</div></td>"
@@ -218,43 +228,60 @@ def _source_row(r, now, jobs, *, indent=False, show_note=True) -> str:
 
 
 def sources_page(groups, catalog: dict, now: datetime, *, only: str = "", domain: str = "") -> str:
+    """Problems first (2026-11-21, user): failing or overdue jobs on top, sorted worst first; the full grouped
+    list stays one click away instead of pushing them below a hundred healthy rows."""
     jobs = catalog.get("jobs", {})
+    rows = [r for g in groups for r in g.rows if not domain or r.domain == domain]
     total = sum(len(g.rows) for g in groups)
-    issues = sum(1 for g in groups for r in g.rows if r.light in ("red", "yellow") or r.last_status in ("failed", "quarantined"))
+    problems = sorted((r for r in rows if _needs_attention(r)),
+                      key=lambda r: (_LIGHT_RANK[r.light], -r.consecutive_failures,
+                                     r.last_healthy_at.timestamp() if r.last_healthy_at else 0, r.job_id))
     filt = lambda label_, q, on: (f'<a class="pill {"green" if on else "grey"}" style="text-decoration:none" '  # noqa: E731
                                   f'href="/dashboard/sources{q}">{label_}</a>')
-    bar = " ".join([filt(f"全部 {total}", "", not only and not domain), filt(f"只看异常 {issues}", "?only=issues", only == "issues")]
+    issues_all = sum(1 for g in groups for r in g.rows if _needs_attention(r))
+    bar = " ".join([filt(f"全部 {total}", "", not only and not domain),
+                    filt(f"只看需处理 {issues_all}", "?only=issues", only == "issues")]
                    + [filt(v, f"?domain={k}", domain == k) for k, v in DOMAIN_CN.items()])
     head = ("<tr><th>灯</th><th>采集点</th><th>类别 / 频率</th><th>最近尝试</th><th>最近正常运行</th>"
             "<th>上次拿到新数据</th><th>数据最新</th><th>SLO</th><th>连续失败</th><th>近 30 天</th></tr>")
-    body = []
-    for g in groups:
-        rows = [r for r in g.rows
-                if (not only or r.light in ("red", "yellow") or r.last_status in ("failed", "quarantined"))
-                and (not domain or r.domain == domain)]
-        if not rows:
-            continue
-        if not g.expanded:
-            body.append(_source_row(rows[0], now, jobs))
-            continue
-        bad = sum(1 for r in g.rows if r.light in ("red", "yellow"))
-        n = jobs.get(g.group)
-        body.append(f'<tr><td>{pill(LIGHT_CN[g.light], g.light)}</td><td colspan="9"><b class="mono">{escape(g.group)}</b>'
-                    f"{label(n)}{note(n)} <span class=muted>逐个标的 {len(g.rows)} 个"
-                    f"{f' · {bad} 个临近或逾期' if bad else ''}</span></td></tr>")
-        body += [_source_row(r, now, jobs, indent=True, show_note=False) for r in rows]
-    legend = ('<p class="muted">灯按“距最近一次正常运行（成功或无新数据）”对照 SLO：超过 SLO 红，超过一半黄。'
-              "“上次拿到新数据”只作参考、不参与着色——季度财报类任务在两次财报之间“无新数据”是正常的。"
-              "时间为台北时间；只有日期的是来源本身只给到日期。</p>")
-    return layout("数据源", "sources",
-                  f'<h1>数据源</h1><div>{bar}</div>{legend}<div class="card scroll"><table class="wide">{head}{"".join(body)}</table></div>',
-                  now=now)
+    red = sum(1 for r in problems if r.light == "red")
+    attention = (f'<div class="card scroll"><h2 style="margin-top:0">需要处理 {len(problems)} 项'
+                 f'<span class="muted" style="font-weight:400"> · 异常 {red} · 注意 {len(problems) - red}</span></h2>'
+                 + (f'<table class="wide">{head}{"".join(_source_row(r, now, jobs) for r in problems)}</table>'
+                    if problems else '<p class="muted">没有失败或临近 SLO 的采集点。</p>') + "</div>")
+    if only == "issues":
+        body_html = attention
+    else:
+        body = []
+        for g in groups:
+            grows = [r for r in g.rows if not domain or r.domain == domain]
+            if not grows:
+                continue
+            if not g.expanded:
+                body.append(_source_row(grows[0], now, jobs))
+                continue
+            bad = sum(1 for r in grows if _needs_attention(r))
+            n = jobs.get(g.group)
+            body.append(f'<tr><td>{pill(LIGHT_CN[g.light], g.light)}</td><td colspan="9"><b class="mono">{escape(g.group)}</b>'
+                        f"{label(n)}{note(n)} <span class=muted>逐个标的 {len(grows)} 个"
+                        f"{f' · {bad} 个需处理' if bad else ''}</span></td></tr>")
+            body += [_source_row(r, now, jobs, indent=True, show_note=False) for r in grows]
+        healthy = len(rows) - len(problems)
+        body_html = attention + (
+            f'<details class="card"{" open" if domain else ""}><summary style="cursor:pointer">'
+            f'<b>全部 {len(rows)} 个采集点</b> <span class="muted">（其中正常或停用 {healthy} 个；按类别分组，点开查看）</span>'
+            f'</summary><div class="scroll"><table class="wide">{head}{"".join(body)}</table></div></details>')
+    legend = ('<p class="muted">灯的判定：<b>异常</b> = 已超 SLO、从未正常运行，或连续失败 2 次及以上；'
+              "<b>注意</b> = 最近一次运行失败，或已错过一次计划运行（超过调度间隔 + 1 天，且不早于 SLO 一半）；其余为<b>正常</b>。"
+              "正常运行指成功或“无新数据”。“上次拿到新数据”只作参考、不参与着色——季度财报类任务在两次财报之间"
+              "“无新数据”是正常的。时间为台北时间。</p>")
+    return layout("数据源", "sources", f'<h1>数据源</h1><div>{bar}</div>{legend}{body_html}', now=now)
 
 
 def source_detail_page(job_id: str, row, runs: list[dict], catalog: dict, now: datetime) -> str:
     n = catalog.get("jobs", {}).get(row.group if row else job_id)
     head = (f'<h1 class="mono">{escape(job_id)}</h1><p>{label(n)}{note(n)}</p>' +
-            (f'<p>{pill(LIGHT_CN[row.light], row.light)} 最近正常运行 {t(row.last_healthy_at)}（{ago(row.last_healthy_at, now)}）'
+            (f'<p>{pill(LIGHT_CN[row.light], row.light)} {escape(row.light_reason)} · 最近正常运行 {t(row.last_healthy_at)}（{ago(row.last_healthy_at, now)}）'
              f' · SLO {row.slo_days} 天 · 源 <span class="mono">{escape(", ".join(row.sources))}</span></p>' if row else ""))
     trs = []
     for r in runs:

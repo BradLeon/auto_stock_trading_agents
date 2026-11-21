@@ -9,5 +9,6 @@ workflows:
   sector-review: {mode: legacy, task_ids: [sector-review]}
   fundamental-routine: {mode: legacy, task_ids: [fundamental-routine]}
   fundamental-event: {mode: legacy, task_ids: [fundamental-event]}
+  fundamental-material: {mode: legacy, task_ids: [fundamental-material]}   # event-impact-routing
   macro-review: {mode: legacy, task_ids: [macro-review]}
   technical-review: {mode: legacy, task_ids: [technical-review]}

@@ -620,7 +620,8 @@ for _consumer in _DECISION_READS:
 # --------------------------------------------------------------------------------------------------------
 TASK_CONSUMERS = {
     "information-brief": "information", "fundamental-routine": "fundamental",
-    "fundamental-event": "fundamental", "layer-review": "layer", "sector-review": "sector",
+    "fundamental-event": "fundamental", "fundamental-material": "fundamental",
+    "layer-review": "layer", "sector-review": "sector",
     "macro-review": "macro", "technical-review": "technical",
 }
 # Technical reads runtime prices, which the refresh controller does not collect: it is checked before its

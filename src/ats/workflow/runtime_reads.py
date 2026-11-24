@@ -216,8 +216,8 @@ def task_identity(plan, task):
             raise ReadUnavailable(f"business plan configuration drifted: {relative}")
     consumer = {"layer-review": "layer", "sector-review": "sector",
                 "information-brief": "information", "fundamental-routine": "fundamental",
-                "fundamental-event": "fundamental", "macro-review": "macro",
-                "technical-review": "technical"}[task.task_id]
+                "fundamental-event": "fundamental", "fundamental-material": "fundamental",
+                "macro-review": "macro", "technical-review": "technical"}[task.task_id]
     scopes = plan.task_inputs.get("read_scopes", {}) or {}
     explicit = scopes.get(task.instance_key, scopes.get(f"{consumer}:{task.scope.key}"))
     entities = consumer_entities(consumer, task.scope.kind, task.scope.id,

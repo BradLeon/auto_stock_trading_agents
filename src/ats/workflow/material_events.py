@@ -145,8 +145,12 @@ def targets(candidate: Mapping[str, Any], routes: list[dict[str, Any]], chain: M
         resolver = rule["scope_resolver"]
         if resolver == "component_entity" and candidate["scope"] == "entity":
             entity = candidate["entity"]
-            if entity not in chain["member_of"] and not _covered(entity):
-                refused.append(f"entity {entity} is not a registered target")
+            if not _covered(entity):
+                # Only Fundamental targets get a material review. A chain member that is not one (the light-brief
+                # names: AMD, 005930.KS, ...) still reaches its layer below (D2b); its brief exists for the
+                # components, not for a Fundamental view (design, 2026-11-15). Was "member OR target" until
+                # 2026-11-24, which sent those names to a material review they have no baseline or register for.
+                refused.append(f"entity {entity} is not a Fundamental target (its layer still sees the component)")
                 continue
             out += [(wf, ProjectionScope(kind="entity", id=entity)) for wf in rule["workflow_ids"]]
         elif resolver == "component_layers":
@@ -219,7 +223,7 @@ def ledger_rows(path: str | None = None, *, component_id: str = "", cluster_key:
 def _already(path: str | None, key: str, version: str) -> bool:
     with closing(_ledger(path)) as conn:
         return conn.execute("SELECT 1 FROM material_event_ledger WHERE dedupe_key=? AND event_version=? AND "
-                            "outcome IN ('triggered','deduplicated') LIMIT 1", (key, version)).fetchone() is not None
+                            "outcome IN ('triggered','deduplicated','rejected') LIMIT 1", (key, version)).fetchone() is not None
 
 
 def _task_inputs(workflow_id: str, members: list[Mapping[str, Any]], scope: ProjectionScope) -> dict[str, Any]:
@@ -259,7 +263,12 @@ def dispatch_material_developments(*, store=None, now: datetime | None = None,
     for cand in candidates(store, now=now, conf=conf):
         pairs, refused = targets(cand, routes, chain)
         for reason in refused:
-            record(ledger_path, at=now, candidate=cand, workflow_id="", scope="", key="", version="",
+            # Once per (component, reason): the same brief is rescanned every tick for `lookback_hours`, and the
+            # 2026-11-24 ledger repeated the same five refusals every 30 minutes.
+            key, version = f"rejected:{cand['brief']}#{cand['component_id']}", reason
+            if _already(ledger_path, key, version):
+                continue
+            record(ledger_path, at=now, candidate=cand, workflow_id="", scope="", key=key, version=version,
                    outcome="rejected", reason=reason)
             outcomes.append({"component": cand["component_id"], "outcome": "rejected", "reason": reason})
         for workflow_id, scope in pairs:

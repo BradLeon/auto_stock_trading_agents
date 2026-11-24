@@ -116,6 +116,7 @@ def _expectations_table(dossier) -> str:
             label = f"{label} ({w:.0%})"
         lines.append(f"| {label} | {r.metric or '—'} | {r.conservative or '—'} "
                      f"| {r.neutral or '—'} | {r.optimistic or '—'} | {r.source or '—'} |")
+    lines.append(f"\n_预期表建于本次运行 {es.as_of:%Y-%m-%d %H:%M} UTC；「依据/来源」为分析师自述，未逐条核对时间。_")
     return "\n".join(lines)
 
 
@@ -137,13 +138,25 @@ def _consensus(dossier) -> str:
         lines.append(f"| Revenue (本地货币) | **{rev_b:.1f}B** | {low_b} | {high_b} |")
     if es.consensus_target_price is not None:
         lines.append(f"| 目标价 (PT均值) | **${es.consensus_target_price:.1f}** | — | — |")
-    out = ["\n".join(lines)]
+    out = [_consensus_stamp(es), "\n".join(lines)]
     if es.consensus_rating_summary:
         out.append(f"**评级分布**: {es.consensus_rating_summary}")
     if es.consensus_recent_actions:
         out.append("**近期评级变动**:\n"
                    + "\n".join(f"- {a}" for a in es.consensus_recent_actions))
     return "\n\n".join(out)
+
+
+def _consensus_stamp(es) -> str:
+    """When the consensus snapshot was taken, and how old it was when this report ran."""
+    from ..provenance import age_text, parse_time
+
+    taken = parse_time(getattr(es, "consensus_as_of", ""))
+    if taken is None:
+        return "_共识快照采集时间未登记。_"
+    ref = parse_time(es.as_of)
+    age = f"（距本次运行 {age_text(taken, ref).removesuffix('前')}）" if ref else ""
+    return f"_共识快照采集于 {taken:%Y-%m-%d %H:%M} UTC{age}。_"
 
 
 def _market_setup(dossier) -> str:
@@ -168,6 +181,8 @@ def _market_setup(dossier) -> str:
                      else "（负 = call premium 偏高，看涨偏斜）")
         lines.append(f"- IV Skew (25Δ put-call): **{ms.iv_skew:+.1f}pts** {skew_note}")
     lines += [f"- _{note}_" for note in ms.notes]
+    if lines:
+        lines.insert(0, f"_行情与期权数据取于本次运行 {ms.as_of:%Y-%m-%d %H:%M} UTC。_\n")
     return "\n".join(lines) if lines else _NA
 
 

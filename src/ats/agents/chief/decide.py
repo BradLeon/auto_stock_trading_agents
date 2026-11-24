@@ -28,6 +28,9 @@ class ChiefResult(BaseModel):
     context_text: str = ""            # the exact context the Chief saw (for the audit report)
     outcome_note: str = ""            # why these proposals did NOT become orders, when they did not
     skipped_note: str = ""            # proposals left out of an otherwise sent batch (e.g. no usable overnight book)
+    # projection_id -> {agent_role, scope_id, as_of, vintages: [str]} for every projection in this round's
+    # snapshot; the report resolves references against it (report-source-timestamps). Empty = not resolved.
+    citations: dict[str, dict] = Field(default_factory=dict)
 
 
 def run(*, use_llm: bool = True) -> ChiefResult:

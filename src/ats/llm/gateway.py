@@ -74,7 +74,7 @@ def get_model(role: str, reasoning: Any = None) -> Any:
         timeout=cfg.app.llm.timeout_seconds,
         max_retries=cfg.app.llm.max_retries,
         # Logs id/usage/finish per call and flags output that reached max_tokens (see llm/telemetry.py).
-        callbacks=[UsageCallback(role, rc.max_tokens)],
+        callbacks=[UsageCallback(role, rc.max_tokens, model=rc.model, provider=_provider_label(rc, cfg))],
     )
 
     if rc.provider == "anthropic":
@@ -118,7 +118,14 @@ def get_model(role: str, reasoning: Any = None) -> Any:
         # OpenRouter (optional) attribution headers — harmless against vanilla OpenAI.
         headers = {"HTTP-Referer": "https://github.com/ats", "X-Title": "ats"} \
             if base_url and "openrouter" in base_url else None
-        extra = reasoning_body(rc.reasoning) if base_url and "openrouter" in base_url else None
+        extra = None
+        if base_url and "openrouter" in base_url:
+            extra = dict(reasoning_body(rc.reasoning) or {})
+            # 2026-11-19 (user): default load balancing spread one model over providers billing 1.5x-5x its
+            # listed price (3.4x on the day); `provider` preferences (e.g. sort by price) come from config.
+            if cfg.app.llm.openrouter_provider:
+                extra["provider"] = dict(cfg.app.llm.openrouter_provider)
+            extra = extra or None
         value = ChatOpenAI(
             model=rc.model,
             api_key=cfg.secrets.openai_api_key or None,
@@ -131,6 +138,13 @@ def get_model(role: str, reasoning: Any = None) -> Any:
                 if rc.structured_output_method == "json_schema" else value)
 
     raise ValueError(f"Unknown LLM provider {rc.provider!r} for role {role!r}")
+
+
+def _provider_label(rc, cfg) -> str:
+    """Who bills the call: the OpenAI-compatible wire is OpenRouter when its base URL says so."""
+    if rc.provider == "openai" and "openrouter" in (cfg.secrets.openai_base_url or ""):
+        return "openrouter"
+    return rc.provider
 
 
 def reset_model_cache() -> None:

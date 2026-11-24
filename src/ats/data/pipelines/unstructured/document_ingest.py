@@ -27,7 +27,7 @@ from ...sources.defeatbeta import snapshot as _hf_snapshot
 from ...sources.sec_submissions import discover as _edgar_discover
 from ...sources.sec_submissions import due_entities as _due_entities
 from ...stores.unstructured import get_platform_unstructured_store
-from .sec import SECSourceUnavailable, SECTransport, fetch_filing
+from .sec import FilingNotApplicable, SECSourceUnavailable, SECTransport, fetch_filing
 from .sec import validate_filing as _filing_row
 from .transcripts import parse_transcript as _transcript_row
 
@@ -224,7 +224,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
             id=source_id, label=source["provider"], adapter=source["adapter"],
             cadence=source["cadence"], entity=""), at=now)
         run_id = store.begin_ingestion(source_id, kind="fixed_source_refresh", at=now)
-        accepted = quarantined = unchanged = failed = deferred = 0
+        accepted = quarantined = unchanged = failed = deferred = not_applicable = 0
         row_ids: list[str] = []
         document_ids: list[str] = []
         coverage_missing_entities: list[str] = []
@@ -292,10 +292,13 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                          "THEN substr(attempted_at,1,10) END) missing "
                          "FROM data_fixed_source_attempts WHERE source_id=? AND outcome!='accepted' "
                          "GROUP BY natural_key), "
+                         "na AS (SELECT DISTINCT natural_key FROM data_fixed_source_attempts "
+                         "WHERE source_id=? AND outcome='not_applicable'), "
                          "okd AS (SELECT natural_key,MAX(attempted_at) last_ok "
                          "FROM data_fixed_source_attempts WHERE source_id=? AND outcome='accepted' "
                          "GROUP BY natural_key), "
-                         "ranked AS (SELECT latest.raw_json raw_json,latest.raw_json filing,latest.index_source index_source,"
+                         "ranked AS (SELECT latest.natural_key natural_key,latest.raw_json raw_json,latest.raw_json filing,"
+                         "latest.index_source index_source,"
                          "COALESCE(published.accepted,0) accepted,"
                          "COALESCE(okd.last_ok,published.last_row,'') last_ok,"
                          "MAX(COALESCE(tried.n,0),COALESCE(published.legacy_tries,0)) tries,"
@@ -303,8 +306,9 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                          "COALESCE(tried.last_try,published.last_row,'') last_try "
                          "FROM latest LEFT JOIN published USING(natural_key) LEFT JOIN tried USING(natural_key) "
                          "LEFT JOIN okd USING(natural_key) WHERE latest.rn=1) "
-                         "SELECT raw_json,index_source FROM ranked WHERE (accepted=0 AND missing<? AND tries<?) "
-                         "OR (accepted=1 AND last_ok<?) ORDER BY accepted, "
+                         "SELECT raw_json,index_source FROM ranked WHERE natural_key NOT IN (SELECT natural_key FROM na) "
+                         "AND ((accepted=0 AND missing<? AND tries<?) "
+                         "OR (accepted=1 AND last_ok<?)) ORDER BY accepted, "
                          "CASE WHEN json_extract(filing,'$.filing_date') >= date('now','-30 days') "
                          "THEN 0 ELSE 1 END, tries, last_try, "
                          "json_extract(filing,'$.filing_date') DESC LIMIT ?")
@@ -312,7 +316,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                 if entity:
                     params.append(entity.upper())
                 recheck = now - timedelta(days=int(budget.get("recheck_admitted_after_days", 7)))
-                params += [source_id, source_id, source_id, int(budget.get("max_missing_attempts", 3)),
+                params += [source_id, source_id, source_id, source_id, int(budget.get("max_missing_attempts", 3)),
                            int(budget.get("max_attempts_per_filing", 5)), _stamp(recheck),
                            int(budget["max_documents_per_run"])]
                 index_of: dict[str, str] = {}
@@ -397,6 +401,10 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                             if result.status == "unreachable" or "RequestBudgetExceeded" in failure_codes:
                                 raise SECSourceUnavailable("sec_" + result.status + ":" +
                                     result.stage + ":" + ",".join(failure_codes))
+                            if (result.status == "missing" and result.stage == "complete_submission"
+                                    and str(row.get("form_type") or "") in {"8-K", "6-K"}):
+                                # The complete submission WAS read and holds no earnings release.
+                                raise FilingNotApplicable("sec_not_release:" + str(row.get("form_type")))
                             raise ValueError("sec_" + result.status + ":" +
                                              result.stage + ":" + ",".join(failure_codes))
                         official_url, text = result.url, result.text
@@ -460,6 +468,16 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                         quarantined += 1
                     if doc_id and status == "accepted":
                         document_ids.append(doc_id)
+                except FilingNotApplicable as exc:
+                    not_applicable += 1
+                    natural_key = str(row.get("accession_number") or "invalid")
+                    _record_attempt(store, source_id=source_id, natural_key=natural_key,
+                                    outcome="not_applicable", reason=str(exc), now=now)
+                    na_row_id, _ = _record_row(
+                        store, source_id=source_id, snapshot_id=snapshot_id,
+                        entity=str(row.get("symbol") or ""), natural_key=natural_key,
+                        row=row, status="not_applicable", reason=str(exc), now=now)
+                    row_ids.append(na_row_id)
                 except (ValueError, TypeError, KeyError, SECSourceUnavailable) as exc:
                     unavailable = isinstance(exc, SECSourceUnavailable)
                     if unavailable and "RequestBudgetExceeded" in str(exc):
@@ -496,6 +514,8 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                                    accepted=accepted, quarantined=quarantined,
                                    reason_codes={**({"fixed_source_quarantine": quarantined}
                                                    if quarantined else {}),
+                                                 **({"not_applicable": not_applicable}
+                                                    if not_applicable else {}),
                                                  **({"source_unavailable": failed} if failed else {}),
                                                  **({"deferred_budget": deferred} if deferred else {}),
                                                  **({"snapshot_stale": 1}
@@ -514,7 +534,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                     "snapshot_id": snapshot_id, "row_ids": row_ids,
                     "document_ids": document_ids, "published_version_ids": versions,
                     "accepted": accepted, "quarantined": quarantined,
-                    "failed": failed,
+                    "failed": failed, "not_applicable": not_applicable, "deferred": deferred,
                     "no_change": unchanged, "discovered": len(source_rows),
                     "snapshot_stale": snapshot_stale,
                     "snapshot_lag_hours": snapshot_lag_hours,

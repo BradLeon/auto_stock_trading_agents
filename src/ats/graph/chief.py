@@ -359,6 +359,35 @@ def _consume_scores(state: ChiefDecisionState) -> None:
             log.warning("score consume failed for %s: %s", pair, exc)
 
 
+def _citation_index(state: ChiefDecisionState) -> dict[str, dict]:
+    """Every projection in this round's snapshot, with the data vintages it was built on.
+
+    Only the projections the Chief actually cited get their envelope read; a failed read
+    leaves that entry without vintages — the report still shows role, scope and as_of.
+    """
+    from ..agents.provenance import describe_vintage_ref
+
+    index = {item["projection_id"]: {k: item.get(k, "") for k in ("agent_role", "scope_id", "as_of", "task_id")}
+             for item in (state.research_snapshot or {}).get("items") or [] if item.get("projection_id")}
+    cited = set()
+    for part in ([d.references for d in state.decisions]
+                 + [h.get("references") or [] for h in (state.chief_reasoning or {}).get("holdings_review") or []]
+                 + [e.get("references") or [] for e in (state.chief_reasoning or {}).get("evidence_weighing") or []]
+                 + [a.get("references") or [] for a in state.option_actions]):
+        cited.update(part)
+    try:
+        from ..memory import get_store
+
+        store = get_store()
+        for pid in sorted(cited & index.keys()):
+            row = store.get_task_projection(pid) or {}
+            refs = row.get("data_vintage_refs") or []
+            index[pid]["vintages"] = [t for t in (describe_vintage_ref(r) for r in refs) if t]
+    except Exception as exc:  # noqa: BLE001 - the audit report must not fail on a lookup
+        log.warning("chief report: vintage lookup failed: %s", exc)
+    return index
+
+
 def _write_chief_report(state: ChiefDecisionState, outcome_note: str = "") -> None:
     if not (state.use_llm and state.decide):   # audit report; skip for stubs
         return
@@ -374,6 +403,7 @@ def _write_chief_report(state: ChiefDecisionState, outcome_note: str = "") -> No
                                           summary=state.summary, decisions=state.decisions,
                                           reasoning=state.chief_reasoning,
                                           option_actions=state.option_actions,
+                                          citations=_citation_index(state),
                                           context_text=state.context_text, outcome_note=outcome_note,
                                           skipped_note="；".join(
                                               n.removeprefix("未下单：") for n in (state.risk_notes or [])

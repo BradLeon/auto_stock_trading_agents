@@ -303,6 +303,7 @@ def _consensus_kwargs(c: dict) -> dict:
         "consensus_target_price": c.get("target_mean"),
         "consensus_rating_summary": "/".join(rating_parts),
         "consensus_recent_actions": actions,
+        "consensus_as_of": str(c.get("_data_as_of") or ""),
     }
 
 

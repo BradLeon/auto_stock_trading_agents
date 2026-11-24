@@ -27,7 +27,7 @@ def render(result: ChiefResult) -> str:
         lines += ["| 动作 | 标的 | 规模 | 限价 | 信心 | 理由 | 引用 |", "|---|---|---|---|---|---|---|"]
         for d in result.decisions:
             lines.append(f"| {d.action} | {d.symbol} | {_size(d)} | {_price(d)} | {d.conviction:.2f} "
-                         f"| {d.rationale} | {', '.join(r[:8] for r in d.references) or '—'} |")
+                         f"| {d.rationale} | {_refs(d.references, result)} |")
     else:
         lines.append("**（无行动 — 零决策）**")
     if result.option_actions:
@@ -37,7 +37,8 @@ def render(result: ChiefResult) -> str:
             roll = f"{a.get('roll_to_expiry') or ''} {a.get('roll_to_strike') or ''}".strip() or "—"
             lines.append(f"| {a['action']} | {a['symbol']} {a['expiry']} {a['strike']:g}{a['right']} "
                          f"| {a.get('contracts') or '—'} | {roll} | {a.get('rationale', '')} |")
-    lines += _reasoning_lines(result.reasoning)
+    lines += _reasoning_lines(result.reasoning, result)
+    lines += _basis_lines(result)
     if result.context_text:
         lines += ["", "---", "", "## 决策时所见的完整上下文（审计）", "",
                   "```", result.context_text, "```"]
@@ -63,18 +64,75 @@ def _price(d) -> str:
     return "市价" if d.order_type == "market" else "系统按盘口定"
 
 
-def _reasoning_lines(r: dict) -> list[str]:
+def _refs(references, result: ChiefResult) -> str:
+    """References as `来源 · 截至 · 距决策`, resolved by code against this round's snapshot.
+
+    Without a citation index (stub runs, old callers) the short ids are kept as before.
+    """
+    references = list(references or [])
+    if not references:
+        return "—"
+    if not result.citations:
+        return ", ".join(r[:8] for r in references)
+    from ..provenance import cite_projection
+
+    return "；".join(cite_projection(result.citations[r], result.as_of) if r in result.citations
+                    else f"❓ 未知引用 {r[:8]}" for r in references)
+
+
+def _cited_in_order(result: ChiefResult) -> list[str]:
+    r = result.reasoning or {}
+    seen: list[str] = []
+    for refs in ([d.references for d in result.decisions]
+                 + [h.get("references") or [] for h in r.get("holdings_review") or []]
+                 + [e.get("references") or [] for e in r.get("evidence_weighing") or []]
+                 + [a.get("references") or [] for a in result.option_actions]):
+        for ref in refs:
+            if ref not in seen:
+                seen.append(ref)
+    return seen
+
+
+def _basis_lines(result: ChiefResult) -> list[str]:
+    """依据清单: every cited projection, its as_of and age, and the data it was built on."""
+    if not result.citations:
+        return []
+    from ..provenance import cite_projection
+
+    cited = _cited_in_order(result)
+    if not cited:
+        return []
+    unknown = [r for r in cited if r not in result.citations]
+    out = ["", "## 依据清单", "",
+           f"> 时间均为 UTC；“距决策”以本轮决策时刻 {result.as_of:%Y-%m-%d %H:%M} UTC 为准；"
+           "⚠️ 表示超出该类研究的新鲜度窗口。"]
+    if unknown:
+        out.append(f"> ❓ 有 {len(unknown)} 个引用不在本轮研究快照中（未拦截，仅标出）："
+                   + "、".join(u[:8] for u in unknown))
+    out.append("")
+    for ref in cited:
+        if ref not in result.citations:
+            continue
+        item = result.citations[ref]
+        out.append(f"- {cite_projection(item, result.as_of)}　`{ref}`")
+        out += [f"    - {v}" for v in item.get("vintages") or []]
+    return out
+
+
+def _reasoning_lines(r: dict, result: ChiefResult | None = None) -> list[str]:
     if not r:
         return []
     out = ["", "## 推理", "", f"**组合判断：** {r.get('portfolio_stance', '')}", ""]
     if r.get("holdings_review"):
-        out += ["### 逐个持仓复查", "", "| 标的 | 判断 | 依据 | 冲突信号与取舍 |", "|---|---|---|---|"]
-        out += [f"| {h['symbol']} | {h['verdict']} | {h['basis']} | {h.get('conflicts') or '—'} |"
+        out += ["### 逐个持仓复查", "", "| 标的 | 判断 | 依据 | 冲突信号与取舍 | 引用 |", "|---|---|---|---|---|"]
+        out += [f"| {h['symbol']} | {h['verdict']} | {h['basis']} | {h.get('conflicts') or '—'} "
+                f"| {_refs(h.get('references'), result) if result else '—'} |"
                 for h in r["holdings_review"]]
         out.append("")
     if r.get("evidence_weighing"):
-        out += ["### 证据权衡", "", "| 来源 | 结论 | 采用 | 理由 |", "|---|---|---|---|"]
-        out += [f"| {e['source']} | {e['said']} | {e['use']} | {e['why']} |" for e in r["evidence_weighing"]]
+        out += ["### 证据权衡", "", "| 来源 | 结论 | 采用 | 理由 | 引用 |", "|---|---|---|---|---|"]
+        out += [f"| {e['source']} | {e['said']} | {e['use']} | {e['why']} "
+                f"| {_refs(e.get('references'), result) if result else '—'} |" for e in r["evidence_weighing"]]
         out.append("")
     if r.get("considered_not_taken"):
         out += ["### 考虑过但没做", ""] + [f"- {a['idea']}：{a['why_not']}" for a in r["considered_not_taken"]]

@@ -18,6 +18,15 @@ _ACCESSION = re.compile(r"^\d{10}-\d{2}-\d{6}$")
 class SECSourceUnavailable(RuntimeError):
     """Transport failure or exhausted budget, not bad source content."""
 
+
+class FilingNotApplicable(ValueError):
+    """The whole filing was read and carries no earnings release: an answer, not a defect.
+
+    An 8-K about a director change or a 6-K cover letter is not what the body job wants. It used to be recorded
+    as a quarantine and retried on three days, so a run made only of such filings reported `quarantined` and lit
+    the dashboard red while nothing was wrong (2026-11-19: AAOI, WDC 8-Ks; SKHY 6-K).
+    """
+
 def _official_url(value: str, accession: str, cik: str) -> bool:
     parsed = urlparse(value)
     digits = accession.replace("-", "")

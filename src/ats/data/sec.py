@@ -152,7 +152,13 @@ def _index_documents(page: str) -> list[SecIndexDocument]:
         if len(cells) < 4:
             continue
         hrefs = re.findall(r'href=["\']([^"\']+)', raw, re.I)
-        href = next((item for item in hrefs if "/ix?doc=" not in item), "")
+        # An inline-XBRL primary document (every large filer's 10-Q / 10-K) is linked ONLY through the viewer,
+        # `/ix?doc=/Archives/...`. Dropping that link dropped the whole row, so the primary was never found and
+        # the fallback full submission (14-15 MB for GOOG, LITE) hit the size cap: 21 periodic filings never
+        # landed (2026-11-19). The viewer's `doc` parameter is the archive file itself.
+        href = next((item for item in hrefs if "/ix?doc=" not in item), "") or next(
+            (item.split("/ix?doc=", 1)[1] for item in hrefs
+             if "/ix?doc=/Archives/" in item), "")
         size = int(cells[4].replace(",", "")) if len(cells) > 4 and \
             cells[4].replace(",", "").isdigit() else 0
         if href:

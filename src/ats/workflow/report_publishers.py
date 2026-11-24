@@ -126,8 +126,26 @@ def event_calibration_report(outcomes: list[dict], *, store_path: str | None) ->
     return {"report": "event_calibration", "status": "written", "path": str(path)}
 
 
+def material_review_report(outcomes: list[dict], *, store_path: str | None) -> dict[str, Any]:
+    """One readable report per new material-event review (event-impact-routing, 2026-11-24)."""
+    from . import material_report
+    from ..config import load_sector_config
+    from ..memory import task_store_scope
+
+    refs = _new_refs(outcomes, "fundamental-material")
+    if not refs:
+        return {"report": "material_review", "status": "skipped", "reason": "no_new_projection"}
+    folder = load_sector_config("ai_hardware").output_dir
+    if not folder:
+        return {"report": "material_review", "status": "skipped", "reason": "output_dir_unset_or_missing"}
+    with task_store_scope(store_path) as memory:
+        paths = material_report.write(memory, refs, output_dir=folder)
+    return {"report": "material_review", "status": "written" if paths else "skipped", "paths": paths}
+
+
 PUBLISHERS: Mapping[str, tuple[Callable[..., dict[str, Any]], ...]] = {
     "technical-review": (technical_report,),
+    "fundamental-material": (material_review_report,),
     "sector-review": (chain_evidence_report, event_calibration_report),
 }
 

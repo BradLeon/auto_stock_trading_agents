@@ -125,8 +125,10 @@ def test_an_unregistered_layer_is_refused_with_a_reason(env):
     assert row["outcome"] == "rejected" and "L9_quantum" in row["reason"]
 
 
-def test_off_by_default():
-    assert me.settings()["enabled"] is False
+def test_switched_off_it_does_nothing(monkeypatch):
+    """Went live 2026-11-21 (switch on); turning `routing.enabled` off must stop every trigger."""
+    monkeypatch.setattr(me, "settings", lambda config_dir=None: {"enabled": False, "min_materiality": "major",
+                                                                  "lookback_hours": 6})
     assert me.dispatch_material_developments(store=Store([]), runner=Runner()) == []
 
 
@@ -143,3 +145,34 @@ def test_one_tick_runs_each_task_and_scope_once_with_all_its_components(env):
     assert refs == ["b1#c1", "b1#c2"]
     l5 = [r for r in me.ledger_rows(env) if r["workflow_id"] == "layer-review"]
     assert {r["component_id"] for r in l5} == {"c1", "c2", "c3"} and len({r["trigger_key"] for r in l5}) == 1
+
+
+def test_a_chain_member_that_is_no_fundamental_target_reaches_only_its_layer(env, monkeypatch):
+    """2026-11-24: AMD / 005930.KS light-brief components were routed to a material review (design: layer only)."""
+    chain = {**CHAIN, "member_of": {**CHAIN["member_of"], "AMD": ["L5_chip_design"]}}
+    monkeypatch.setattr(me, "chain_index", lambda sector=me.SECTOR: chain)
+    runner = Runner()
+    store = Store([_brief("b1", "AMD", [_comp("a1", "entity", cluster="amd-x")])])
+    _run(store, env, runner)
+    assert [(wf, sc) for wf, sc, _i, _c in runner.calls] == [("layer-review", "layer:L5_chip_design"),
+                                                             ("sector-review", "sector:ai_hardware")]
+    _run(store, env, runner, now=NOW + timedelta(minutes=30))   # the same brief on the next tick
+    refused = [r for r in me.ledger_rows(env) if r["outcome"] == "rejected"]
+    assert len(refused) == 1 and "not a Fundamental target" in refused[0]["reason"]
+
+
+def test_the_read_preflight_knows_the_material_task():
+    """2026-11-24: every material review failed in production with KeyError in the read preflight."""
+    from ats.agent.task_projection import ProjectionScope
+    from ats.workflow.planning import build_plan
+    from ats.workflow.run_contracts import TriggerContext
+    from ats.workflow.runtime_reads import task_identity
+
+    plan = build_plan(requested_tasks=["fundamental-material"], scope=ProjectionScope(kind="entity", id="NVDA"),
+                      trigger=TriggerContext(kind="event", workflow_id="fundamental-material", event_id="e",
+                                             event_version="v"),
+                      as_of=NOW.isoformat(), run_id="r-test", profile_id="", enter_decision_cycle=False,
+                      task_inputs={"fundamental-material": {"component_refs": ["b#c"]}})
+    task = next(t for t in plan.tasks if t.task_id == "fundamental-material")
+    identity = task_identity(plan, task)
+    assert identity.consumer_id == "fundamental"

@@ -16,6 +16,21 @@ llm:
   max_tokens: 4096
   timeout_seconds: 120
   max_retries: 3
+  # 估算单价（美元 / 百万 token），只在供应商响应里没有费用时用来估算看板上的成本（标"估算"）。
+  # OpenRouter 的响应自带费用，一般用不到；DeepSeek 直连（evidence_adjudicator）没有，需按官网价填写。
+  # 未填写的模型，看板费用显示"未知"，不按 0 计。
+  # 2026-11-19 用户提供：DeepSeek V4.1 Flash 输入 $0.035 / 输出 $0.15 每百万 token。
+  # 注意：同日 OpenRouter 实际计费约为此价的 3.3 倍（22 次调用 $0.0162 vs 估算 $0.0049），
+  # 所以 OpenRouter 调用一律以响应自带的费用为准，此价只在缺费用时兜底估算。
+  # OpenRouter 选服务商的偏好（原样作为请求的 provider 字段）。2026-11-19 用户决定按价格路由：
+  # 默认负载均衡把同一模型分给多家服务商，实扣是宣称价的 1.5–5 倍（当日平均 3.4 倍）。
+  # sort: price = 优先最便宜的服务商，失败时仍会回退到其他家。清空即恢复默认。
+  # 2026-11-24：只按价格排会选中 4 位量化（mxfp4 / fp4）的服务商（Wafer 等），evidence_observer 74 次里 48 次
+  # 输出跑满上限被截断、并出现"没有返回工具调用"。改为只用 fp8 及以上精度，再在其中按价格挑。
+  openrouter_provider: {sort: price, quantizations: [fp8, bf16, fp16, fp32]}
+  prices:
+    deepseek/deepseek-v4.1-flash-1017: {input: 0.035, output: 0.15}
+    deepseek-v4-flash: {input: 0.035, output: 0.15}   # DeepSeek 直连（evidence_adjudicator），按同一模型计
   # Per-role overrides. Omit a role to use the defaults above.
   routing:
     # 2026-10-17 max_tokens / reasoning audit. Reasoning tokens are billed and counted INSIDE max_tokens on
@@ -85,6 +100,12 @@ llm:
     # 16,384 reasoning cap (the provider does not hold it), left ~6.3K of the 32,768 for the structured answer and was truncated
     # (zero decisions). The cap is raised and max_tokens doubled so the answer keeps >=32K even if thinking overshoots.
     # Every deepseek-v4-pro / v4-flash-0731 role moved to v4.1-flash-1017 the same day (same 1,048,576-token context, cheaper than pro).
+    # 2026-11-24 首席四模型对比（去风控、不下单，结果见 var/chief-model-compare/20261124T0236Z/）：用户评价
+    # Gemini 4 Carbon > Kimi K3.1 Pro ≈ DeepSeek V4.1 Flash；Opus 5.5 因结构化输出限制与 reasoning_extraction 拦截未能参评。
+    # 用户决定：首席暂用 DeepSeek V4.1 Flash，Gemini 4 Carbon（google/gemini-4-carbon，$2/$10 每百万 token，单次约 $0.6）为备选。
+    # 切到备选前须先做：首席单独放宽超时（Gemini 单次 514 秒 > 全局 timeout_seconds 120）；openrouter_provider 的
+    # quantizations 过滤只对多服务商开源模型生效（Gemini 只有谷歌一家，套用过滤会无可用端点）；手动跑通一次再交给定时任务。
+    # 备选：chief: {model: google/gemini-4-carbon, max_tokens: 65536, reasoning: 32768}
     chief: {model: deepseek/deepseek-v4.1-flash-1017, max_tokens: 65536, reasoning: 32768}
     risk_officer: {max_tokens: 16384}     # 组合风控官 — narrative memo over the deterministic 6-layer read
     # Fundamental routine fact-change classification. One output size standard for every ticker:

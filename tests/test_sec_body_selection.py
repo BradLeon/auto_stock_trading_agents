@@ -219,3 +219,45 @@ def test_a_filing_that_yields_no_body_gives_its_requests_back(monkeypatch):
     monkeypatch.setattr(sec.extractor, "exhibit_result", nothing_found)
     result, _ = sec.fetch_filing(_filing(9) | {"form_type": "8-K"}, transport)
     assert result.status == "missing" and transport.remaining == 20
+
+
+def test_index_keeps_inline_xbrl_primary_document():
+    """EDGAR links an inline-XBRL primary ONLY through the viewer; the row must survive (2026-11-19, GOOG 10-Q)."""
+    from ats.data import sec
+
+    page = (
+        '<table><tr><th>Seq</th><th>Description</th><th>Document</th><th>Type</th><th>Size</th></tr>'
+        '<tr><td scope="row">1</td><td scope="row">10-Q</td><td scope="row">'
+        '<a href="/ix?doc=/Archives/edgar/data/1652044/000165204426000084/goog-20260930.htm">goog-20260930.htm</a>'
+        ' &nbsp;&nbsp;<span style="color: green">iXBRL</span></td><td scope="row">10-Q</td>'
+        '<td scope="row">2530604</td></tr>'
+        '<tr class="evenRow"><td scope="row">2</td><td scope="row">EX-31.01</td><td scope="row">'
+        '<a href="/Archives/edgar/data/1652044/000165204426000084/googexhibit3101q32026.htm">x</a></td>'
+        '<td scope="row">EX-31.01</td><td scope="row">10974</td></tr></table>')
+    rows = sec._index_rows(page)
+    assert rows[0] == ("10-Q", "/Archives/edgar/data/1652044/000165204426000084/goog-20260930.htm", 2530604)
+    base = "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084"
+    assert sec._absolute_sec_url(base, rows[0][1]) == f"{base}/goog-20260930.htm"
+
+
+def test_primary_filing_uses_inline_xbrl_document_not_the_oversize_submission():
+    from ats.data import sec
+
+    base = "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000084"
+    index = ('<tr><td>1</td><td>10-Q</td><td><a href="/ix?doc=/Archives/edgar/data/1652044/'
+             '000165204426000084/goog-20260930.htm">goog-20260930.htm</a></td><td>10-Q</td><td>2530604</td></tr>')
+    body = "<html><body>" + "Alphabet Inc. quarterly report on Form 10-Q. " * 400 + "</body></html>"
+    asked = []
+
+    def transport(url, *, stage, attempts=3):
+        asked.append(url)
+        if url.endswith("-index.html"):
+            return index, ()
+        if url == f"{base}/goog-20260930.htm":
+            return body, ()
+        return "", (sec.SecFetchFailure(stage, url, "ValueError", "sec_body_over_budget"),)
+
+    with sec.document_transport(transport):
+        result = sec.primary_filing_result("1652044", "0001652044-26-000084", "10-Q", primary_url=base)
+    assert result.status == "succeeded" and result.url == f"{base}/goog-20260930.htm"
+    assert not any(url.endswith(".txt") for url in asked)

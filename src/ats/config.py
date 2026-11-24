@@ -16,7 +16,7 @@ import os
 import re
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -126,6 +126,12 @@ class LLMConfig(BaseModel):
     timeout_seconds: int = 120
     max_retries: int = 3
     routing: dict[str, LLMRoleConfig] = Field(default_factory=dict)
+    # model -> {input, output} USD per million tokens. Only used to ESTIMATE a call's cost when the
+    # provider's response carries none (llm/telemetry.py); a model without a price shows cost "unknown".
+    prices: dict[str, dict[str, float]] = Field(default_factory=dict)
+    # OpenRouter provider-routing preferences, sent as the request's `provider` object (e.g. {sort: price}).
+    # Empty = OpenRouter's default load balancing across providers. Only OpenRouter requests carry it.
+    openrouter_provider: dict[str, Any] = Field(default_factory=dict)
 
     def for_role(self, role: str) -> LLMRoleConfig:
         """Merge defaults with any per-role override."""

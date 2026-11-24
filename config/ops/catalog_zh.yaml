@@ -1,0 +1,360 @@
+# 运维看板的中文注释（ops-observability-dashboard）。
+# 看板在每个采集任务 / 流程名称旁的 ⓘ 里展示这里的内容；缺一条就显示"缺说明"，覆盖率由 tests/test_ops_catalog.py 守。
+# 键：jobs 以 config/data/schedules.yaml 的任务定义 ID 为键（逐个标的展开的任务只写一条）；workflows 以流程 ID 为键。
+# 字段：label 中文名；what 是什么；source 从哪来；used_by 谁在用；if_broken 坏了影响什么。
+# 只是说明，不参与任何判定。初稿 2026-11-19 由 Claude 依据 schedules.yaml 的 semantics 与代码消费关系起草，待用户审定。
+
+jobs:
+  # ── 结构化：L1 AI 采用与商业化 ────────────────────────────────────────────
+  ramp_ai_index_p10d_probe:
+    label: Ramp AI 指数（网页）
+    what: Ramp 发布的美国企业 AI 采用率与 AI 支出；每 10 天检查一次，只有新一期或修订才入库。
+    source: Ramp AI Index 网页（FRED 没有发布的部分）
+    used_by: L1 产业采用观测器 → 层分析 L1（应用层）
+    if_broken: L1 少一个"企业真实花钱"的证人。月度数据，SLO 35 天。
+  ramp_ai_index_fred_weekly:
+    label: Ramp AI 采用率（FRED）
+    what: FRED 上 Ramp 发布的 14 条 AI 采用率序列（总体、三家厂商、七个行业、三种企业规模）。
+    source: FRED
+    used_by: L1 产业采用观测器 → 层分析 L1
+    if_broken: L1 采用趋势轴缺读数。月度序列，周检查，SLO 10 天。
+  us_census_btos_weekly:
+    label: 美国人口普查局企业 AI 使用调查
+    what: 美国企业"过去两周是否使用 AI"的调查（BTOS），双周发布。
+    source: U.S. Census Bureau BTOS API
+    used_by: L1 产业采用观测器 → 层分析 L1
+    if_broken: L1 缺官方口径的企业采用率。SLO 10 天。
+  rps_genai_adoption_weekly:
+    label: 劳动者生成式 AI 采用率
+    what: 美国劳动者使用生成式 AI 的比例，季度发布。
+    source: FRED（Real-time Population Survey）
+    used_by: L1 产业采用观测器 → 层分析 L1
+    if_broken: L1 缺劳动者侧的采用读数。季度数据，周检查只为发布后一周内抓到。
+  anthropic_economic_index_weekly:
+    label: Anthropic 经济指数
+    what: 按职业 / 任务统计的 AI 使用分布，不定期发布。
+    source: Anthropic Economic Index 公开数据（Hugging Face 仓库）
+    used_by: L1 产业采用观测器 → 层分析 L1
+    if_broken: L1 缺"AI 在做哪些工作"的结构读数。发布不定期，长时间"无新数据"属正常。
+  openrouter_rankings_p7d_ingest:
+    label: OpenRouter 模型调用排行
+    what: OpenRouter 上各模型 / 各实验室的 token 调用量，按周汇总。
+    source: OpenRouter 排行页
+    used_by: L1 前沿实验室商业化观测器（token 经济）→ 层分析 L1
+    if_broken: L1 缺"真实调用量"这一商业化证据。SLO 10 天。
+  frontier_ai_capability_model_discovery_p7d:
+    label: 前沿模型能力 · 新模型发现
+    what: 每周发现新模型与基准测试的新版本。
+    source: 第三方基准榜单（Artificial Analysis 等公开页）
+    used_by: L1 原始能力观测器 → 层分析 L1
+    if_broken: 新模型发布后，能力曲线不会更新。
+  frontier_ai_capability_benchmark_probe_p7d:
+    label: 前沿模型能力 · 基准分数
+    what: 各基准的分数新增与修订，保留"未测"状态，不混用不可比的分组。
+    source: 第三方基准榜单
+    used_by: L1 原始能力观测器 → 层分析 L1
+    if_broken: 能力前沿的读数停在旧分数。
+  frontier_ai_capability_official_release_probe_p7d:
+    label: 前沿模型能力 · 官方发布
+    what: 实验室官方的发布与模型卡，以及其中的自报分数；不覆盖第三方测评。
+    source: 各实验室官网 / 模型卡
+    used_by: L1 原始能力观测器 → 层分析 L1
+    if_broken: 缺官方口径，只剩第三方测评。
+  frontier_ai_capability_full_audit_p7d:
+    label: 前沿模型能力 · 全量审计
+    what: 每周全量核对各实验室、基准方法与方法论指纹，发现过期就告警。
+    source: 同上各榜单
+    used_by: 数据质量自检（不直接给分析师）
+    if_broken: 方法论悄悄改变时没人发现。
+  frontier_ai_labs_revenue_p7d_refresh:
+    label: 前沿实验室收入
+    what: OpenAI、Anthropic 等实验室的年化收入估计；同期数值变化记为修订，方法论漂移只隔离新值。
+    source: Sacra、TickerTrends 公开研究
+    used_by: L1 前沿实验室商业化观测器 → 层分析 L1
+    if_broken: L1 缺"实验室赚到多少钱"的读数。
+
+  # ── 结构化：产业链区域数据 ────────────────────────────────────────────────
+  kr_semiconductor_exports_monthly:
+    label: 韩国半导体出口（月）
+    what: 韩国央行 ECOS 的半导体出口月度序列，修订值保留历史版本。
+    source: 韩国央行 ECOS
+    used_by: 产业链区域证据 → 层分析（存储 / 芯片层）；宏观分析
+    if_broken: 存储景气缺韩国出口这一第三方读数。月度数据，SLO 45 天。
+  kr_semiconductor_exports_late_monthly:
+    label: 韩国半导体出口（月末补抓）
+    what: 同上序列的月末补抓，用来接住晚于常规窗口的发布。
+    source: 韩国央行 ECOS
+    used_by: 同上
+    if_broken: 晚发布的月份要等到下个月才入库。
+  tw_ic_exports_monthly:
+    label: 台湾集成电路出口（月）
+    what: 台湾财政部公布的 HS8542（集成电路）出口金额，按月发布，修订值保留历史版本。
+    source: 台湾财政部贸易统计
+    used_by: 产业链区域证据 → 层分析（芯片需求景气）；宏观分析
+    if_broken: 失败期间层分析缺台湾出口这一证人，相关命题只剩公司口径。SLO 45 天。
+  dram_contract_price_monthly:
+    label: DRAM 合约价（月）
+    what: TrendForce 公开的 DRAM 合约价表，只算环比，不做其他推导。
+    source: TrendForce 公开价格表
+    used_by: 产业链区域证据 → 层分析 L6（存储）
+    if_broken: 存储层缺价格读数。SLO 45 天。
+
+  # ── 结构化：公司与市场 ──────────────────────────────────────────────────
+  consensus_daily:
+    label: 市场一致预期（逐股）
+    what: 每只标的的分析师一致预期：EPS / 营收均值与高低值、目标价、评级变动、历史 EPS 实际值。每次抓取存一个快照，不覆盖。
+    source: Yahoo Finance（yfinance）
+    used_by: 基本面分析师（财报前后"实际 vs 预期"的基准）；行业配置
+    if_broken: 基本面无法判断超预期 / 不及预期。SLO 3 天。
+  company_financials_weekly:
+    label: 公司财务报表（第三方，周）
+    what: 第三方整理的公司三张表；通过"完整报告包"检查的才给下游读，被拒的行隔离并显示为缺口。
+    source: DefeatBeta（Hugging Face 数据集）
+    used_by: 基本面分析师；层分析截面；行业配置
+    if_broken: 财务快照停在旧季度，截面排序用旧数。SLO 10 天。
+  company_financials_sec_daily:
+    label: 公司财务报表（SEC，逐股）
+    what: SEC Company Facts 的财务数据，每次抓取存一个版本；与第三方数据走同一道"完整报告包"检查。
+    source: SEC EDGAR Company Facts
+    used_by: 基本面分析师；层分析截面；行业配置
+    if_broken: 新财报的官方数字进不来。两次财报之间"无新数据"属正常。SLO 3 天。
+  company_financials_issuer_ir_daily:
+    label: 公司财务报表（公司 IR，逐股）
+    what: TSM、ASML、SK 海力士等不在 SEC 申报的公司，直接从公司 IR 文件取报表；比第三方新一季时优先用它。
+    source: 公司投资者关系网站文件
+    used_by: 基本面分析师；层分析截面
+    if_broken: 这几家公司的财务停在第三方的旧季度。SLO 3 天。
+  macro_series_daily:
+    label: 宏观序列
+    what: 利率、通胀、就业、信用利差等宏观序列，回看 120 天；修订值记为新版本，不覆盖。
+    source: FRED 等
+    used_by: 宏观分析师的指标表
+    if_broken: 宏观日报对应指标显示过期，宏观判断用旧读数。SLO 4 天。
+
+  # ── 非结构化：文件与文章 ────────────────────────────────────────────────
+  defeatbeta_sec_index_daily:
+    label: SEC 申报索引（第三方）
+    what: 第三方整理的 SEC 申报目录（只有元数据，不含正文），用来发现新申报。
+    source: DefeatBeta（Hugging Face 数据集）
+    used_by: SEC 正文下载任务的候选来源
+    if_broken: 少一条发现新申报的路径（EDGAR 官方发现任务仍在）。
+  sec_edgar_discovery_morning:
+    label: SEC 申报发现（早班）
+    what: 对近期（财报前 3 天到后 1 天）有财报的公司查 EDGAR 新申报，只取目录。
+    source: SEC EDGAR submissions
+    used_by: SEC 正文下载 → 基本面事件评审、产业链观测抽取
+    if_broken: 财报申报发现变慢，事件评审推迟。两次财报之间"无新数据"属正常。
+  sec_edgar_discovery_evening:
+    label: SEC 申报发现（晚班）
+    what: 同上，盘后再查一次，接住收盘后提交的申报。
+    source: SEC EDGAR submissions
+    used_by: 同上
+    if_broken: 盘后申报要等到第二天早班才发现。
+  sec_official_body_morning:
+    label: SEC 文件正文（早班）
+    what: 按已接受的 SEC 索引，从官方 HTTPS 地址下载 10-Q / 10-K / 8-K 正文。
+    source: SEC EDGAR
+    used_by: 基本面事件评审、产业链观测抽取
+    if_broken: 被隔离 = 文件下载了但未通过准入检查，下游读不到正文。SLO 3 天。
+  sec_official_body_daily:
+    label: SEC 文件正文（日班）
+    what: 同上，白天再跑一次。
+    source: SEC EDGAR
+    used_by: 同上
+    if_broken: 同上。
+  defeatbeta_transcript_daily:
+    label: 财报电话会纪要
+    what: 按标的与财季精确匹配的电话会纪要。
+    source: DefeatBeta（Hugging Face 数据集）
+    used_by: 基本面事件评审（电话会定性信号）；产业链观测抽取
+    if_broken: 事件评审只能基于新闻稿，缺管理层口径。两次财报之间"无新数据"属正常。
+  ai_hardware_knowledge_daily:
+    label: AI 硬件判据笔记
+    what: 仓库内 config/knowledge 下的判据笔记清单与内容哈希核对，不访问外网。
+    source: 本仓库文件
+    used_by: 层分析（判据笔记）
+    if_broken: 笔记改了，但层分析不知道要重算。笔记没改时"无新数据"属正常。
+  trendforce_news_weekly:
+    label: TrendForce 文章
+    what: TrendForce 公开文章的发现与正文入库；不调用模型。
+    source: TrendForce 网站
+    used_by: 文章证据抽取 → 层分析 L4–L8（TRENDFORCE 证人）
+    if_broken: L4–L8 的第三方证人停更。部分完成（预算内）记为成功。SLO 10 天。
+  semianalysis_newsletter_weekly:
+    label: SemiAnalysis 通讯
+    what: SemiAnalysis 订阅邮件 / RSS 批量入库，持久化完成后才推进邮箱游标。
+    source: 订阅邮箱（IMAP）/ RSS
+    used_by: 文章证据抽取 → 层分析 L5（SEMIANALYSIS 证人）
+    if_broken: L5 的半导体专业证人停更。SLO 10 天。
+  ibkr_news_daily:
+    label: IBKR 新闻（每日）
+    what: TWS 推送的个股新闻标题与正文；主源失败时用 Yahoo 补，补来的需人工复核。
+    source: IBKR TWS（主）/ Yahoo（备）
+    used_by: 信息简报；文章证据抽取 → 层分析（DOWJONES 证人）
+    if_broken: 信息简报变薄，层分析的道琼斯证人缺席。SLO 3 天。
+
+  # ── 派生：证据抽取与日历 ────────────────────────────────────────────────
+  chain_evidence_daily:
+    label: 产业链证据抽取（逐股）
+    what: 从该公司最新一份已确认的财报文件中抽取中立的产业链观测（谁说了什么、指标、方向、原文句子）。同一文件只抽一次，不打分、不交易。
+    source: 已入库的财报、纪要、SEC 文件
+    used_by: 层分析的"证人发言"
+    if_broken: 新财报的观测进不了层分析。季度财报之间"无新数据"是正常的；只有财报发布后仍无新数据才算异常。
+  chain_l1_governed_evidence_daily:
+    label: L1 观测器读数转证据
+    what: 三个 L1 观测器（产业采用、实验室商业化、原始能力）的读数，转成可复核的中立观测；读数不变就不重复存。
+    source: 上面各 L1 结构化数据
+    used_by: 层分析 L1
+    if_broken: L1 层分析读不到观测器的新读数。
+  chain_regional_kr_exports_weekly:
+    label: 韩国出口转证据
+    what: 把韩国半导体出口月度序列按公式（同比 / 环比方向）转成中立观测；数值不变就不新增。
+    source: 韩国半导体出口序列
+    used_by: 层分析（存储 / 芯片层）
+    if_broken: 新一期出口数据进不了层分析。
+  chain_regional_tw_exports_weekly:
+    label: 台湾出口转证据
+    what: 把台湾集成电路出口月度序列转成中立观测。
+    source: 台湾集成电路出口序列
+    used_by: 层分析（芯片层）
+    if_broken: 新一期出口数据进不了层分析。
+  chain_regional_dram_price_weekly:
+    label: DRAM 价格转证据
+    what: 把 DRAM 合约价月度序列转成中立观测。
+    source: DRAM 合约价序列
+    used_by: 层分析 L6（存储）
+    if_broken: 新一期价格进不了层分析。
+  macro_theme_news_daily:
+    label: 宏观主题新闻
+    what: 宏观主题新闻按 URL 入库，同一 URL 只存一次。
+    source: 新闻检索
+    used_by: 宏观分析师（叙事 regime）
+    if_broken: 宏观叙事用旧新闻。SLO 3 天。
+  calendar_finnhub_earnings_daily:
+    label: 财报日历（Finnhub）
+    what: PEAD 标的的财报日期与盘前 / 盘后，作为带版本的日历事件；只有元数据，没有财报数字。
+    source: Finnhub
+    used_by: 事件触发（基本面事件评审）、财报前基线窗口
+    if_broken: 新财报日期不进日历，事件评审不会被唤起。
+  calendar_yahoo_earnings_daily:
+    label: 财报日历（Yahoo 核对）
+    what: 同一批财报的具体时刻；与 Finnhub 在双方都给出的字段上必须一致，否则事件挂起等人工处理。
+    source: Yahoo Finance
+    used_by: 同上（交叉核对）
+    if_broken: 少了交叉核对，时刻错了也发现不了。
+  calendar_fomc_daily:
+    label: FOMC 会议日历
+    what: 美联储议息会议日期。
+    source: 美联储日历页
+    used_by: 宏观事件日历
+    if_broken: 宏观事件日历缺议息日。SLO 5 天。
+  calendar_bls_daily:
+    label: BLS 发布日历
+    what: CPI 与就业数据的发布日期。
+    source: 美国劳工统计局发布日历
+    used_by: 宏观事件日历
+    if_broken: 宏观事件日历缺 CPI / 非农日期。SLO 5 天。
+  calendar_bea_daily:
+    label: BEA 发布日历
+    what: PCE 与 GDP 的发布日期。
+    source: 美国经济分析局发布日程
+    used_by: 宏观事件日历
+    if_broken: 宏观事件日历缺 PCE / GDP 日期。SLO 5 天。
+  calendar_finalize_morning:
+    label: 财报落地确认（早班）
+    what: 确认日历上计划的财报是否已发布且材料已入库，确认后事件流程才能运行。
+    source: 日历 + 已入库文件
+    used_by: 基本面事件评审的触发
+    if_broken: 财报已发布，事件评审却迟迟不跑。
+  calendar_finalize_daily:
+    label: 财报落地确认（日班）
+    what: 同上，白天再确认一次。
+    source: 日历 + 已入库文件
+    used_by: 同上
+    if_broken: 同上。
+  factset_month_end_ingest:
+    label: FactSet 月末盈利洞察
+    what: 每月最后一期 FactSet Earnings Insight 报告，入库一次。
+    source: FactSet Earnings Insight（PDF）
+    used_by: 宏观、行业、层分析（盈利预期与修正）
+    if_broken: 缺"全市场盈利预期"视角。SLO 40 天。
+  article_evidence_ibkr_news_daily:
+    label: 道琼斯文章转证据
+    what: 已入库的道琼斯文章 → 中立产业链观测（只抽与 DOWJONES 证人命题相关的）；每个版本只读一次。会产生模型请求，每次有上限。
+    source: 已入库的 IBKR 新闻
+    used_by: 层分析（DOWJONES 证人）
+    if_broken: 层分析的道琼斯证人停更。没有新文章时"无新数据"属正常。
+  article_evidence_semianalysis_weekly:
+    label: SemiAnalysis 文章转证据
+    what: 已入库的 SemiAnalysis 文章全文 → 中立产业链观测；每个版本只读一次。会产生模型请求。
+    source: 已入库的 SemiAnalysis 通讯
+    used_by: 层分析 L5（SEMIANALYSIS 证人）
+    if_broken: L5 的专业证人停更。
+  article_evidence_trendforce_weekly:
+    label: TrendForce 文章转证据
+    what: 已入库的 TrendForce 文章 → 中立产业链观测（L4–L8）；每个版本只读一次。会产生模型请求。
+    source: 已入库的 TrendForce 文章
+    used_by: 层分析 L4–L8（TRENDFORCE 证人）
+    if_broken: L4–L8 的第三方证人停更。
+
+workflows:
+  information-brief:
+    label: 信息简报
+    what: 逐个标的汇总近期新闻与文件，标出事件时间、发布时间与来源数；是基本面分析的原材料，首席不直接读。
+    source: IBKR 新闻、SEC 文件、财报日历
+    used_by: 基本面例行 / 事件 / 重大事项评审
+    if_broken: 基本面分析缺最新信息。可复用 120 小时。
+  fundamental-routine:
+    label: 基本面例行
+    what: 逐个标的更新预期差判断（方向、关键指标、叙事），每个交易日早上跑。
+    source: 信息简报、财务数据、一致预期
+    used_by: 首席决策（基本面类别）
+    if_broken: 首席该标的"无新近基本面研究"：只允许持有或减仓，买入会被风控驳回。可复用 72 小时。
+  technical-review:
+    label: 技术面评审
+    what: 逐个标的的趋势、均线、建议敞口上限读数，每个交易日早上跑。
+    source: 行情数据（Yahoo / IBKR）
+    used_by: 首席决策（技术面类别）
+    if_broken: 缺技术面的标的本轮不出任何订单；全部缺失则首席整轮阻断。可复用 24 小时。
+  macro-review:
+    label: 宏观评审
+    what: 每周判断宏观 regime（象限、叙事、利率与估值压力）。
+    source: 宏观序列、宏观新闻、FactSet、区域出口
+    used_by: 首席决策（宏观类别）；行业配置
+    if_broken: 首席用上一周的宏观判断。窗口 7 天。
+  sector-review:
+    label: 行业 / 层分析（周）
+    what: 每周对 AI 硬件 8 个产业链层做证据裁决，再汇总成行业配置。
+    source: 产业链观测、判据笔记、财务与一致预期、FactSet
+    used_by: 首席决策（层分析、行业配置类别）
+    if_broken: 首席用上一周的层与行业判断。窗口 7 天。
+  layer-review:
+    label: 层分析（单层）
+    what: 单个产业链层的证据裁决；通常由行业评审带起，也可单独触发。
+    source: 产业链观测、判据笔记
+    used_by: 行业配置；首席决策
+    if_broken: 该层判断停在上一版。
+  fundamental-event:
+    label: 基本面事件评审
+    what: 财报发布后，对该公司做"实际 vs 预期"的事件评审（scorecard、电话会信号）。由财报日历触发。
+    source: 财报新闻稿、纪要、SEC 文件、财报前基线
+    used_by: 首席决策（基本面类别，事件模式）
+    if_broken: 财报后首席只能用财报前的例行判断。窗口 4 天。
+  fundamental-material:
+    label: 基本面重大事项评审
+    what: 非财报的重大事件（并购、监管、重大合同等）对单个公司的影响评审。
+    source: 新闻、公告
+    used_by: 首席决策（作为补充，与例行基本面并读）
+    if_broken: 重大事项不会进入首席视野。窗口 14 天。
+  clerk-daily:
+    label: 账务日结
+    what: 收盘后核对成交、持仓与现金，生成 Clerk 日报，登记账务异常。
+    source: IBKR 成交与持仓
+    used_by: 风控、首席决策（组合账本）
+    if_broken: 第二天风控与首席用的持仓可能不是最新。
+  chief-daily:
+    label: 首席决策（日）
+    what: 读研究快照、风控与账本，给出当日交易建议，走审批流程。
+    source: 全部分析师投影、风控姿态、组合账本
+    used_by: 你（审批）→ 执行
+    if_broken: 当天没有交易建议。紫色 = 转人工复核，需要你处理。

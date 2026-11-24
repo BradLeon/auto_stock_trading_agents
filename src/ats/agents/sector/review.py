@@ -236,11 +236,13 @@ def _run_layered(name: str, cfg, store, *, use_llm: bool, live_data: bool,
         from . import report as report_mod
 
         by_key = {b.layer_key: b for b in baskets}
+        stamps = _report_source_stamps(pending_reports)
         for layer, verdict, assessments, rows in pending_reports:
             try:
                 path = report_mod.write_layer(verdict, layer, cfg,
                                               basket=by_key.get(layer.key),
-                                              assessments=assessments, rows=rows)
+                                              assessments=assessments, rows=rows,
+                                              source_stamps=stamps)
                 if path:
                     log.info("layer report: %s", path)
             except Exception as exc:  # noqa: BLE001 - a report must not fail the run
@@ -682,3 +684,30 @@ def _to_review(name: str, cfg: SectorConfig, view: SectorReviewLLMView) -> Secto
     return SectorReview(sector=name, as_of=now, regime=view.regime, summary=view.summary,
                         layers=layers, company_calls=calls, baskets=baskets,
                         rotation_advice=view.rotation_advice, top_risks=view.top_risks)
+
+
+def _report_source_stamps(pending_reports) -> dict | None:
+    """Source document and information time of every observation the layer reports cite.
+
+    One batch for all layers, as the HTML dashboard does. A failed lookup returns None:
+    the reports still render, with the source column showing "—" (report-source-timestamps).
+    """
+    ids: set[str] = set()
+    for _layer, _verdict, assessments, _rows in pending_reports:
+        for a in assessments or []:
+            for j in a.judgements:
+                ids.update(j.observation_ids)
+            for r in a.entity_readings:
+                ids.update(r.key_observation_ids or r.observation_ids)
+    try:
+        from ...data.products import get_unstructured_read_router
+        from ..provenance import observation_sources
+
+        reader = get_unstructured_read_router(consumer="sector_agent")
+        try:
+            return observation_sources(ids, reader)
+        finally:
+            reader.close()
+    except Exception as exc:  # noqa: BLE001 - a report must not fail the run
+        log.warning("layer report: source lookup failed: %s", exc)
+        return None

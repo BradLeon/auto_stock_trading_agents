@@ -25,7 +25,9 @@ llm:
   # OpenRouter 选服务商的偏好（原样作为请求的 provider 字段）。2026-11-19 用户决定按价格路由：
   # 默认负载均衡把同一模型分给多家服务商，实扣是宣称价的 1.5–5 倍（当日平均 3.4 倍）。
   # sort: price = 优先最便宜的服务商，失败时仍会回退到其他家。清空即恢复默认。
-  openrouter_provider: {sort: price}
+  # 2026-11-24：只按价格排会选中 4 位量化（mxfp4 / fp4）的服务商（Wafer 等），evidence_observer 74 次里 48 次
+  # 输出跑满上限被截断、并出现"没有返回工具调用"。改为只用 fp8 及以上精度，再在其中按价格挑。
+  openrouter_provider: {sort: price, quantizations: [fp8, bf16, fp16, fp32]}
   prices:
     deepseek/deepseek-v4.1-flash-1017: {input: 0.035, output: 0.15}
     deepseek-v4-flash: {input: 0.035, output: 0.15}   # DeepSeek 直连（evidence_adjudicator），按同一模型计

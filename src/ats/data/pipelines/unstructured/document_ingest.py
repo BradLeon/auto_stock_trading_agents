@@ -534,7 +534,7 @@ def ingest_documents(source_id: str, *, entity: str = "", now: datetime | None =
                     "snapshot_id": snapshot_id, "row_ids": row_ids,
                     "document_ids": document_ids, "published_version_ids": versions,
                     "accepted": accepted, "quarantined": quarantined,
-                    "failed": failed, "not_applicable": not_applicable,
+                    "failed": failed, "not_applicable": not_applicable, "deferred": deferred,
                     "no_change": unchanged, "discovered": len(source_rows),
                     "snapshot_stale": snapshot_stale,
                     "snapshot_lag_hours": snapshot_lag_hours,

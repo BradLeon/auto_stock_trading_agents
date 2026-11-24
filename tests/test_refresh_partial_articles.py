@@ -111,3 +111,14 @@ def test_structured_partial_runs_that_hold_data_are_not_failures():
     assert not refresh._partial_runs_hold_data([("partial", 2, 0), ("parse_failed", 0, 0)])
     assert not refresh._partial_runs_hold_data([("succeeded", 5, 0)])           # nothing to excuse
     assert not refresh._partial_runs_hold_data([])
+
+
+def test_document_ingest_budget_only_partial_is_success_not_failure():
+    """2026-11-24: SEC body runs re-checked filings already in the library, deferred the rest to the budget and
+    published nothing new — that is the expected state, not `failed / article_source_partial`."""
+    from ats.data.refresh import _article_partial_outcome
+
+    packet = {"status": "partial", "accepted": 0, "failed": 0, "no_change": 9, "deferred": 11}
+    assert _article_partial_outcome(packet, {}) == ("succeeded", "partial_budget_deferred")
+    # a real transport failure in the same run still fails it
+    assert _article_partial_outcome({**packet, "failed": 1}, {}) == ("failed", "article_source_partial")

@@ -612,7 +612,9 @@ def _article_partial_outcome(packet: dict[str, Any], refs: dict[str, list[str]])
     - nothing was published: `failed / article_source_partial`, which the controller retries.
     """
     discovery = packet.get("discovery") or {}
-    transport_gap = bool(discovery.get("failed_slices")) or \
+    # Document ingestion (SEC bodies) reports transport failures as `failed`, not as discovery slices;
+    # without this a run whose only gap was the budget read as failed (2026-11-24, sec_official_body_*).
+    transport_gap = bool(discovery.get("failed_slices")) or int(packet.get("failed") or 0) > 0 or \
         str(discovery.get("status") or "succeeded") not in {"succeeded", "no_change"}
     if int(packet.get("deferred") or 0) > 0 and not transport_gap:
         return "succeeded", "partial_budget_deferred"

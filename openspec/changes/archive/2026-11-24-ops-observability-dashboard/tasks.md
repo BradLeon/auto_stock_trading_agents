@@ -11,6 +11,7 @@
   - 2026-11-19：`llm/telemetry.persist`，表建在 `ATS_DB_PATH`（生产为 `var/ats.sqlite`）；gateway 传入模型与供应商（openrouter / deepseek）。`tests/test_llm_ledger.py` 4 项通过。
 - [ ] 1.2 核实 OpenRouter 响应是否带 `usage.cost`。不带则在 gateway 打开用量统计参数（同一请求，不额外发请求）。验证：对一个最便宜的角色发 1 次真实调用（经你批准），核对记录的费用与 OpenRouter Logs 一致。
   - 2026-11-19 调整：不专门发测试调用。上线后用第一次定时运行的真实调用核对：看 `llm_calls.cost_source` 是 provider 还是空，再与 OpenRouter Logs 对账。这样不多花一次请求。
+  - 2026-11-24 归档时：前半已完成——11-19 首批 22 次调用 `cost_source=provider`，OpenRouter 响应自带费用。后半（与 OpenRouter Logs 逐笔对账）未正式完成，只按价格做过整体估算；转为日常核对，不拦归档。
 - [x] 1.3 `config/settings.yaml` 新增 `llm.prices`（当前在用的两个模型），供应商未返回费用时按单价估算。验证：单测覆盖 provider / estimate / 未知三种来源。
   - 2026-11-19：`LLMConfig.prices` + `settings.yaml` 的 `llm.prices: {}`。**单价未填**：我不知道这两个模型的实际价格，不编数；DeepSeek 直连的 `evidence_adjudicator` 在填价前显示"未知"。
 
@@ -49,5 +50,7 @@
 
 ## 5. 上线
 
-- [ ] 5.1 跑直接相关测试；合回 `feat/provenance-observability`。
-- [ ] 5.2 重启 serve 与 dispatcher；打开 `http://127.0.0.1:8000/dashboard` 核对四个页面；确认下一次模型调用已入账。
+- [x] 5.1 跑直接相关测试；合回 `feat/provenance-observability`。
+  - 2026-11-19：worktree 分支 feat/ops-dashboard 快进合入（08714f4）。
+- [x] 5.2 重启 serve 与 dispatcher；打开 `http://127.0.0.1:8000/dashboard` 核对四个页面；确认下一次模型调用已入账。
+  - 2026-11-19：serve 与 dispatcher 已重启，四个页面已核对；`llm_calls` 自 11-19 起持续入账。

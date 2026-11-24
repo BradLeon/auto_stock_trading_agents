@@ -882,6 +882,12 @@ def main(argv: list[str] | None = None) -> int:
                     print(json.dumps({"consumer_health": row}, default=str))
         except Exception as exc:  # noqa: BLE001 - the refresh itself already finished and is recorded
             print(json.dumps({"consumer_health_error": f"{type(exc).__name__}: {exc}"}))
+        # Per-job Feishu alerts on a light change, and the daily collection digest (runtime/collection_alerts).
+        from ats.runtime.collection_alerts import after_tick
+
+        alerts = after_tick()
+        if alerts.get("changes") or alerts.get("digest") or alerts.get("error"):
+            print(json.dumps({"collection_alerts": alerts}, default=str))
     return 1 if any(row["status"] in {"failed", "quarantined"} for row in results) else 0
 
 

@@ -100,6 +100,12 @@ llm:
     # 16,384 reasoning cap (the provider does not hold it), left ~6.3K of the 32,768 for the structured answer and was truncated
     # (zero decisions). The cap is raised and max_tokens doubled so the answer keeps >=32K even if thinking overshoots.
     # Every deepseek-v4-pro / v4-flash-0731 role moved to v4.1-flash-1017 the same day (same 1,048,576-token context, cheaper than pro).
+    # 2026-11-24 首席四模型对比（去风控、不下单，结果见 var/chief-model-compare/20261124T0236Z/）：用户评价
+    # Gemini 4 Carbon > Kimi K3.1 Pro ≈ DeepSeek V4.1 Flash；Opus 5.5 因结构化输出限制与 reasoning_extraction 拦截未能参评。
+    # 用户决定：首席暂用 DeepSeek V4.1 Flash，Gemini 4 Carbon（google/gemini-4-carbon，$2/$10 每百万 token，单次约 $0.6）为备选。
+    # 切到备选前须先做：首席单独放宽超时（Gemini 单次 514 秒 > 全局 timeout_seconds 120）；openrouter_provider 的
+    # quantizations 过滤只对多服务商开源模型生效（Gemini 只有谷歌一家，套用过滤会无可用端点）；手动跑通一次再交给定时任务。
+    # 备选：chief: {model: google/gemini-4-carbon, max_tokens: 65536, reasoning: 32768}
     chief: {model: deepseek/deepseek-v4.1-flash-1017, max_tokens: 65536, reasoning: 32768}
     risk_officer: {max_tokens: 16384}     # 组合风控官 — narrative memo over the deterministic 6-layer read
     # Fundamental routine fact-change classification. One output size standard for every ticker:

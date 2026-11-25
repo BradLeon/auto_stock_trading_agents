@@ -40,7 +40,18 @@ def test_trading_hours_come_from_the_contract():
 
 
 def _overnight_quote(**changes):
-    return quote(session="overnight", **changes)
+    # a book deep enough that the overnight depth cap (overnight-session-scheduling D4) does not bind
+    return quote(session="overnight", **{"bid_size": 10_000, "ask_size": 10_000, **changes})
+
+
+@pytest.fixture(autouse=True)
+def _session_closes_later(monkeypatch):
+    """The approval deadline is taken from the session's close; keep it ahead of the test's own clock."""
+    from ats.workflow import overnight_session as osn
+
+    now = datetime.now(UTC)
+    monkeypatch.setattr(osn, "confirmed_overnight_window", lambda point: osn.SessionWindow(
+        "overnight", now - timedelta(hours=2), now + timedelta(hours=6), "ibkr"))
 
 
 def test_overnight_quote_is_validated_like_a_live_quote_only_while_the_regular_session_is_closed(monkeypatch):

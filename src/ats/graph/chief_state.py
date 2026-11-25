@@ -61,6 +61,11 @@ class ChiefDecisionState(BaseModel):
     approval_summary: str = ""          # banner + risk block + order lines (the card body)
     normalization_errors: list[str] = Field(default_factory=list)
     normalization_fixable: bool = False  # every refusal is the proposal's to fix -> back to the Chief
+    # overnight-session-scheduling D2: an overnight-venue proposal must be approved before this instant
+    # (the session's close minus the approval window); None on the regular venue.
+    approval_deadline: datetime | None = None
+    session_closes_at: datetime | None = None
+    session_venue: str = ""             # the venue the deadline belongs to: "overnight" | "extended"
     execution_price_audit: list[dict] = Field(default_factory=list)
 
     # decision-audit loop (Phase B, ARCHITECTURE §5.2–5.3). `decisions` stays this round's FULL

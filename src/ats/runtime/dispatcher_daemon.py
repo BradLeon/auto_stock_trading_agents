@@ -190,7 +190,8 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
         observe("wake", workflow_id, {"owner": "dispatcher", "trigger": context.model_dump(mode="json")})
         try:
             if workflow_id in trade_entries:
-                result = run_trade_workflow(workflow_id, entry, context, now=planned)
+                result = run_trade_workflow(workflow_id, entry, context, now=planned,
+                                            current=datetime.now(timezone.utc))
                 log.info("workflow %s -> %s", workflow_id, result.get("status") or result.get("outcome"))
                 if workflow_id == "chief-daily" and result.get("outcome") == "research_incomplete":
                     alerts.chief_blocked(planned, result)
@@ -258,8 +259,10 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
         ticks = []
         planned = trigger.get_next_fire_time(None, start_at)
         while planned is not None and planned <= startup_now:
+            # The trading day is the date in the cron's own zone, as the expected-trigger oracle reads it: a
+            # Taipei-morning Chief run (Sunday evening in New York) trades the overnight session of that Taipei date.
             if workflow_id in trade_entries and (
-                    not is_trading_day(planned.astimezone(ET).date())
+                    not is_trading_day(planned.astimezone(ZoneInfo(cron["timezone"])).date())
                     or (resumed.get(workflow_id) and planned < resumed[workflow_id])):
                 # A closed market has no tick; a tick from before the workflow was resumed was never its to run.
                 planned = trigger.get_next_fire_time(planned, planned)
@@ -340,6 +343,13 @@ def _run_dispatcher(*, run_once: bool = False) -> None:
 
     scheduler.add_job(capture_job, CronTrigger(day_of_week="*", **CAPTURE_CRON), id="phase_e:fills-capture",
                       coalesce=True, max_instances=1, misfire_grace_time=600)
+
+    # overnight-session-scheduling D3: 10 minutes before the overnight close, the system's overnight orders still
+    # working are cancelled, never carried into the regular session. Five minutes late is still before the close.
+    from ..trader.session_end import CRON as SESSION_END_CRON, cancel_job as session_end_cancel
+
+    scheduler.add_job(session_end_cancel, CronTrigger(**SESSION_END_CRON), id="phase_e:overnight-session-end",
+                      coalesce=True, max_instances=1, misfire_grace_time=300)
 
     log.info("dispatcher started: workflows=%s; calendar_consume=%s; fills_capture=%02d:%02d %s",
              ",".join(entries) or "none", bool(refresh_schedule.get("enabled", False)),

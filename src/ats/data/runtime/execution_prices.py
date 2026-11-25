@@ -25,6 +25,10 @@ class ExecutionPrice(BaseModel):
     size_increment: float
     min_tick: float
     source_precision: str = "tick"
+    # Top-of-book sizes (shares) of a live bid/ask quote; the overnight single-order cap is sized from them
+    # (overnight-session-scheduling D4). None where the source has no book (a session close, older quotes).
+    bid_size: float | None = None
+    ask_size: float | None = None
     # session: "regular" (SMART, 09:30-16:00 ET) or "overnight" (IBKR's OVERNIGHT venue, IBEOS) for a live
     # two-sided quote; "previous_completed_regular" for the dated close that only a deferred order is priced from.
 

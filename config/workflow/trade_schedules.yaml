@@ -25,6 +25,9 @@ workflows:
     # Taipei in winter). Order normalization prices only from a live bid/ask inside the regular session (09:30-16:00
     # NY, quote no older than 30 s), so a pre-open cycle can never normalize its orders (blockers B9). The Boss
     # approves the same night, while the market is still open.
-    cron: {day_of_week: "mon-fri", hour: 9, minute: 45, timezone: America/New_York}
+    # 2026-11-25 (overnight-session-scheduling D1/D6): 09:45 NY -> 21:00 Taipei = 08:00 NY pre-market (09:00 in US summer
+    # time). The Chief sends SMART limit DAY orders allowed outside regular hours; the approval deadline is the regular
+    # close minus 4 hours (01:00 Taipei in winter). Rollback: hour 9, minute 45, America/New_York.
+    cron: {day_of_week: "mon-fri", hour: 21, minute: 0, timezone: Asia/Taipei}
     decision_profile: ai_hardware
     fundamental_mode: routine

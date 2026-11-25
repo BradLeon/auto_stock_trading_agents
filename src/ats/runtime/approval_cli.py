@@ -200,6 +200,32 @@ def _lock_note(cycle_id: str) -> str | None:
     return f"⚠ 批准后不会下单：{reason}。批准只会记录并做执行前检查。" if reason else None
 
 
+def _deadline(cycle_id: str) -> tuple[datetime | None, datetime | None, str]:
+    """(approval deadline, session close) of an overnight-venue proposal, from the checkpoint; (None, None) otherwise."""
+    try:
+        values = _checkpoint_values(_graph(), cycle_id)
+    except ApprovalRefused:
+        return None, None, ""
+    return (_as_time(values.get("approval_deadline")), _as_time(values.get("session_closes_at")),
+            values.get("session_venue") or "overnight")
+
+
+def _as_time(value) -> datetime | None:
+    if value is None or isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
+
+
+def _deadline_note(cycle_id: str) -> str | None:
+    deadline, closes, venue = _deadline(cycle_id)
+    if deadline is None:
+        return None
+    from ..workflow.overnight_session import deadline_line
+
+    late = "（已过截止，批准会被拒绝）" if _now() > deadline else ""
+    return deadline_line(deadline, closes, venue) + late
+
+
 def brief_card(cycle_id: str) -> int:
     """What a person needs to answer: each order (size, limit, amount) with the Chief's reason, and nothing else.
 
@@ -234,6 +260,9 @@ def brief_card(cycle_id: str) -> int:
     lock = _lock_note(cycle_id)
     if lock:
         print(lock)
+    due = _deadline_note(cycle_id)
+    if due:
+        print(due)
     from ..decision.repository import option_advice_lines
 
     extra = len(option_advice_lines(rev["rationale"])) if rev["rationale"] else 0
@@ -294,6 +323,9 @@ def show(cycle_id: str, *, full: bool = False) -> int:
     lock = _lock_note(cycle_id)
     if lock:
         print(f"\n{lock}")
+    due = _deadline_note(cycle_id)
+    if due:
+        print(f"\n{due}")
     rounds = repo.conn.execute(
         "SELECT COUNT(*) FROM boss_approvals WHERE cycle_id = ? AND decision = 'revise'",
         (cycle_id,)).fetchone()[0]
@@ -370,7 +402,7 @@ def _report(cycle_id: str, result: dict) -> int:
         from ..schemas.channel import ApprovalRequest
 
         req = ApprovalRequest.model_validate(result["__interrupt__"][0].value)
-        title, body = reminder_text(cycle_id, req.revision_no, pending_summary(req))
+        title, body = reminder_text(cycle_id, req.revision_no, pending_summary(req), req.approval_deadline)
         print(f"⏸ 新修订 {req.revision_no}（hash {req.decision_hash[:MIN_HASH_PREFIX]}）已通过风控，等待你审批。")
         notify(title, body)
         return 0
@@ -448,6 +480,12 @@ def approve(cycle_id: str, prefix: str, *, actor: str | None = None) -> int:
         cycle, rev, previous = _resolve(repo, cycle_id, prefix)
         app = _graph()
         values = _checkpoint_values(app, cycle_id)
+        from ..workflow.overnight_session import deadline_rejection
+
+        late = deadline_rejection(_as_time(values.get("approval_deadline")), _now())
+        if late:
+            # The execution check would refuse it anyway (graph.chief.trader); say so before any snapshot or broker read.
+            raise ApprovalRefused(late)
         refresh = _refresh_review(repo, app, cycle_id, rev, previous, values)
     except ApprovalRefused as exc:
         print(f"✗ {exc}")

@@ -250,11 +250,11 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 | 工作流 | 时间（工作日，仅 NYSE 交易日） | 内容 |
 |---|---|---|
 | `clerk-daily` | 18:00 纽约（收盘后；台北次日 07:00） | 对账：把成交与持仓写入账本（只认审计表） |
-| `chief-daily` | 09:45 纽约（开盘后，台北晚上 22:45；排在 08:00/08:30 的研究之后；订单只在常规时段内取价，所以要在开盘后、并当晚批准） | 跑一个决策周期（非演练、实盘锁定）；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接） |
+| `chief-daily` | 21:00 台北（纽约 08:00 盘前，夏令 09:00；排在 19:00/20:00 的研究之后；2026-11-25 起，原为 09:45 纽约，见 7.2） | 跑一个决策周期（非演练、实盘锁定）；盘前用延长时段 venue；有订单且过风控则进入 `pending_approval`，并给你发一次提醒（不带链接），审批截止为常规收盘前 4 小时 |
 
 **成交读取的两层保障（B11，tasks 11.12）：** TWS 的 `reqExecutions` 只返回账户“自午夜起”（TWS 本地时间 = 台北）的成交，所以台北 07:00 的 Clerk 看不到前一晚午夜前的成交。补救有两层：(1) dispatcher 里的 `phase_e:fills-capture` 每天台北 23:58 读一次当日成交（`ats clerk capture-fills` 可手动跑一次；只记成交，不动 Clerk 窗口），迟到超过 10 分钟就跳过；(2) 每次 Clerk 对账后用 IBKR Flex 对账单（`.env` 的 `IBKR_FLEX_TOKEN`、`IBKR_FLEX_QUERY_ID`，查询 `ats-trades`，美东时间，落后一个营业日）补入库里没有的成交，建账日之前的不补，已有同一笔成交（含手工补录行）的不重复（`ats clerk flex-backfill --dry-run` 只看）。Flex 拉不到只记在对账摘要的 `flex` 里，不让 Clerk 失败。令牌一年到期，到期前要在 IBKR 网页重新生成并改 `.env`。
 
-**隔夜时段下单（tasks 11.13）：** 订单的 `execution_basis.venue` 为 `regular`（默认，SMART，常规时段实时买卖价）或 `overnight`（合约交易所 `OVERNIGHT`，IBEOS）。定时的首席运行若落在隔夜时段（美东周日 18:00 起、周一至周四 20:00 起，至次日 03:50；周五夜间不开）就用 overnight：价格读 OVERNIGHT 合约的实时买卖价（≤30 秒、点差 ≤1%，合约交易时段已关则 fail-closed），只下限价单，审批与执行前检查沿用订单绑定的 venue。审批必须在隔夜时段关闭前完成，否则执行前检查会要求重新审批。当前调度未前移，因此该路径只有在首席于隔夜时段运行时才会触发。
+**隔夜时段下单（tasks 11.13）：** 订单的 `execution_basis.venue` 为 `regular`（默认，SMART，常规时段实时买卖价）或 `overnight`（合约交易所 `OVERNIGHT`，IBEOS）。定时的首席运行若落在隔夜时段（美东周日 18:00 起、周一至周四 20:00 起，至次日 03:50；周五夜间不开）就用 overnight：价格读 OVERNIGHT 合约的实时买卖价（≤30 秒、点差 ≤1%，合约交易时段已关则 fail-closed），只下限价单，审批与执行前检查沿用订单绑定的 venue。审批截止、收盘撤单、盘口深度上限、盘前延长时段 venue 与前移后的时间表见 7.2。
 
 两者在 `config/workflow/trade_schedules.yaml` 里默认 `enabled: false`（对外叫“停用”）。启用某一个：把它改成 `enabled: true` → `ats dispatch resume --workflow <id> ...`（第 3.4 节）→ **最后**重启 `com.ats.dispatcher`，并用 `launchctl list` 确认新 PID、看 `var/logs/dispatcher.err.log` 里的 `dispatcher started: workflows=…` 一行含该工作流。每一步都需要你批准。**必须先 `resume` 再重启**：Dispatcher 在启动时才按负责人决定注册哪些交易工作流，`resume` 前启动的进程不会注册它（2026-11-01 启用 `clerk-daily` 时核实）。停用：`ats dispatch pause --workflow <id> ...`，不需要批准。
 
@@ -308,6 +308,36 @@ ats approval approve <cycle_id> --revision <hash 前缀，至少 12 位>   # 脚
 
 **观察窗口的停止条件**（任一出现就停用两个工作流并记录）：出现真实券商提交；主理人上下文出现旧表读取；批准的 hash 与风控修订不一致，或旧修订被接受；
 决策链（快照 → 修订 → 风控 → 审批）断裂；Clerk 对账与 TWS 不一致且无法解释；同一触发重复执行或同一输入重复发模型请求；主理人连续 2 个交易日因非数据缺口原因失败。
+
+### 7.2 隔夜与盘前时段运行
+
+> **状态（2026-11-25）：** 时段判定、审批截止、隔夜收盘撤单、盘口深度上限、盘前延长时段 venue 已实现（overnight-session-scheduling 1.1–2.4）。
+> 隔夜 venue 已于 11-25 台北上午演练通过（3.1）。**调度已于 2026-11-25 11:38 台北前移**（3.2，你决定跳过盘前演练 3.1b，直接切换并观察当晚运行）；两周观察见 change 的 3.3。
+
+**时间表（前移后，cron 一律用 `Asia/Taipei` 声明，冬夏令不调整）**
+
+| 任务 | 现在（台北冬令） | 前移后（台北） |
+|---|---|---|
+| `clerk-daily` | 07:00 | 不变 |
+| `information-brief` | 21:00 | 19:00 |
+| `fundamental-routine`、`technical-review` | 21:30 | 20:00 |
+| `chief-daily` | 22:45 | 21:00（纽约 08:00 盘前，夏令 09:00），用延长时段 venue |
+| 审批截止 | 无 | 常规收盘前 4 小时：冬令台北 01:00，夏令 00:00；提前收盘日更早（如感恩节次日 13:00 收盘，截止台北 22:00） |
+| 隔夜挂单撤单 | 无 | 03:40 纽约（冬令台北 16:40，夏令 15:40），只处理隔夜 venue 的单 |
+
+**三种 venue。** 首席按运行时刻选：常规时段开着用 `regular`（SMART，常规时段）；IBKR 隔夜时段（台北冬令约 09:00–16:50）开着用 `overnight`（交易所 OVERNIGHT）；纽约交易日盘前（04:00 至开盘，台北冬令 17:00–22:30）用 `extended`（SMART，`outsideRth`，限价当日单，盘前、常规、盘后一路挂到 20:00 纽约由 IBKR 自动失效）。后两种只用于定时首席；手动 `ats chief run` 仍只认常规时段。IBKR 的“隔夜 + 当日”（OND）生效时间需要 `includeOvernight`，`ib_async` 2.1.0 不支持；从台北 21:00 提交时，`extended` 与 OND 效果相同。
+
+**运行前的时段判定。** `chief-daily` 每次触发先判定它要用的时段是否开放：常规 → 隔夜（交易所日历，再问 IBKR 上 OVERNIGHT 合约自己的交易时段，探测标的 NVDA；连不上 TWS 时以日历为准）→ 盘前。都不开放（周末、美国节假日、盘后到隔夜之间）时不建周期、不发审批，调度历史里记一条 `skipped_session_closed`（`schedule_runtime_history`）。盘后（16:00–20:00 纽约）不算可运行时段：离当日单失效不到 4 小时。
+
+**审批截止。** 隔夜提案截止 = 隔夜收盘 − 4 小时；盘前提案截止 = 当日常规收盘 − 4 小时。截止时间写进审批请求，出现在：审批卡正文第一行（`⏰ 审批截止：…`）、待审批提醒、`ats approval approve` 的审批卡与 `ats approval show`（已过截止会注明）。截止后：`ats approval approve` 直接拒绝；从其他入口恢复的批准，执行前检查拒绝（`approval_deadline_passed`），不下单。不能在本周期补批，等下一个首席周期。常规时段的提案没有这个截止。
+
+**报价。** 隔夜单读 OVERNIGHT 合约的实时买卖价；盘前单读 SMART 的实时买卖价（盘前为 `session=extended`，开盘后为 `regular`，所以开盘后才批准的盘前单也能做执行前检查）。都要求 ≤30 秒、点差 ≤1%；点差超限或没有双边报价的标的本轮跳过，其余照下。按盘前报价定的限价会带入常规时段（你 11-25 确认接受）。
+
+**未成交订单。** 隔夜 venue：dispatcher 每个工作日 03:40 纽约跑 `phase_e:overnight-session-end`，只读列出系统在 OVERNIGHT 上仍在途的订单（`ats:` 前缀；常规与盘前单、你在 TWS 手下的单不碰），有就撤单，成交记录的 `error` 记 `cancelled_session_end`，不重新提交。撤单后仍在途或撤单被拒（例如 dispatcher 进程没有写授权），会给你发「⚠️ 隔夜挂单未撤净」。盘前 venue：当日单由 IBKR 在 20:00 纽约自动失效，不另撤。实盘锁定期间系统不会有在途订单。
+
+**流动性上限。** 隔夜与盘前单的单笔金额上限取常规单笔上限与「盘口一档数量 × 价格 × 5」中较小者（买看卖一，卖看买一）。超限走现有风控边界：违规 `overnight_book_depth` 带可接受上限，主理人按边界缩量后重新过风控。报价里没有盘口数量的单不放行。
+
+**回滚。** 把 `config/workflow/research_schedules.yaml` 与 `trade_schedules.yaml` 的 cron 改回原值（information-brief 08:00、fundamental-routine 与 technical-review 08:30、chief-daily 09:45，均为 `America/New_York`），重启 `com.ats.dispatcher`，用 `launchctl list` 确认新 PID。时段判定、截止与撤单留在代码里不影响常规时段运行。
 
 ## 8. 首次安装
 

@@ -36,6 +36,8 @@ class ApprovalRequest(BaseModel):
     # How many change requests ("revise") the Boss has used on this cycle, and the cap.
     boss_revisions: int = 0
     max_boss_revisions: int = 2
+    # An overnight-venue proposal approved after this is not executed (overnight-session-scheduling D2).
+    approval_deadline: datetime | None = None
 
 
 class ReportBundle(BaseModel):

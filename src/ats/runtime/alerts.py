@@ -51,6 +51,18 @@ def chief_manual_review(planned: datetime | None, result: dict) -> None:
           f"原因：{result.get('reason') or '（未记录）'}")
 
 
+def overnight_cancel_failed(*, result: dict | None = None, exc: BaseException | None = None) -> None:
+    """The session-end cancel (03:40 New York) could not cancel every overnight order: it may fill on a stale basis."""
+    if exc is not None:
+        last = traceback.format_exception_only(type(exc), exc)[-1].strip()
+        body = f"隔夜时段收盘前撤单没有完成，可能仍有隔夜挂单。\n原因：{last}\n请在 TWS 里核对并手动撤单。"
+    else:
+        left = "；".join(f"{r.get('symbol')} {r.get('order_ref')}（{r.get('status')}）"
+                        for r in (result or {}).get("still_working") or [])
+        body = f"以下隔夜订单撤单后仍显示在途：{left}\n请在 TWS 里核对并手动撤单。"
+    _push("⚠️ 隔夜挂单未撤净", body)
+
+
 def research_incomplete(workflow_id: str, planned: datetime | None, result: dict, *, attempts: int) -> None:
     """A research workflow stayed incomplete after its retries; the names are stated uncovered by the Chief."""
     missing = sorted({str(item.get("scope", "")).partition(":")[2] or str(item.get("scope", ""))

@@ -26,8 +26,17 @@ class PriceUnavailable(ValueError):
     pass
 
 
+#: Fields added after quotes were first stored on revisions. Left out of the hash while unset, so a revision
+#: normalized before they existed keeps the quote_ref it was approved under.
+_LATER_OPTIONAL_FIELDS = ("bid_size", "ask_size")
+
+
 def quote_ref(quote: ExecutionPrice) -> str:
-    body = json.dumps(quote.model_dump(mode="json"), sort_keys=True, allow_nan=False)
+    body = quote.model_dump(mode="json")
+    for name in _LATER_OPTIONAL_FIELDS:
+        if body.get(name) is None:
+            body.pop(name, None)
+    body = json.dumps(body, sort_keys=True, allow_nan=False)
     return "execution-quote:" + hashlib.sha256(body.encode()).hexdigest()
 
 
@@ -191,6 +200,20 @@ def validate_quote(quote, *, symbol, currency="USD", overnight=False, now=None, 
             # (the broker read already refused outside the contract's own overnight hours).
             if (regular and not as_reference) or q.session != "overnight":
                 raise PriceUnavailable("quote_outside_overnight_session")
+        elif venue == "extended":
+            # D6: a SMART order allowed outside regular hours. Priced in the pre-market, it keeps working into the
+            # regular session, so a later check reads whichever of the two is open now.
+            if as_reference:
+                if q.session not in ("extended", "regular"):
+                    raise PriceUnavailable("quote_outside_extended_session")
+            elif regular:
+                if q.session != "regular":
+                    raise PriceUnavailable("quote_outside_regular_session")
+            else:
+                from ..workflow.overnight_session import premarket_window
+
+                if q.session != "extended" or premarket_window(point) is None:
+                    raise PriceUnavailable("quote_outside_extended_session")
         elif not regular or q.session != "regular":
             raise PriceUnavailable("quote_outside_regular_session")
         if q.price_kind != "bid_ask" or q.market_data_mode != "live" or q.source_precision != "tick":
@@ -317,16 +340,18 @@ def normalize_orders(orders, *, cycle_id, currency="USD", overnight=False,
                 # One thin name must not take the whole batch down. On the overnight venue a name whose book is
                 # unusable tonight (spread past the limit, no two-sided quote) is left out and said so; the rest are
                 # sized, reviewed and sent. Every name unusable = an outage, not a thin name: refuse as before.
-                if skip_unquotable and venue == "overnight" and str(exc).startswith("input_unavailable:"):
+                if skip_unquotable and venue in ("overnight", "extended") \
+                        and str(exc).startswith("input_unavailable:"):
                     skipped.append((decision.symbol, exc))
-                    notes.append(f"未下单：{decision.symbol} 隔夜盘口今晚不可用（{str(exc).rsplit(':', 1)[-1]}），"
+                    where = "隔夜" if venue == "overnight" else "盘前"
+                    notes.append(f"未下单：{decision.symbol} {where}盘口本轮不可用（{str(exc).rsplit(':', 1)[-1]}），"
                                  "本轮不下，常规时段再处理")
                     continue
                 raise
             ref = directional_price(quote, decision.action)
             increasing = action_direction(decision.action) > 0
             limit = decision.limit_price
-            deferred_limit = overnight or venue == "overnight"
+            deferred_limit = overnight or venue in ("overnight", "extended")
             if ((decision.order_type == "limit" and limit is None or deferred_limit)
                     and (limit is None or decision.order_type == "market")):
                 raw = Decimal(str(ref)) * (1 + Decimal(str(slippage_pct)) / 100

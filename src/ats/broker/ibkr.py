@@ -183,7 +183,7 @@ class IBKRBroker:
         session is open now: IBKR, not a rule in this code, knows about holidays and early closes."""
         from ib_async import Stock
 
-        exchange = {"regular": "SMART", "overnight": "OVERNIGHT"}[venue]
+        exchange = {"regular": "SMART", "overnight": "OVERNIGHT", "extended": "SMART"}[venue]
         with self.session() as ib:
             contracts = ib.qualifyContracts(Stock(symbol, exchange, currency))
             if len(contracts) != 1 or contracts[0].symbol != symbol \
@@ -207,11 +207,27 @@ class IBKRBroker:
                 return {**metadata, "source": "ibkr:tick_by_tick_bid_ask",
                         "source_as_of": tick.time, "queried_at": _now(),
                         "price_kind": "bid_ask", "bid": tick.bidPrice, "ask": tick.askPrice,
-                        "session": "overnight" if venue == "overnight" else "regular", "market_data_mode": (
+                        # top-of-book sizes: the overnight single-order cap is sized from them (D4)
+                        "bid_size": _fnum(getattr(tick, "bidSize", None)),
+                        "ask_size": _fnum(getattr(tick, "askSize", None)),
+                        "session": _quote_session(venue), "market_data_mode": (
                             "live" if ticker.marketDataType == 1 else "delayed_or_unknown"),
                         "adjusted": False, "source_precision": "tick"}
             finally:
                 ib.cancelTickByTickData(contract, "BidAsk")
+
+    def overnight_session_hours(self, symbol: str, *, point, currency: str = "USD"):
+        """The OVERNIGHT contract's trading-hours segment containing `point`, or None when its hours say closed."""
+        from ib_async import Stock
+
+        with self.session() as ib:
+            contracts = ib.qualifyContracts(Stock(symbol, "OVERNIGHT", currency))
+            if len(contracts) != 1:
+                raise IBKRUnavailable("overnight_contract_unavailable")
+            details = ib.reqContractDetails(contracts[0])
+            if len(details) != 1:
+                raise IBKRUnavailable("overnight_contract_details_unavailable")
+            return trading_hours_segment(details[0].tradingHours, details[0].timeZoneId, point)
 
     def get_portfolio(self) -> PortfolioSnapshot:
         with self.session() as ib:
@@ -584,6 +600,42 @@ class IBKRBroker:
                 ib.sleep(1.5)
             return cancelled
 
+    @staticmethod
+    def _session_trades(ib, venue: str) -> list:
+        """System orders (`ats:` orderRef) still working on `venue`'s exchange; manual and other-venue orders excluded."""
+        exchange = {"regular": "SMART", "overnight": "OVERNIGHT", "extended": "SMART"}[venue]
+        ib.reqAllOpenOrders()
+        ib.sleep(1.0)
+        return [t for t in ib.openTrades()
+                if getattr(t.contract, "exchange", "") == exchange
+                and str(getattr(t.order, "orderRef", "") or "").startswith("ats:")]
+
+    def open_session_orders(self, venue: str = "overnight") -> list[dict]:
+        """Read-only: the system's orders still working on `venue`."""
+        with self.session() as ib:
+            return [_session_order_row(t) for t in self._session_trades(ib, venue)]
+
+    def cancel_session_orders(self, venue: str = "overnight") -> list[dict]:
+        """Cancel the system's orders still working on `venue` (overnight-session-scheduling D3).
+
+        Only `ats:`-tagged orders on that venue's exchange: a regular-session order and a manual TWS order are left
+        alone. Each row reports the status the broker shows after the cancel; one still working is the caller's to
+        alert on.
+        """
+        check_broker_write(operation="cancel_session_orders", caller="IBKRBroker.cancel_session_orders",
+                           detail=f"venue={venue}")
+        with self.session() as ib:
+            trades = self._session_trades(ib, venue)
+            for t in trades:
+                with self._submission_gate(ib, operation="cancelOrder", detail=str(t.order.orderId)) as state:
+                    if t.order.account != state.account:
+                        guard.refuse(guard.REASON_ACCOUNT_MISMATCH, operation="cancelOrder",
+                                     caller="IBKRBroker.cancel_session_orders", detail="order account differs")
+                    ib.cancelOrder(t.order)
+            if trades:
+                ib.sleep(2.0)
+            return [_session_order_row(t) for t in trades]
+
     def _submit(self, ib, decision: TradeDecision, qty: float, cycle_id: str,
                 revision_no: int = 0, seq: int = 0,
                 chain: dict | None = None, *, execution_check=None) -> TradeLogEntry:
@@ -614,8 +666,8 @@ class IBKRBroker:
                 self._last_trades.append(None)
                 return entry
             venue = (decision.execution_basis or {}).get("venue", "regular")
-            if venue == "overnight" and not (decision.order_type == "limit" and decision.limit_price):
-                raise ValueError("overnight_order_requires_limit")
+            if venue in ("overnight", "extended") and not (decision.order_type == "limit" and decision.limit_price):
+                raise ValueError(f"{venue}_order_requires_limit")
             contract = Stock(decision.symbol, "OVERNIGHT" if venue == "overnight" else "SMART", "USD")
             if not ib.qualifyContracts(contract):
                 # Never send an order on an unverified contract. Error 200 on a
@@ -630,6 +682,9 @@ class IBKRBroker:
                      if decision.order_type == "limit" and decision.limit_price
                      else MarketOrder(side, qty))
             order.tif = decision.time_in_force          # DAY/GTC (avoid preset TIF warning)
+            if venue == "extended":
+                # D6: works in the pre-market, regular and after-hours sessions; a DAY order expires at 20:00 NY.
+                order.outsideRth = True
             # Tag the order so its executions can be recognised as ours. reqExecutions
             # returns the whole ACCOUNT's fills, including ones placed by hand in TWS;
             # without a tag the only link is orderId, which TWS resets on restart and
@@ -683,8 +738,9 @@ class IBKRBroker:
             [cycle_id, revision_no, seq]).encode()).hexdigest()
 
 
-def trading_hours_open(hours: str, timezone_id: str, point) -> bool:
-    """Is `point` inside one of IBKR's `tradingHours` segments ("20261105:2000-20261106:0350;20261107:CLOSED;...")?"""
+def trading_hours_segment(hours: str, timezone_id: str, point) -> tuple[datetime, datetime] | None:
+    """The IBKR `tradingHours` segment ("20261105:2000-20261106:0350;20261107:CLOSED;...") containing `point`,
+    as aware datetimes, or None."""
     from zoneinfo import ZoneInfo
 
     zone = ZoneInfo({"US/Eastern": "America/New_York"}.get(timezone_id, timezone_id or "America/New_York"))
@@ -697,8 +753,31 @@ def trading_hours_open(hours: str, timezone_id: str, point) -> bool:
         except ValueError:
             continue
         if start <= local < end:
-            return True
-    return False
+            return start.replace(tzinfo=zone), end.replace(tzinfo=zone)
+    return None
+
+
+def trading_hours_open(hours: str, timezone_id: str, point) -> bool:
+    """Is `point` inside one of IBKR's `tradingHours` segments?"""
+    return trading_hours_segment(hours, timezone_id, point) is not None
+
+
+def _quote_session(venue: str) -> str:
+    """The session a live quote on `venue` belongs to: the extended venue reads SMART in or outside regular hours."""
+    if venue == "overnight":
+        return "overnight"
+    if venue == "extended":
+        from ..data.runtime.execution_prices import session_context
+
+        return "regular" if session_context(_now())[0] else "extended"
+    return "regular"
+
+
+def _session_order_row(trade) -> dict:
+    st, o = trade.orderStatus, trade.order
+    return {"order_id": str(o.orderId), "perm_id": str(getattr(o, "permId", "") or ""),
+            "order_ref": str(getattr(o, "orderRef", "") or ""), "symbol": trade.contract.symbol,
+            "status": _map_status(st.status), "filled": float(st.filled or 0)}
 
 
 def order_ref(cycle_id: str, revision_no: int, seq: int, symbol: str) -> str:

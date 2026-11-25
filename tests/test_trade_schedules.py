@@ -71,8 +71,8 @@ def config_off(tmp_path):
 def test_both_workflows_have_the_agreed_times():
     schedules = ts.load_trade_schedules()
     assert set(schedules) == {"clerk-daily", "chief-daily"}
-    assert schedules["chief-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 9, "minute": 45,
-                                               "timezone": "America/New_York"}
+    assert schedules["chief-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 21, "minute": 0,
+                                               "timezone": "Asia/Taipei"}
     assert schedules["clerk-daily"]["cron"] == {"day_of_week": "mon-fri", "hour": 18, "minute": 0,
                                                "timezone": "America/New_York"}
 
@@ -110,7 +110,8 @@ def test_a_closed_market_runs_nothing(world, monkeypatch):
     thanksgiving = datetime(2026, 11, 26, 10, 30, tzinfo=ET)
     out = ts.run_trade_workflow("chief-daily", {"scope": ts.ProjectionScope(kind="portfolio", id="portfolio")},
                                 _tick("chief-daily", thanksgiving))
-    assert out == {"status": "skipped", "reason": "market_closed"} and calls == []
+    # neither the regular nor the overnight session is open (overnight-session-scheduling D2)
+    assert out == {"status": "skipped", "reason": "skipped_session_closed"} and calls == []
 
 
 def test_a_replayed_tick_runs_once_and_returns_the_first_result(world, monkeypatch):
@@ -174,7 +175,7 @@ def test_the_daemon_registers_only_resumed_trade_workflows(world, config, monkey
     monkeypatch.setattr("ats.workflow.ownership.research_schedule_entries", lambda **kw: {})
     ran = []
     monkeypatch.setattr("ats.workflow.trade_schedules.run_trade_workflow",
-                        lambda wid, entry, trigger, now=None: ran.append(wid) or {"status": "complete"})
+                        lambda wid, entry, trigger, now=None, current=None: ran.append(wid) or {"status": "complete"})
     holder = {}
     monkeypatch.setattr(blocking, "BlockingScheduler", lambda *a, **kw: holder.setdefault("s", FakeScheduler(*a, **kw)))
     dispatcher_daemon._run_dispatcher()                    # the daemon swallows the scheduler's stop

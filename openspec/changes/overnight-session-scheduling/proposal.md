@@ -15,7 +15,7 @@ IBKR 的隔夜交易时段（IBEOS）覆盖台北周一至周五的白天：周�
 
 ## What Changes
 
-- 研究（information-brief、fundamental-routine、technical-review）与 chief-daily 的定时改到台北上午。首席在隔夜时段内运行，并自动使用隔夜 venue。
+- 研究（information-brief、fundamental-routine、technical-review）与 chief-daily 的定时前移（2026-11-25 调整为研究 19:00/20:00、首席 21:00 台北，见 design D1）。首席在隔夜时段内运行时用隔夜 venue；在盘前运行时用新增的延长时段 venue（SMART + outsideRth 限价 DAY 单，design D6）。
 - 首席运行时间按“距隔夜时段收盘至少 4 小时”设定，留足审批窗口；审批截止时间写进审批请求。
 - 隔夜时段收盘时未成交的订单按明确规则处理（建议：撤单，次一周期重新评估），不自动带入常规时段。
 - 周五美东夜间不开：台北周六不触发首席。美国节假日按交易所日历跳过。

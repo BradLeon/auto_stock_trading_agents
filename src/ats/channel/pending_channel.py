@@ -41,9 +41,14 @@ def pending_summary(req: ApprovalRequest) -> str:
     return "；".join(lines) + more
 
 
-def reminder_text(cycle_id: str, revision_no: int, summary: str) -> tuple[str, str]:
+def reminder_text(cycle_id: str, revision_no: int, summary: str, deadline=None) -> tuple[str, str]:
+    due = ""
+    if deadline is not None:
+        from ..workflow.overnight_session import deadline_line
+
+        due = deadline_line(deadline) + "\n"
     return (f"待审批：{cycle_id}",
-            f"修订 {revision_no}：{summary or '（无订单摘要）'}\n"
+            f"修订 {revision_no}：{summary or '（无订单摘要）'}\n{due}"
             f"查看：ats approval show {cycle_id}")
 
 
@@ -62,7 +67,7 @@ class PendingApprovalChannel:
         notify(msg.title, msg.body)
 
     def send_approval_request(self, req: ApprovalRequest, thread_id: str) -> None:
-        title, body = reminder_text(req.cycle_id, req.revision_no, pending_summary(req))
+        title, body = reminder_text(req.cycle_id, req.revision_no, pending_summary(req), req.approval_deadline)
         notify(title, body)
 
     def request_approval(self, req: ApprovalRequest):

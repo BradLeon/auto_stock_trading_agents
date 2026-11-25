@@ -110,6 +110,28 @@ def _order_cap_boundary(rc, decision: TradeDecision) -> float | None:
     return rc.max_single_order_usd
 
 
+#: D4/D6 (overnight-session-scheduling): an overnight or extended-hours order may not exceed this many times the top-of-book amount on
+#: the side it takes (the ask for a buy, the bid for a sale).
+OVERNIGHT_BOOK_MULTIPLE = 5
+
+
+def _overnight_book_boundary(decision: TradeDecision) -> float | None:
+    """Max notional the overnight book supports, from the quote the order was normalized on; None off that venue.
+
+    Returns 0.0 when the quote carries no book size: the depth cannot be judged, so nothing may pass it."""
+    from ..schemas.decision import action_direction
+
+    basis = decision.execution_basis or {}
+    if basis.get("venue") not in ("overnight", "extended"):
+        return None
+    quote = basis.get("quote") or {}
+    side = ("ask_size", "ask") if action_direction(decision.action) > 0 else ("bid_size", "bid")
+    size, price = quote.get(side[0]), quote.get(side[1])
+    if not size or not price or size <= 0 or price <= 0:
+        return 0.0
+    return float(size) * float(price) * OVERNIGHT_BOOK_MULTIPLE
+
+
 def _event_notional_boundary(decision: TradeDecision, portfolio: PortfolioSnapshot,
                              rc, event_data: dict[str, dict]) -> float | None:
     """Max notional the event-loss budget accepts for an increasing order."""
@@ -273,12 +295,18 @@ def review_revision(
                     update={"notional_usd": abs(decision.qty) * float(px)})
         cap = _order_cap_boundary(rc, decision) if apply_caps else None
         event_cap = _event_notional_boundary(decision, working_pf, rc, event_data)
-        binding = [c for c in (cap, event_cap) if c is not None]
+        # D4: on the overnight venue the single-order cap is also bounded by the book; same boundary path.
+        book_cap = _overnight_book_boundary(decision) if apply_caps else None
+        binding = [c for c in (cap, event_cap, book_cap) if c is not None]
         max_allowed = min(binding) if binding else None
         if (max_allowed is not None and decision.notional_usd is not None
                 and decision.notional_usd > max_allowed):
-            if event_cap is not None and event_cap <= (cap if cap is not None else float("inf")):
+            inf = float("inf")
+            if event_cap is not None and event_cap <= min(cap if cap is not None else inf,
+                                                          book_cap if book_cap is not None else inf):
                 rule_id, limit = "max_event_loss_pct", event_cap
+            elif book_cap is not None and book_cap < (cap if cap is not None else inf):
+                rule_id, limit = "overnight_book_depth", book_cap
             else:
                 rule_id, limit = "max_single_order_usd", cap
             violations.append(RiskViolation(

@@ -150,17 +150,38 @@ def _chief_daily(entry: dict) -> dict:
 _RUNNERS = {"clerk-daily": _clerk_daily, "chief-daily": _chief_daily}
 
 
-def run_trade_workflow(workflow_id: str, entry: dict, trigger, *, now: datetime | None = None) -> dict:
+def run_trade_workflow(workflow_id: str, entry: dict, trigger, *, now: datetime | None = None,
+                       current: datetime | None = None) -> dict:
     """One scheduled wake of a trade workflow: a closed market does nothing, an open one runs under the claim.
 
     The claim is keyed by workflow, scope and the planned instant, so a restart that replays the same tick finds
     the first run's result instead of running again. Each workflow runs in its own claim: a Chief failure leaves
     the Clerk's tick untouched, and the reverse.
+
+    `current` is the wall clock when the dispatcher runs the tick. A Chief tick replayed after its session's
+    approval deadline (or, with no deadline, its close) is not run: it would trade a different session than the
+    one it was planned for, and nobody could approve it in time.
     """
     from .schedule_runtime import execute
 
     planned = datetime.fromisoformat(trigger.scheduled_for) if trigger.scheduled_for else (now or datetime.now(ET))
-    if not is_trading_day(planned.astimezone(ET).date()):
+    if workflow_id == "chief-daily":
+        # The Chief trades in whichever session is open at its tick: the regular session, or IBKR's overnight
+        # session (Taipei morning). Neither open (Saturday, a US holiday, an unscheduled closure): no proposal and
+        # no approval request (overnight-session-scheduling D2).
+        from .overnight_session import SKIPPED_SESSION_CLOSED, chief_session
+        from .schedule_runtime import observe
+
+        session = chief_session(planned)
+        if session is None:
+            observe(SKIPPED_SESSION_CLOSED, workflow_id, {"scheduled_for": planned.isoformat()})
+            return {"status": "skipped", "reason": SKIPPED_SESSION_CLOSED}
+        expires = session.closes_at if session.venue == "regular" else session.approval_deadline
+        if current is not None and current >= expires:
+            observe(SKIPPED_SESSION_CLOSED, workflow_id, {"scheduled_for": planned.isoformat(),
+                                                          "run_at": current.isoformat(), "expired_at": expires.isoformat()})
+            return {"status": "skipped", "reason": SKIPPED_SESSION_CLOSED, "detail": "tick_session_expired"}
+    elif not is_trading_day(planned.astimezone(ET).date()):
         return {"status": "skipped", "reason": "market_closed"}
     runner = _RUNNERS[workflow_id]
     return execute(workflow_id, entry["scope"].model_dump(mode="json"), trigger, lambda: runner(entry),

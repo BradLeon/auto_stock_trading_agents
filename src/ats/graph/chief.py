@@ -183,6 +183,7 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     from ..workflow.read_scope import ReadUnavailable
 
     normalization_notes, normalization_errors = [], []
+    deadline: dict = {}                     # an overnight-venue proposal's approval deadline (D2)
     try:
         if pf is None:
             raise PriceUnavailable("portfolio_snapshot_unavailable")
@@ -196,12 +197,20 @@ def risk_gate(state: ChiefDecisionState) -> dict:
         # a closed market (premarket, weekend, Friday night) is, for an event trade, still priced from the previous close
         # and deferred, and, for the daily chief, refused (blockers B9).
         venue = "overnight" if off_session and overnight_session_candidate(_now()) else "regular"
-        overnight = off_session and state.source == "pead-chief" and venue != "overnight"
+        if venue == "regular" and off_session and state.source in ("scheduled", "rehearsal"):
+            # D6: the daily Chief in the pre-market sends SMART limits allowed outside regular hours. (An event trade
+            # keeps its deferred previous-close pricing.)
+            from ..workflow.overnight_session import premarket_window
+
+            venue = "extended" if premarket_window(_now()) else venue
+        if venue != "regular":
+            deadline = _offhours_deadline(venue)
+        overnight = off_session and state.source == "pead-chief" and venue == "regular"
         slip = load_pead_global().get("schedule", {}).get("overnight_limit_slippage_pct", .5)
         decisions, normalization_notes = normalize_orders(
             decisions, cycle_id=state.cycle_id, currency=pf.base_currency if pf else "USD",
             overnight=overnight, slippage_pct=slip, venue=venue,
-            net_liquidation=pf.net_liquidation if pf else 0, skip_unquotable=venue == "overnight",
+            net_liquidation=pf.net_liquidation if pf else 0, skip_unquotable=venue != "regular",
             positions={p.symbol: p.qty for p in pf.positions if p.sec_type == "STK"})
     except (PriceUnavailable, ReadUnavailable, PermissionError) as exc:
         from ..data.execution_prices import proposal_error, proposal_hint
@@ -262,6 +271,10 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     for n in risk_notes:
         print(f"   [risk] {n}")
     out: dict = {"decisions": decisions, "approved_decisions": approved,
+                 # set every round: a revision priced on the regular venue carries no overnight deadline
+                 "approval_deadline": deadline.get("approval_deadline"),
+                 "session_closes_at": deadline.get("session_closes_at"),
+                 "session_venue": deadline.get("session_venue", ""),
                  "revision_no": revision["revision_no"],
                  "revision_hash": revision["decision_hash"], "normalization_errors": [],
                  "normalization_fixable": False,
@@ -275,6 +288,11 @@ def risk_gate(state: ChiefDecisionState) -> dict:
     risk_notes = list(risk_notes) + normalization_notes
     sized = texec.size_decisions(approved)
     summary = texec.build_approval_summary(sized, risk_notes, state.source)
+    if deadline.get("approval_deadline"):
+        from ..workflow.overnight_session import deadline_line
+
+        summary = deadline_line(deadline["approval_deadline"], deadline["session_closes_at"],
+                                deadline["session_venue"]) + "\n" + summary
     if state.option_actions:
         import json
 
@@ -285,6 +303,20 @@ def risk_gate(state: ChiefDecisionState) -> dict:
                qty_by_symbol={d.symbol: q for d, q in sized},
                approval_summary=summary)
     return out
+
+
+def _offhours_deadline(venue: str) -> dict:
+    """The approval deadline of an off-hours proposal: the venue's close minus the approval window (D2, D6).
+
+    Overnight: the OVERNIGHT contract's own close (IBKR), else the exchange calendar's. Extended: that day's regular
+    close. A session neither source sees open leaves no deadline here; the quote read refuses such a session anyway."""
+    from ..workflow.overnight_session import confirmed_overnight_window, premarket_window
+
+    window = (confirmed_overnight_window if venue == "overnight" else premarket_window)(_now())
+    if window is None:
+        return {}
+    return {"approval_deadline": window.approval_deadline, "session_closes_at": window.closes_at,
+            "session_venue": venue}
 
 
 def _decision_repo():
@@ -712,7 +744,8 @@ def boss_review(state: ChiefDecisionState) -> dict:
                                   revision_no=state.revision_no,
                                   decision_hash=state.revision_hash,
                                   boss_revisions=state.boss_revisions,
-                                  max_boss_revisions=state.max_boss_revisions)
+                                  max_boss_revisions=state.max_boss_revisions,
+                                  approval_deadline=state.approval_deadline)
         verdict = interrupt(request.model_dump(mode="json"))
         approval = BossApproval.model_validate(verdict)
         if approval.reviewed_at is None:
@@ -772,6 +805,23 @@ def trader(state: ChiefDecisionState) -> dict:
         approval is not None and approval.status == "approved") else []
     sized_all = [(d, d.qty or 0.0)
                  for d in state.approved_decisions]
+
+    from ..workflow.overnight_session import deadline_rejection
+
+    late = deadline_rejection(state.approval_deadline, approval.reviewed_at or _now()) if approved else None
+    if late:
+        # overnight-session-scheduling D2: an approval after the deadline leaves too little of the session for the
+        # orders to work. Refused, never sent; the next Chief cycle re-decides (a fresh approval is a new cycle).
+        from ..schemas.memory import TradeLogEntry
+
+        print(f"🚫 {late}")
+        entries = [TradeLogEntry(order_id="", cycle_id=state.cycle_id, symbol=d.symbol, action=d.action,
+                                 qty=d.qty or 0.0, status="rejected", revision_no=state.revision_no or 0,
+                                 decision_hash=state.revision_hash or "", submitted_at=_now(),
+                                 rationale=d.rationale, error=late)
+                   for d in approved]
+        return {"order_results": entries, "gate_outcome": "refused", "gate_rejections": [late],
+                "authorization": None}
 
     if state.dry_run or not approved:
         print(f"→ {approval.status}: no orders placed (dry_run={state.dry_run})")

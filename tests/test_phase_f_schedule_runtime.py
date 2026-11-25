@@ -213,7 +213,10 @@ def test_independent_oracle_detects_the_dispatcher_omitting_a_tick(business_inpu
     config=yaml.safe_load(schedules.read_text())
     for name,entry in config["workflows"].items(): entry["enabled"]=(name=="technical-review")
     schedules.write_text(yaml.safe_dump(config)); reset_config_cache()
-    expected=rt.expected_triggers(datetime(2026,10,9,8,29,tzinfo=dispatcher_daemon.ET),datetime(2026,10,9,8,31,tzinfo=dispatcher_daemon.ET))
+    # technical-review runs at 20:00 Taipei since 2026-11-25 (overnight-session-scheduling D1)
+    from zoneinfo import ZoneInfo
+    tpe=ZoneInfo("Asia/Taipei")
+    expected=rt.expected_triggers(datetime(2026,10,9,19,59,tzinfo=tpe),datetime(2026,10,9,20,1,tzinfo=tpe))
     assert len(expected["expected"])==1
     # Only the dispatcher path exists since the legacy serial scheduler was removed (2026-10-20).
     assert set(expected["expected"][0]["paths"])=={"dispatcher"}

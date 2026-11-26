@@ -2230,6 +2230,35 @@ def _run_managed_article_ingestion(*, source_ids: set[str] | None = None,
     return outcomes
 
 
+def _run_registration(action: str, *, entity: str, form: str, file: str, filing_date: str,
+                      accession: str, as_of: str) -> int:
+    """Registration filings of a declared issuer: local file, one-off SEC backfill, or the version chain."""
+    from datetime import date
+
+    from ..data.pipelines.unstructured import registration
+
+    if not entity:
+        print(f"❌ {action} 需要 --entity")
+        return 2
+    try:
+        if action == "registration-filings":
+            cutoff = date.fromisoformat(as_of[:10]) if as_of else None
+            chain = registration.registration_filings(entity, as_of=cutoff)
+            result = {"status": "succeeded", "entity": entity.upper(), "as_of": as_of or None,
+                      "filings": chain, "latest": chain[-1] if chain else None}
+        elif action == "registration-ingest":
+            if not form or not file:
+                print("❌ registration-ingest 需要 --form 与 --file")
+                return 2
+            result = registration.ingest_file(entity, form, file, filing_date=filing_date, accession=accession)
+        else:
+            result = registration.backfill(entity)
+    except (OSError, ValueError) as exc:
+        result = {"status": "failed", "reason_code": str(exc) or type(exc).__name__}
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 0 if result["status"] in {"succeeded", "no_change", "partial", "quarantined"} else 1
+
+
 def run_data(
     action: str,
     value: str = "",
@@ -2239,6 +2268,10 @@ def run_data(
     ingest_new: bool = False,
     series: str = "",
     entity: str = "",
+    form: str = "",
+    file: str = "",
+    filing_date: str = "",
+    accession: str = "",
     provider: list[str] | None = None,
     since: str = "",
     as_of: str = "",
@@ -2360,6 +2393,10 @@ def run_data(
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["status"] in {"succeeded", "no_change", "partial",
                                          "quarantined"} else 1
+
+    if action in {"registration-ingest", "registration-backfill", "registration-filings"}:
+        return _run_registration(action, entity=entity or value, form=form, file=file,
+                                 filing_date=filing_date, accession=accession, as_of=as_of)
 
     if action == "chain-source-collect":
         source_id = source or value
@@ -3170,6 +3207,9 @@ def main(argv: list[str] | None = None) -> int:
             "article-metadata-reconcile",
             "document-ingest",
             "fixed-ingest",
+            "registration-ingest",
+            "registration-backfill",
+            "registration-filings",
             "chain-source-collect",
             "article-evidence-observe",
             "evidence-observe",
@@ -3277,6 +3317,11 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--dataset", default="", help="结构化 dataset ID 过滤")
     data.add_argument("--scope", default="", help="Ramp 图表 scope（adoption_overall 等）")
     data.add_argument("--entity", default="", help="实体过滤")
+    data.add_argument("--form", default="", help="registration-ingest: 表单类型 S-1 / S-1/A / 424B4")
+    data.add_argument("--file", default="", help="registration-ingest: 本地注册文件（HTML 或 SEC 完整提交文本）")
+    data.add_argument("--filing-date", default="",
+                      help="registration-ingest: 申报日期 YYYY-MM-DD；封面写明时可省略，给出时须一致")
+    data.add_argument("--accession", default="", help="registration-ingest: SEC accession 号（若已知）")
     data.add_argument("--lookback-days", type=int, default=7,
                       help="evidence-observe: 向前查找最近一次已发布财报的天数（日常 7，补抽 60）")
     data.add_argument("--dry-run", action="store_true",
@@ -3781,6 +3826,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "data":
         persistent_write = args.action in {
             "ingest", "article-ingest", "document-ingest", "fixed-ingest", "factset-import", "factset-reprocess",
+            "registration-ingest", "registration-backfill",
             "factset-refresh", "factset-semantic-refresh", "calendar-refresh", "calendar-finalize",
         } or (args.action == "release-check" and args.ingest_new)
         persistent_write = persistent_write or args.action == "chain-source-collect"
@@ -3806,6 +3852,15 @@ def main(argv: list[str] | None = None) -> int:
                     raw_args = list(argv) if argv is not None else sys.argv[1:]
                     trigger_at = datetime.now(timezone.utc).replace(second=0, microsecond=0)
                     source_id = args.source or args.value or args.group or args.dataset
+                    if args.action.startswith("registration-"):
+                        # One source per command; the worker reads the file from the repository root, so the
+                        # operator's relative path is made absolute before it is queued.
+                        from ..data.pipelines.unstructured import registration
+
+                        source_id = (registration.LOCAL_SOURCE_ID if args.action == "registration-ingest"
+                                     else registration.SEC_SOURCE_ID)
+                        if args.file:
+                            raw_args = [*raw_args, "--file", str(Path(args.file).expanduser().resolve())]
                     if args.action == "evidence-observe":
                         source_id = source_id or args.entity
                     elif args.action == "macro-news-collect":
@@ -3895,6 +3950,10 @@ def main(argv: list[str] | None = None) -> int:
             args.action,
             args.value,
             source=args.source,
+            form=args.form,
+            file=args.file,
+            filing_date=args.filing_date,
+            accession=args.accession,
             group=args.group,
             ingest_new=args.ingest_new,
             series=args.series,

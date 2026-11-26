@@ -18,8 +18,15 @@ document_types:
   - earnings_transcript
   - company_release
   - news_item
+  - registration_statement
 record_types:
   - sec_filing_metadata
+# 需要处理注册类文件（S-1、S-1/A、424B4）的发行人。只有列在这里的发行人可以走本地入库
+# （ats data registration-ingest）或一次性补采（ats data registration-backfill）；每日 SEC 发现不拉这些表单。
+# registrant_name 是文件封面上的注册人法定名称，用于身份核对。
+registration_issuers:
+  ANT:
+    registrant_name: Anthropic, PBC
 admission:
   require_source_url: true
   quarantine_on_short_body: true
@@ -36,6 +43,9 @@ datasets:
   sec_filing_documents:
     document_types: [regulatory_filing, company_release]
     sources: [sec_edgar_filing_body]
+  registration_documents:
+    document_types: [registration_statement]
+    sources: [sec_registration_filing, local_registration_file]
   earnings_transcripts:
     document_types: [earnings_transcript]
     sources: [defeatbeta_earnings_transcript]
@@ -344,6 +354,41 @@ sources:
       usage: public_official_disclosure
       retention: immutable_official_body
       freshness_days: 3
+  sec_registration_filing:
+    # One-off, per issuer (registration_issuers): ats data registration-backfill --entity ANT. Not scheduled.
+    domain: unstructured
+    source_kind: registration_filing
+    datasets: [registration_documents]
+    provider: SEC EDGAR
+    adapter: sec_registration_by_issuer
+    status: registered
+    cadence: on_demand
+    request_budget: {max_index_requests_per_run: 2, max_requests_per_run: 8, max_documents_per_run: 8, timeout_seconds: 60, max_body_bytes: 60000000}
+    policy:
+      forms: [S-1, S-1/A, 424B4]
+      permission: public_official_disclosure
+      require_accession: true
+      require_official_url: true
+      allowed_hosts: [www.sec.gov, www.sec.gov:443]
+      fallback: none
+      usage: public_official_disclosure
+      retention: immutable_official_body
+  local_registration_file:
+    # A file the operator already has: ats data registration-ingest --entity ANT --form S-1 --file <path>.
+    domain: unstructured
+    source_kind: registration_filing
+    datasets: [registration_documents]
+    provider: 本地提供
+    adapter: local_registration_file
+    status: registered
+    cadence: on_demand
+    request_budget: {max_documents_per_run: 1}
+    policy:
+      forms: [S-1, S-1/A, 424B4]
+      permission: public_official_disclosure
+      fallback: none
+      usage: public_official_disclosure
+      retention: immutable_official_body
   defeatbeta_earnings_transcript:
     domain: unstructured
     source_kind: fixed_transcript

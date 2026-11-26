@@ -111,13 +111,14 @@ def resolve_ciks(symbols: list[str], *, known: dict[str, str], requests: _Reques
     return resolved
 
 
-def recent_filings(symbol: str, cik: str, payload: dict, *, since: date) -> list[dict[str, Any]]:
+def recent_filings(symbol: str, cik: str, payload: dict, *, since: date,
+                   forms: tuple[str, ...] = FORMS) -> list[dict[str, Any]]:
     recent = (payload.get("filings") or {}).get("recent") or {}
     columns = ("accessionNumber", "form", "filingDate", "reportDate", "acceptanceDateTime", "primaryDocument")
     rows = list(zip(*(recent.get(name) or [] for name in columns), strict=False))
     output = []
     for accession, form, filed, report, accepted, primary in rows:
-        if form not in FORMS or not filed or date.fromisoformat(filed) < since:
+        if form not in forms or not filed or date.fromisoformat(filed) < since:
             continue
         base = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}"
         output.append({"symbol": symbol, "cik": str(int(cik)), "accession_number": accession,

@@ -19,6 +19,8 @@ class DocumentSemantic(StrEnum):
     INVESTOR_PRESENTATION = "investor_presentation"
     EARNINGS_TRANSCRIPT = "earnings_transcript"
     REGULATORY_FILING = "regulatory_filing"
+    # S-1, S-1/A, 424B4: an official filing that is not earnings material.
+    REGISTRATION_STATEMENT = "registration_statement"
 
 
 class CarrierFormat(StrEnum):
@@ -37,6 +39,7 @@ LEGACY_TO_SEMANTIC: dict[str, DocumentSemantic] = {
     "deck": DocumentSemantic.INVESTOR_PRESENTATION,
     "transcript": DocumentSemantic.EARNINGS_TRANSCRIPT,
     "filing": DocumentSemantic.REGULATORY_FILING,
+    "registration": DocumentSemantic.REGISTRATION_STATEMENT,
 }
 SEMANTIC_TO_LEGACY: dict[DocumentSemantic, str] = {
     semantic: legacy for legacy, semantic in LEGACY_TO_SEMANTIC.items()

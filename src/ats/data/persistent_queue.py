@@ -40,6 +40,7 @@ _SAFE_COMMANDS = {
     "chain-source-collect", "calendar-refresh", "calendar-finalize",
     "evidence-observe", "macro-news-collect",
     "article-evidence-observe",      # article-witness-observations 2.3 (2026-11-13)
+    "registration-ingest", "registration-backfill",
 }
 
 

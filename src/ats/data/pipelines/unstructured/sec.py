@@ -76,6 +76,8 @@ class SECTransport:
         self.remaining = int(budget["max_requests_per_run"])
         self.failures_remaining = int(budget.get("max_failed_requests_per_run", self.remaining))
         self.timeout = float(budget.get("timeout_seconds", 30))
+        # A registration statement is far larger than a periodic report; its source raises this.
+        self.max_body_bytes = int(budget.get("max_body_bytes", 12_000_000))
         self.user_agent = (os.environ.get("SEC_EDGAR_USER_AGENT") or
                            os.environ.get("ATS_SEC_USER_AGENT") or "").strip()
         if not self.user_agent:
@@ -125,7 +127,7 @@ class SECTransport:
                             payload = bytearray()
                             for chunk in response.iter_bytes():
                                 payload.extend(chunk)
-                                if len(payload) > 12_000_000:
+                                if len(payload) > self.max_body_bytes:
                                     raise ValueError("sec_body_over_budget")
                             self.remaining -= 1
                             return bytes(payload).decode(response.encoding or "utf-8",

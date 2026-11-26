@@ -36,9 +36,13 @@
 - 原方案（证据账本折叠为 ANT）在实施中撤回；撤回前定时任务写入生产的两行已于 2026-11-26 清理。
 
 ### D2 注册类文件：本地入库命令 + 按发行人补采
-- 新增运维命令（暂定 `ats data registration-ingest --entity ANT --form S-1 --file <path>`）。它把本地文件包装成与 SEC 正文入库相同的行结构，复用 `fetch_filing` 之后的准入与存储，注册人名称和申报日期从封面解析。
-- SEC 补采：`FORMS` 增加 S-1、S-1/A、424B4，但**只对配置里声明需要补采注册文件的发行人生效**（ANT），并且走一次性补采命令，不进入每日发现，避免把所有 target 多年前的 S-1 都拉进来。
-- 注册类文件的文档类型与财报材料分开，不触发财报事件路由。
+- 运维命令：`ats data registration-ingest --entity ANT --form S-1 --file <path>`（本地文件）、`ats data registration-backfill --entity ANT`（SEC 一次性补采）、`ats data registration-filings --entity ANT [--as-of]`（版本链）。写入经托管队列，复用固定来源文档的准入与存储。
+- 发行人在 `config/data/unstructured.yaml` 的 `registration_issuers` 声明，附封面注册人法定名称；身份核对只认封面上的这个名称，不用按代码或正文提及的宽松匹配（"ant" 是普通词）。
+- 两个来源 `local_registration_file`、`sec_registration_filing`，cadence 为 on_demand，不进任何定时任务。每日发现的 `FORMS` 不变，S-1、S-1/A、424B4 只在补采命令里使用。
+- 文档类型 `registration_statement`，不在财报材料角色里，不触发财报事件路由。
+- 版本链按（申报日期, 表单顺序, accession）排序，查询时计算，不改写前版。本地已有同一（表单, 申报日期）时补采不再下载。只附展品的 S-1/A 记为不适用，不能成为"最新注册文件"。
+- 正文抽取单独实现：行内标签不插空格并解码实体，不改既有财报抽取器（改它会改变历史文档的内容哈希）。
+- SEC 单文件上限由来源预算 `max_body_bytes` 给出（首版 S-1 约 14 MB，超过原 12 MB 固定值）。
 
 ### D3 SEC 例行通路不写 ANT 专用代码
 ANT 加入 `config/pead.yaml` 的 targets 后，现有的发现、正文、XBRL 任务会自动覆盖它。验收用回放：用 SPCX（2026-05 递 S-1 上市、已发布定期报告）和 NVDA 的一个历史财报事件，离线回放发现 → 正文 → XBRL → 实际值抽取的全过程，证明通路可用。ANT 首份 10-Q 发布后再做一次真实验收。

@@ -1,6 +1,6 @@
 # Tasks
 
-> 前置：第 1、2 组需要 `ant-thesis-monitor` 的投影；第 4、5 组只依赖 `ant-data-onboarding` 5.2 核对过的解禁日期，可以先做，并且**必须在 2026-12-16 前上线**。验收结果写入本 change 的 `verification.md`。
+> 前置：第 1、2 组需要 `ant-thesis-monitor` 的投影；第 4、5 组只依赖 `ant-data-onboarding` 16.3 核对过的解禁日期，可以先做，并且**必须在 2026-12-16 前上线**。验收结果写入本 change 的 `verification.md`。
 
 ## 1. 快照与主理人上下文
 

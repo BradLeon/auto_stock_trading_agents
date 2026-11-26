@@ -29,7 +29,7 @@
 
 ## Impact
 
-- **依赖**：`ant-thesis-monitor` 的投影；`ant-data-onboarding` 5.2 核对过的解禁日期。
+- **依赖**：`ant-thesis-monitor` 的投影；`ant-data-onboarding` 16.3 核对过的解禁日期。
 - **配置**：`config/workflow/decision_profiles.yaml` 的 `optional_categories`；`config/risk.yaml` 新增解禁窗口、代理 beta 与代理簇（规则集版本随之变化）；`config/thesis/ANT.yaml` 新增 `tiers`。
 - **代码**：主理人快照组装、主理人 skill 与决策 schema（表态字段）、主理人图中风控之前的表态关口、风控检查新增规则、beta 与相关性的代理回退、交易日志字段。
 - **交易行为**：只会多拦，不会多放。表态关口和解禁规则都只会退回或驳回；代理 beta 会让 ANT 的风险读数更保守。所有交易仍需用户人工批准。

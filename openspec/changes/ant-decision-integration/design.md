@@ -51,7 +51,7 @@ tiers: {observe: <用户定>, standard: <用户定>, target: <用户定>}
 - 档位只约束主理人因监测信号提出的增减，风控仍按"静态上限 × 层配置比例"的有效上限审查，两者取更严的一方。
 
 ### D4 解禁窗口写进规则包
-- `risk.yaml` 新增 `event_windows.ANT.lockups: [{date, days_before, days_after}]`，数据来自 `ant-data-onboarding` 5.2 用 424B4 核对的结果。
+- `risk.yaml` 新增 `event_windows.ANT.lockups: [{date, days_before, days_after}]`，数据来自 `ant-data-onboarding` 16.3 用 424B4 核对的结果。
 - `review_revision` 在逐单检查中加入 `lockup_window` 规则：窗口内增加经济敞口的订单判为硬违规。
 - 经济敞口按 `instruments` 归一，所以通过期权或杠杆 ETF 增加 ANT 敞口也会被拦下。
 - 不选只靠监测的"加仓禁止窗口"标注：标注是给主理人看的，风控规则才是硬约束。两者数据同源，不会矛盾。

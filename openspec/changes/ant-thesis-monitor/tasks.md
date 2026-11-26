@@ -1,11 +1,11 @@
 # Tasks
 
-> 前置：`ant-data-onboarding` 第 1、2、4、5 组完成；其余数据未就绪时，对应指标显示"未覆盖"。验收结果写入本 change 的 `verification.md`。
+> 前置：`ant-data-onboarding` 第 1、2、4 组完成；其余数据未就绪时，对应指标显示"未覆盖"。验收结果写入本 change 的 `verification.md`。
 
 ## 1. 配置
 
 - [ ] 1.1 定义 `config/thesis/` 的 schema（问题、指标、封闭的恶化条件形状、E/R/A、优先级、执行纪律），配一个加载器。验证：schema 测试覆盖"未知恶化形状被拒绝"和"引用不存在的指标被拒绝"。
-- [ ] 1.2 按 Claude 文稿写 `config/thesis/ANT.yaml`，解禁日取自 `ant-data-onboarding` 5.2 核对的结果。验证：与用户逐条对照文稿，确认后写入 `verification.md`。
+- [ ] 1.2 按 Claude 文稿写 `config/thesis/ANT.yaml`，解禁日取自 `ant-data-onboarding` 16.3 核对的结果。验证：与用户逐条对照文稿，确认后写入 `verification.md`。
 
 ## 2. 确定性引擎
 

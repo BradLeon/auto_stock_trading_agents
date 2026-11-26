@@ -91,7 +91,10 @@ def test_packet_states_revenue_observed_and_economics_unverified(seeded_products
     assert packet["status"] == "ok"
     assert packet["economics_verified"] is False
     assert packet["retention_verified"] is False
-    assert packet["overall_status"] == "revenue_monetization_expanding_but_economics_unverified"
+    # In the frozen fixtures OpenAI has only two points from either source: no direction without joining sources.
+    assert {company["entity_id"]: company["trend"]["status"] for company in packet["companies"]} == {
+        "OPENAI": "insufficient_history", "ANTHROPIC": "expanding"}
+    assert packet["overall_status"] == "revenue_monetization_partial_but_economics_unverified"
     assert packet["coverage"]["revenue_scale_and_growth"] == "observed"
     for key in ("revenue_retention", "unit_economics", "business_model_durability"):
         assert packet["coverage"][key] == "not_yet_observed"

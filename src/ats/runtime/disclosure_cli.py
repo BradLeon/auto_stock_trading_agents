@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 ACTIONS = ("disclosure-extract", "disclosure-candidates", "disclosure-confirm", "disclosure-reject",
-           "disclosure-correct", "disclosure-series")
+           "disclosure-correct", "disclosure-series", "disclosure-derived")
 WRITES = ("disclosure-extract", "disclosure-confirm", "disclosure-reject", "disclosure-correct")
 CORRECTABLE = ("value_text", "scale", "scale_quote", "period_end", "period_basis", "quote", "period_quote",
                "header_quote", "column_index", "bucket", "qualifier")
@@ -83,6 +83,7 @@ def run(action: str, *, entity: str, form: str = "", metric: str = "", status: s
         settings_changes: list[str] | None = None, isolated: bool = False) -> int:
     from ..data.pipelines.structured import disclosure_metrics as pipeline
     from ..data.products import company_disclosure_metrics as product
+    from ..data.products import company_disclosure_ratios as ratios
     from ..data.runtime.repository import get_platform_structured_repository
     from ..data.stores.structured import disclosure_review
     from ..data.stores.unstructured import get_platform_unstructured_repository
@@ -116,7 +117,7 @@ def run(action: str, *, entity: str, form: str = "", metric: str = "", status: s
                     result = pipeline.extract_document(repository, document, settings, metrics)
             finally:
                 repository.close()
-        elif action in {"disclosure-candidates", "disclosure-series"}:
+        elif action in {"disclosure-candidates", "disclosure-series", "disclosure-derived"}:
             repository = _readonly()
             try:
                 if action == "disclosure-candidates":
@@ -127,9 +128,13 @@ def run(action: str, *, entity: str, form: str = "", metric: str = "", status: s
                     result = {"status": "succeeded", "count": len(rows), "candidates": rows}
                 else:
                     cutoff = datetime.fromisoformat(as_of) if as_of else None
-                    result = {"status": "succeeded",
-                              "series": product.series(repository, entity, metric=metric, as_of=cutoff),
-                              "coverage": product.coverage(repository, entity)}
+                    if action == "disclosure-derived":
+                        result = {"status": "succeeded",
+                                  "ratios": ratios.derived(repository, entity, as_of=cutoff)}
+                    else:
+                        result = {"status": "succeeded",
+                                  "series": product.series(repository, entity, metric=metric, as_of=cutoff),
+                                  "coverage": product.coverage(repository, entity)}
             finally:
                 repository.close()
         else:

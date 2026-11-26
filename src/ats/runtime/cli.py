@@ -3246,6 +3246,7 @@ def main(argv: list[str] | None = None) -> int:
             "disclosure-reject",
             "disclosure-correct",
             "disclosure-series",
+            "disclosure-derived",
             "chain-source-collect",
             "article-evidence-observe",
             "evidence-observe",

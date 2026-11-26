@@ -2342,6 +2342,7 @@ def run_data(
     evidence_fingerprint_paths: list[str] | None = None,
     evidence_reason: str = "",
     evidence_event_id: str = "",
+    disclosure: dict | None = None,
 ) -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
@@ -2415,6 +2416,13 @@ def run_data(
         print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         return 0 if result["status"] in {"succeeded", "no_change", "partial",
                                          "quarantined"} else 1
+
+    if action.startswith("disclosure-"):
+        from . import disclosure_cli
+
+        return disclosure_cli.run(
+            action, entity=entity or value, form=form, metric=metric, status=status, as_of=as_of,
+            output_format=output_format, isolated=bool(db_path or artifact_root or force), **(disclosure or {}))
 
     if action in {"registration-ingest", "registration-backfill", "registration-filings"}:
         return _run_registration(action, entity=entity or value, form=form, file=file,
@@ -3232,6 +3240,12 @@ def main(argv: list[str] | None = None) -> int:
             "registration-ingest",
             "registration-backfill",
             "registration-filings",
+            "disclosure-extract",
+            "disclosure-candidates",
+            "disclosure-confirm",
+            "disclosure-reject",
+            "disclosure-correct",
+            "disclosure-series",
             "chain-source-collect",
             "article-evidence-observe",
             "evidence-observe",
@@ -3344,6 +3358,14 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--filing-date", default="",
                       help="registration-ingest: 申报日期 YYYY-MM-DD；封面写明时可省略，给出时须一致")
     data.add_argument("--accession", default="", help="registration-ingest: SEC accession 号（若已知）")
+    data.add_argument("--document", default="", help="disclosure-extract: 指定已入库文件（代替 --form 取最新一版）")
+    data.add_argument("--candidate", action="append", default=[],
+                      help="disclosure-confirm/reject/correct: 候选 ID，可重复")
+    data.add_argument("--reviewer", default="", help="disclosure-confirm/reject/correct: 审阅人")
+    data.add_argument("--note", default="", help="disclosure-reject/correct: 理由；confirm 可选")
+    data.add_argument("--basis-note", default="", help="disclosure-confirm: 记录口径变化")
+    data.add_argument("--set", dest="changes", action="append", default=[],
+                      help="disclosure-correct: 字段=值，例如 period_end=2026-09-30，可重复")
     data.add_argument("--lookback-days", type=int, default=7,
                       help="evidence-observe: 向前查找最近一次已发布财报的天数（日常 7，补抽 60）")
     data.add_argument("--dry-run", action="store_true",
@@ -3854,6 +3876,9 @@ def main(argv: list[str] | None = None) -> int:
             "factset-refresh", "factset-semantic-refresh", "calendar-refresh", "calendar-finalize",
         } or (args.action == "release-check" and args.ingest_new)
         persistent_write = persistent_write or args.action == "chain-source-collect"
+        persistent_write = persistent_write or args.action in {
+            "disclosure-confirm", "disclosure-reject", "disclosure-correct"} or (
+            args.action == "disclosure-extract" and not args.dry_run)
         persistent_write = persistent_write or (
             args.action in {"evidence-observe", "macro-news-collect", "article-evidence-observe"}
             and not args.dry_run)
@@ -3885,6 +3910,8 @@ def main(argv: list[str] | None = None) -> int:
                                      else registration.SEC_SOURCE_ID)
                         if args.file:
                             raw_args = [*raw_args, "--file", str(Path(args.file).expanduser().resolve())]
+                    if args.action.startswith("disclosure-"):
+                        source_id = "company_disclosure_metrics"
                     if args.action == "evidence-observe":
                         source_id = source_id or args.entity
                     elif args.action == "macro-news-collect":
@@ -3910,6 +3937,9 @@ def main(argv: list[str] | None = None) -> int:
                         trigger_kind="manual", trigger_ref=trigger_at.isoformat(),
                         command=["ats", *raw_args], policy_fingerprint=policy,
                         requested_as_of=trigger_at.isoformat(), priority=20,
+                        # A person's release decision, or a run that calls a model, is never replayed later by the
+                        # queue: the operator reruns the command.
+                        max_attempts=1 if args.action.startswith("disclosure-") else 3,
                     )
                     result = queue.run_one(task_id=task_id)
                     if result is None:
@@ -4030,6 +4060,9 @@ def main(argv: list[str] | None = None) -> int:
             evidence_fingerprint_paths=args.evidence_fingerprint_paths,
             evidence_reason=args.evidence_reason,
             evidence_event_id=args.evidence_event_id,
+            disclosure={"dry_run": args.dry_run, "document_id": args.document, "candidate_ids": args.candidate,
+                        "reviewer": args.reviewer, "note": args.note, "basis_note": args.basis_note,
+                        "settings_changes": args.changes} if args.action.startswith("disclosure-") else None,
         )
     if args.command == "ibkr":
         return ibkr_probe()

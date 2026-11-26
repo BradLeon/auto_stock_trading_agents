@@ -244,3 +244,44 @@ CIK 2130357。结果 succeeded：入库 4 份，首版 S-1 因本地已有而跳
 | `events label` | 参数通过，临时库没有占位事件故报 `unknown calendar event`；成功路径由 `tests/test_calendar_unlabeled_earnings.py` 覆盖 |
 
 核对中发现文档初稿漏了财季标签命令必填的 `--evidence-json`，已改。经托管队列执行时工作进程自动读取仓库 `.env`；只有绕过队列的隔离运行需要手工导出 `SEC_EDGAR_USER_AGENT`。
+
+## 第 7 组：公司披露指标通路（2026-11-26，7.1–7.4；7.5 未执行）
+
+分支 `feat/ant-sec-routine`，尚未提交与合并；没有发出模型请求，没有写生产库。
+
+### 实现
+
+- 清单 `config/data/disclosure_metrics.yaml`：ANT 23 项，每项带单位、期间类型、定义与定位词。
+- 定位、抽取、核验、候选：`pipelines/structured/disclosure_metrics.py`、`agents/disclosure/`、`skills/disclosure-extract/`。
+- 确认、驳回、更正、序列：`stores/structured/disclosure_review.py`、`products/company_disclosure_metrics.py`。
+- 命令 `ats data disclosure-{extract,candidates,confirm,reject,correct,series}`，说明见 `docs/OPERATIONS.md` §5.2。
+- 模型路由新增角色 `disclosure_extract`（`config/settings.yaml`）；`agents/base.py` 未改。
+
+### 测试
+
+- `tests/test_disclosure_metrics.py` 19 项通过：清单加载，片段不含数值记为证据不完整，未披露不生成零值，单位、期间、表格列核验，缓存，确认人留痕，更正保留历史，多版文件取较新值并标记冲突。
+- 运维文档一致性两项起初失败（新来源与数据集未登记），补登记后与登记文件、队列失败输出、官方披露、数据层文档测试一起 61 项通过。
+- 新增文件的 ruff `F`、`B` 类检查通过。
+
+### 命令行核对
+
+| 命令 | 结果 |
+|---|---|
+| `disclosure-extract --form S-1 --dry-run`（生产库只读） | succeeded，需 18 次模型请求 |
+| `disclosure-extract --form 424B4 --dry-run`（生产库只读） | succeeded，需 19 次模型请求 |
+| `disclosure-candidates`、`disclosure-series`（生产库只读） | 空候选、空序列，各指标 `not_extracted` |
+| `disclosure-confirm` 不存在的候选（临时库、临时队列） | 经队列执行并返回 `disclosure_candidate_not_found` |
+
+预演后生产库中没有新表。队列核对发现失败命令默认进入 `retry_wait`、最多尝试 3 次，人工确认可能在日后被自动重放，抽取失败也会再次请求模型；已改为 `disclosure-*` 只尝试一次，临时队列复核为 `failed`、1/1 次。
+
+### 离线预演（定位结果，不调模型）
+
+| 文件 | 请求数 | 送入字符 | 全文未定位 |
+|---|---|---|---|
+| S-1（10-26） | 18 | 119,430 | 推理毛利、未来 12 个月到期承诺、GRR、产品收入、前十大客户占比 |
+| 424B4（11-19） | 19 | 132,526 | 推理毛利、GRR、产品收入、前十大客户占比 |
+
+合计 37 次请求；模型返回空内容时底层会重试，单项最多 4 次。
+
+人工查读定位段落得到的待核对事实（以回放后的候选与原文比对为准）：424B4 写明算力是单一共享资源、按总量评估，不按推理与训练拆分，只有按性质列示的算力与基础设施费用，以及按职能列示的营业成本与研发费用。能否用营业成本代理“推理算力”（文稿指标 1a.a）需要用户决定，抽取不做替代。
+

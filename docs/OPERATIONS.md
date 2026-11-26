@@ -221,6 +221,31 @@ ats data registration-filings --entity ANT                                 # 查
   每次只下载还没有的版本；超时导致的 `partial` 直接重跑。
 - 重复执行返回 `no_change`，不产生新版本。入库本身不请求模型，不写事件日历，也不进财报事件材料。
 
+### 5.2 公司披露指标（招股书与定期报告里的经营指标）
+
+清单在 `config/data/disclosure_metrics.yaml`（当前只有 ANT）。流程是：按章节定位段落 → 模型逐指标抄录数值与原文
+→ 代码核对原文、单位、期间和表格列 → 候选 → **人工确认后才发布**。
+
+```bash
+ats data disclosure-extract --entity ANT --form 424B4 --dry-run   # 只定位段落，报告需要几次模型请求；不调模型、不写库
+ats data disclosure-extract --entity ANT --form 424B4             # 抽取并生成候选（调模型，写生产库）
+ats data disclosure-candidates --entity ANT --format markdown     # 逐条看数值、期间和原文；只读
+ats data disclosure-confirm --entity ANT --candidate <ID> --reviewer <审阅人>
+ats data disclosure-reject  --entity ANT --candidate <ID> --reviewer <审阅人> --note "<理由>"
+ats data disclosure-correct --entity ANT --candidate <ID> --reviewer <审阅人> --note "<理由>" --set period_end=2026-09-30
+ats data disclosure-series  --entity ANT                          # 已发布序列与各指标覆盖状态；只读
+```
+
+- `--metric rpo.total,rpo.next_12m_share` 只处理指定指标；`--document <ID>` 指定任意已入库文件（例如日后的 10-Q）。
+- 写库的命令经持久化队列执行且只执行一次：失败后队列不会自动重跑，需要时由操作者重新发起。
+- 同一请求（模型、提示、段落都相同）只发一次，回答缓存在结构化库里；改了核对规则后重跑不会重新请求。
+  改指标清单的定位词或口径、改提示或换模型，会产生新请求。
+- 状态 `证据不完整` 的候选不能确认，先 `disclosure-correct`（`--set` 可改数值原文、期间、原文片段、表头等，改完重新核对）或驳回。
+- 同一指标同一期间在多份文件里取值不同时，默认取申报日较新的文件，旧值与冲突标记在查询结果里一并列出。
+  口径变了（例如一项费用拆成两项）在确认时加 `--basis-note "<说明>"`。
+- `disclosure-reject` 对已发布的候选表示撤回：观测保留，但不再进入默认序列。
+- “未披露”表示模型读过相关段落但文件没有直接给出该指标；“未定位”表示全文没有匹配到相关措辞，两者都不生成数值。
+
 ## 6. 事件日历
 
 ```bash

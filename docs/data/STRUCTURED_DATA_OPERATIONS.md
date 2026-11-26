@@ -688,6 +688,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `macro_series_feeds` | `current_partial` | `persistent` | `macro_series` |
 | `factset_earnings_insight_metrics` | `current_partial` | `persistent` | `sp500_earnings_insight` |
 | `accepted_document_evidence` | `deferred` | `persistent` | `private_company_events` |
+| `company_disclosure_metrics` | `current_partial` | `persistent` | `company_disclosure_metrics` |
 | `ibkr_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_market` | `runtime_excluded` | `runtime` | — |
 | `yfinance_options` | `runtime_excluded` | `runtime` | — |
@@ -715,6 +716,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `macro_series` | `current_partial` |
 | `sp500_earnings_insight` | `current_partial` |
 | `private_company_events` | `deferred` |
+| `company_disclosure_metrics` | `current_partial` |
 
 ### 10.2 请求预算与 checked-in mode
 
@@ -740,6 +742,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `macro_series_feeds` | `macro_series` | `current_partial` | `platform` | daily | concurrency 1；约 40 请求（FRED 21 个序列、行情一次批量、CNN 一次）；日常重读最近 120 天，首次回填 11 年；Macro 评审读取，评审中不再联网 |
 | `factset_earnings_insight_metrics` | `sp500_earnings_insight` | `current_partial` | `platform` | weekly | concurrency 1；每周 1 次受控 URL 解析；60s；仅限许可的内部研究使用 |
 | `accepted_document_evidence` | `private_company_events` | `deferred` | `legacy` | event | 本轮不采集、不发布；保留 evidence workbench 供后续单独批准 |
+| `company_disclosure_metrics` | `company_disclosure_metrics` | `current_partial` | `platform` | on filing | 不抓取远端：读已入库的注册文件与定期报告；每个指标一次短上下文模型调用，结果按请求缓存；人工确认后才发布；concurrency 1 |
 | `sacra_public_company_profiles` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | weekly | concurrency 1；公开页面探测；保留最小证据切片 |
 | `tickertrends_public_research` | `frontier_ai_labs_revenue` | `current_partial` | `platform` | **每 7 天**（与 Sacra 同一研究对象的第二信息源，共用发现组） | concurrency 1；每周期 1 次公开 Substack post API；不接入付费 API；语义指纹未变即 `no_change` |
 

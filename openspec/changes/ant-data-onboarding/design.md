@@ -79,6 +79,15 @@ ANT 加入 `config/pead.yaml` 的 targets 后，现有的发现、正文、XBRL 
 - 不选证据观察器：它服务于命题判读，不产出数值序列。
 - 实现前先查结构化存储是否已有可复用的候选、隔离状态（`structured_observations` 的状态字段）；有就复用，没有再新增候选表。
 
+D7 补注（7.1 结论与实现取舍，2026-11-26）：
+- 复用结构化存储里通用的 `structured_evidence_candidates`、`structured_evidence_reviews`、`structured_evidence_links` 三张表（改动前生产库中均为空），候选、审阅历史、发布链接都落在其中。既有 `EvidenceWorkbench` 绑定事件语义，复核逻辑另写 `disclosure_review.py`。`structured_candidates` 是供应方抓取的隔离区，不适用。
+- 只新增一张表 `structured_document_extractions`：按请求缓存模型回答，并记录“未披露”“未定位”。
+- 请求身份是（模型名、skill 文本、送入的上下文）的哈希。文件版本、指标定义或定位结果变化会改变上下文；只改代码核验规则不会重新请求。失败的请求不缓存。
+- 观测挂在结构化实体 `ANTHROPIC`（D1），证券代码 `ANT` 保存在候选原始记录里。
+- 数值由代码用“原文数字 × 单位倍数”计算，模型只抄录。表格行要求列标题与列序号能对上期间或维度，对不上记 `table_column_unverified`。
+- 口径变化不自动识别，由审阅人在确认时写 `--basis-note`。
+- 写库命令经托管队列执行且只尝试一次：人工确认和调模型的运行不由队列事后重放。
+
 ### D8 成本控制：不把整份文件交给模型
 S-1 约 157 万字符。抽取只把定位出的段落交给模型，每个指标一次短上下文调用，同一文件版本和指标的结果缓存，重跑不重复请求。首轮回放前先报告请求数，由用户确认。
 

@@ -166,6 +166,7 @@ feature_flags:
     factset_earnings_insight_metrics: platform
     factset_earnings_insight_index: platform
     factset_earnings_insight_sector: platform
+    company_disclosure_metrics: platform   # 注册文件与定期报告中的经营指标（人工确认后发布）
     # L1 生产化扩散观察器的四个来源（BTOS / RPS / Anthropic Economic Index / Ramp）。
     anthropic_economic_index: platform
     us_census_btos: platform
@@ -611,6 +612,18 @@ sources:
       concurrency: 1
       requests_per_run: 1
       timeout_seconds: 60
+
+  # 发行人在注册文件与定期报告里披露、标准 XBRL 标签没有的经营指标。清单见 config/data/disclosure_metrics.yaml；
+  # 不抓取远端：读已入库的文件，模型抄录、代码核验、人工确认后才发布（ats data disclosure-*）。
+  company_disclosure_metrics:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: 发行人注册文件与定期报告
+    adapter: company_disclosure_metrics
+    datasets: [company_disclosure_metrics]
+    cadence: on_filing
+    retention: evidence_link_only
+    internal_request_budget: {concurrency: 1}
 
   # Deliberate non-datasets. These entries must never be scheduled, backfilled or
   # written to the structured repository/artifact store. They have no datasets and
@@ -1282,6 +1295,40 @@ datasets:
       shadow_relative_tolerance: 0.000001
     acceptance_samples: [AMZN, MSFT, KLAC, TSM]
     rollback_on: [target_period_conflict, future_leakage, stale, shadow_mismatch]
+  company_disclosure_metrics:
+    catalog_status: current_partial
+    entities: [ANTHROPIC]
+    expected_cadence: on_filing
+    primary_sources: [company_disclosure_metrics]
+    core_metrics:
+      - disclosure.revenue.total
+      - disclosure.compute.total_expense
+      - disclosure.compute.inference_expense
+      - disclosure.compute.training_expense
+      - disclosure.expense.cost_of_revenue
+      - disclosure.expense.research_development
+      - disclosure.margin.inference_gross
+      - disclosure.commitments.total
+      - disclosure.commitments.by_year
+      - disclosure.commitments.next_12m
+      - disclosure.commitments.all_in_total
+      - disclosure.customers.over_100k
+      - disclosure.retention.net_revenue
+      - disclosure.retention.gross_revenue
+      - disclosure.rpo.total
+      - disclosure.rpo.next_12m_share
+      - disclosure.revenue.csp_marketplace_share
+      - disclosure.revenue.consumption
+      - disclosure.revenue.subscription
+      - disclosure.revenue.product
+      - disclosure.revenue.run_rate
+      - disclosure.concentration.top5_share
+      - disclosure.concentration.top10_share
+    quality:
+      require_document_version_span: true
+      require_human_verification_for_release: true
+    acceptance_samples: [ANTHROPIC]
+    rollback_on: [evidence_incomplete, sample_error]
   private_company_events:
     # Intentionally empty in this release.  Keep its schema and review workflow
     # registered so a later approved source can be added without a data-model fork.
@@ -1521,6 +1568,30 @@ metric_definitions:
   event.valuation.post_money: {value_type: number, unit_family: currency, period_basis: event}
   event.valuation.reported: {value_type: number, unit_family: currency, period_basis: event}
   company.arr: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  # 公司披露指标（口径见 config/data/disclosure_metrics.yaml）
+  disclosure.revenue.total: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.compute.total_expense: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.compute.inference_expense: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.compute.training_expense: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.expense.cost_of_revenue: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.expense.research_development: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.margin.inference_gross: {value_type: number, unit_family: percent, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.commitments.total: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  disclosure.commitments.by_year: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  disclosure.commitments.next_12m: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  disclosure.commitments.all_in_total: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  disclosure.customers.over_100k: {value_type: number, unit_family: count, period_basis: point_in_time}
+  disclosure.retention.net_revenue: {value_type: number, unit_family: percent, period_basis: point_in_time}
+  disclosure.retention.gross_revenue: {value_type: number, unit_family: percent, period_basis: point_in_time}
+  disclosure.rpo.total: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  disclosure.rpo.next_12m_share: {value_type: number, unit_family: percent, period_basis: point_in_time}
+  disclosure.revenue.csp_marketplace_share: {value_type: number, unit_family: percent, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.revenue.consumption: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.revenue.subscription: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.revenue.product: {value_type: number, unit_family: currency, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.revenue.run_rate: {value_type: number, unit_family: currency, period_basis: point_in_time}
+  disclosure.concentration.top5_share: {value_type: number, unit_family: percent, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
+  disclosure.concentration.top10_share: {value_type: number, unit_family: percent, period_basis: [quarter, ytd_6m, ytd_9m, annual, trailing_12m]}
 
 # Provider-native fields mapped to registered metric ids. Unknown or ambiguous fields
 # must remain pending under `unmapped_policy`; never guess a convenient metric.

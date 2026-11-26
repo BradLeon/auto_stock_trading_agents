@@ -1,0 +1,182 @@
+# 公司披露指标清单（规格 data/company-disclosure-metrics）。
+# 只声明“要找什么、到文件哪里找、原文里必须出现什么措辞”，不声明数值的好坏方向。清单之外的指标不抽取、不发布。
+#
+#   key           稳定键；结构化指标 ID 为 disclosure.<key>，须与 config/data/structured.yaml 的指标登记一致
+#   unit          USD | count | percent（percent 按 0–100 记录）
+#   period_type   instant（时点）| duration（期间）
+#   dimension     同一指标按维度分开记录时声明，例如到期年度
+#   anchors       章节定位用的正则（不区分大小写），按顺序占用段落名额
+#   must_mention  原文片段（含表头）必须匹配的正则，防止把相近项目当成本指标
+version: 1
+
+locate:
+  chars_before: 900
+  chars_after: 2200
+  max_passages: 5               # 每个指标一次模型调用最多交给模型的段落数
+  max_matches_per_anchor: 2
+
+issuers:
+  ANT:
+    - key: revenue.total
+      name: 营业收入
+      unit: USD
+      period_type: duration
+      definition: 合并经营报表列报的营业收入（GAAP），按年度、年初至今和单季分别记录。
+      anchors: ['Consolidated Statements of Operations Data', 'Quarterly Trends Revenue', 'quarterly (results|statements) of operations']
+      must_mention: ['revenue']
+    - key: compute.total_expense
+      name: 算力与基础设施费用（合计）
+      unit: USD
+      period_type: duration
+      definition: 按费用性质列报的 Compute and infrastructure 合计，涵盖研究、模型开发、服务客户和内部使用。
+      anchors: ['Operating Expenses Compute and Infrastructure', 'quarterly (results|statements) of operations', 'Consolidated Statements of Operations Data']
+      must_mention: ['compute and infrastructure']
+    - key: compute.inference_expense
+      name: 推理算力费用
+      unit: USD
+      period_type: duration
+      definition: 公司单独列报、明确标为推理（inference，服务客户）的算力费用。营业成本等其他口径不算。
+      anchors: ['inference[^.]{0,80}(cost|expense|compute)', 'cost of revenue consists of compute', 'single, shared resource across all workloads']
+      must_mention: ['inference']
+    - key: compute.training_expense
+      name: 训练算力费用
+      unit: USD
+      period_type: duration
+      definition: 公司单独列报、明确标为训练（training / model training）的算力费用。研发费用等其他口径不算。
+      anchors: ['training[^.]{0,80}(cost|expense)s?', 'cost of revenue consists of compute', 'single, shared resource across all workloads']
+      must_mention: ['training']
+    - key: expense.cost_of_revenue
+      name: 营业成本（功能口径）
+      unit: USD
+      period_type: duration
+      definition: 按功能列报的 Cost of revenue，主要是服务客户的算力与基础设施费用，另含部分人员与分摊费用。
+      anchors: ['operating expenses grouped by function']
+      must_mention: ['cost of revenue']
+    - key: expense.research_development
+      name: 研发费用（功能口径）
+      unit: USD
+      period_type: duration
+      definition: 按功能列报的 Research and development，含模型开发与研究算力、人员、软件和分摊费用。
+      anchors: ['operating expenses grouped by function']
+      must_mention: ['research and development']
+    - key: margin.inference_gross
+      name: 推理毛利率
+      unit: percent
+      period_type: duration
+      definition: 公司单独披露的推理业务（服务客户）毛利率。由收入与营业成本自行计算的毛利率不算。
+      anchors: ['inference[^.]{0,80}margin', 'gross margin']
+      must_mention: ['margin']
+    - key: commitments.total
+      name: 合同义务合计（到期表）
+      unit: USD
+      period_type: instant
+      definition: 合同义务到期表的合计数（经营租赁、融资租赁与采购承诺），不含表外说明的短期、未起租和期后新增承诺。
+      anchors: ['summarizes our contractual obligations', 'Payments Due by Year']
+      must_mention: ['contractual obligations|Payments Due']
+    - key: commitments.by_year
+      name: 合同义务到期分布
+      unit: USD
+      period_type: instant
+      dimension: due_bucket
+      definition: 合同义务到期表合计行按到期年度的分布；每个年度列一条，due_bucket 写表头原文（如 2027、Thereafter），不含 Total 列。
+      anchors: ['summarizes our contractual obligations', 'Payments Due by Year']
+      must_mention: ['Payments Due']
+    - key: commitments.next_12m
+      name: 未来 12 个月到期的合同义务
+      unit: USD
+      period_type: instant
+      definition: 公司说明的报告期末之后 12 个月内预计支付的合同义务总额。
+      anchors: ['expected to be paid in the 12 months following', 'due in the 12 months following']
+      must_mention: ['12 months|twelve months']
+    - key: commitments.all_in_total
+      name: 全部承诺合计（含未起租与期后新增）
+      unit: USD
+      period_type: instant
+      definition: 公司给出的到期表、短期与期后承诺、未起租租赁合计总额。
+      anchors: ['In aggregate, the contractual obligations']
+      must_mention: ['aggregate']
+    - key: customers.over_100k
+      name: 年收入贡献 10 万美元以上客户数
+      unit: count
+      period_type: instant
+      definition: 过去 12 个月收入贡献达到 10 万美元及以上的客户数量。
+      anchors: ['(more than|approximately) [\d,]+ customers with \$100,000', 'grew customers with \$100,000', 'number of customers with \$100,000 or more of revenue on a TTM basis grew']
+      must_mention: ['\$100,000']
+    - key: retention.net_revenue
+      name: 净收入留存率（NRR）
+      unit: percent
+      period_type: instant
+      definition: 公司按其定义披露的 Net Revenue Retention。
+      anchors: ['Net Revenue Retention of', 'Net Revenue Retention reflects']
+      must_mention: ['Net Revenue Retention']
+    - key: retention.gross_revenue
+      name: 总收入留存率（GRR）
+      unit: percent
+      period_type: instant
+      definition: 公司披露的 Gross Revenue Retention。
+      anchors: ['gross (revenue |dollar )?retention']
+      must_mention: ['gross (revenue |dollar )?retention']
+    - key: rpo.total
+      name: 剩余履约义务（RPO）
+      unit: USD
+      period_type: instant
+      definition: 不可撤销合同下递延收入与将在未来期间确认收入的金额合计。
+      anchors: ['remaining performance obligations (amounted|were|was)', 'Remaining Performance Obligations']
+      must_mention: ['performance obligations?']
+    - key: rpo.next_12m_share
+      name: RPO 中 12 个月内确认的比例
+      unit: percent
+      period_type: instant
+      definition: 公司预计在报告期末后 12 个月内确认为收入的 RPO 占比。
+      anchors: ['remaining performance obligations (amounted|were|was)', 'Remaining Performance Obligations']
+      must_mention: ['12 months|twelve months']
+    - key: revenue.csp_marketplace_share
+      name: 云渠道（CSP marketplace）收入占比
+      unit: percent
+      period_type: duration
+      definition: 通过云服务商应用市场销售给客户的收入占总收入的比例。
+      anchors: ['revenue generated from sales through CSP marketplaces', 'CSP marketplaces represented']
+      must_mention: ['CSP marketplaces?|third-party cloud']
+    - key: revenue.consumption
+      name: 按用量计费收入
+      unit: USD
+      period_type: duration
+      definition: Consumption-based（pay-for-intelligence）收入金额。
+      anchors: ['Consumption-based revenue increased', 'consumption-based revenue (was|of)']
+      must_mention: ['consumption']
+    - key: revenue.subscription
+      name: 订阅收入
+      unit: USD
+      period_type: duration
+      definition: Subscription-based 收入金额。
+      anchors: ['Subscription-based revenue (increased|was|of)']
+      must_mention: ['subscription']
+    - key: revenue.product
+      name: 单独披露的产品收入
+      unit: USD
+      period_type: duration
+      dimension: product
+      definition: 公司单独披露的某一产品（如 Claude Code）的收入金额，product 写产品名。年化运行率不算。
+      anchors: ['Claude (Code|Cowork)[^.]{0,120}revenue', 'revenue (from|of) Claude (Code|Cowork)']
+      must_mention: ['revenue']
+    - key: revenue.run_rate
+      name: 公司自报年化收入运行率
+      unit: USD
+      period_type: instant
+      definition: 公司披露的 Run-Rate Revenue（经营指标，非 GAAP 收入）。
+      anchors: ['Run-Rate Revenue (was|of|reached|exceeded)']
+      must_mention: ['Run-Rate Revenue']
+    - key: concentration.top5_share
+      name: 前五大客户收入占比
+      unit: percent
+      period_type: duration
+      definition: 前五大客户合计贡献的收入占总收入的比例。公司只给出“前五大以外占比”时不换算。
+      anchors: ['top five customers']
+      must_mention: ['top five']
+    - key: concentration.top10_share
+      name: 前十大客户收入占比
+      unit: percent
+      period_type: duration
+      definition: 前十大客户合计贡献的收入占总收入的比例。
+      anchors: ['(top|largest) (ten|10) customers']
+      must_mention: ['(top|largest) (ten|10)']

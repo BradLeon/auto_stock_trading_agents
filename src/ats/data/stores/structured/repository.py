@@ -173,6 +173,14 @@ CREATE TABLE IF NOT EXISTS structured_evidence_reviews (
 );
 CREATE INDEX IF NOT EXISTS idx_structured_evidence_review_candidate
     ON structured_evidence_reviews(candidate_id, reviewed_at);
+CREATE TABLE IF NOT EXISTS structured_document_extractions (
+    extraction_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, entity_id TEXT NOT NULL,
+    metric_id TEXT NOT NULL, document_id TEXT NOT NULL, version_id TEXT NOT NULL,
+    status TEXT NOT NULL, model TEXT NOT NULL, passages_json TEXT NOT NULL,
+    response_json TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_structured_document_extraction
+    ON structured_document_extractions(entity_id, metric_id, document_id, updated_at);
 CREATE TABLE IF NOT EXISTS structured_snapshots (
     snapshot_id TEXT PRIMARY KEY, consumer TEXT NOT NULL, purpose TEXT NOT NULL,
     as_of TEXT NOT NULL, created_at TEXT NOT NULL, metadata_json TEXT NOT NULL
@@ -1189,6 +1197,37 @@ class SQLiteStructuredRepository:
         row = self.conn.execute(
             "SELECT * FROM structured_events WHERE event_id=?", (event_id,)).fetchone()
         return dict(row) if row else None
+
+    def save_document_extraction(self, payload: dict, *, at: datetime | None = None) -> str:
+        """The answer (or its absence) for one exact extraction request over one document version."""
+        now = _stamp(at)
+        with self._lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO structured_document_extractions VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(extraction_id) DO UPDATE SET status=excluded.status,model=excluded.model,"
+                "response_json=excluded.response_json,updated_at=excluded.updated_at",
+                (payload["extraction_id"], payload["dataset_id"], payload["entity_id"], payload["metric_id"],
+                 payload["document_id"], payload["version_id"], payload["status"], payload.get("model", ""),
+                 _json(payload.get("passages", [])), _json(payload.get("response", {})), now, now))
+        return payload["extraction_id"]
+
+    def document_extraction(self, extraction_id: str) -> dict | None:
+        rows = self._document_extraction_rows("extraction_id=?", [extraction_id])
+        return rows[0] if rows else None
+
+    def document_extractions(self, *, entity_id: str) -> list[dict]:
+        return self._document_extraction_rows("entity_id=?", [entity_id.upper()])
+
+    def _document_extraction_rows(self, where: str, args: list) -> list[dict]:
+        try:
+            rows = self.conn.execute(
+                f"SELECT * FROM structured_document_extractions WHERE {where} ORDER BY updated_at,rowid",
+                args).fetchall()
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc):
+                raise
+            return []                       # a read-only handle on a store that never ran an extraction
+        return [dict(row) for row in rows]
 
     def save_evidence_candidate(self, payload: dict) -> str:
         candidate_id = payload["candidate_id"]

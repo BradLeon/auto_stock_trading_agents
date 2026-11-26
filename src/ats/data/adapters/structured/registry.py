@@ -228,6 +228,9 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         discovery_group="frontier_ai_labs_revenue"),
     "tickertrends_frontier_labs_revenue": RuntimeSourceSpec(
         "tickertrends_frontier_labs_revenue", _tickertrends_frontier_labs_revenue),
+    "company_disclosure_metrics": RuntimeSourceSpec(
+        "company_disclosure_metrics", None, ingest_supported=False,
+        note="Read from stored filings and released by a person (ats data disclosure-*), not fetched."),
     "document_numeric_evidence": RuntimeSourceSpec(
         "document_numeric_evidence", None, ingest_supported=False,
         note="Evidence candidates enter through EvidenceWorkbench review, not remote fetch."),

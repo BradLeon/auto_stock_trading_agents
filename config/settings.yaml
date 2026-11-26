@@ -71,6 +71,9 @@ llm:
     # 不稳就退回下面这一行（官方 API 直连）：
     #   evidence_observer: {provider: deepseek, model: deepseek-v4-flash, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling}
     evidence_observer: {model: deepseek/deepseek-v4.1-flash-1017, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling, reasoning: "off"}
+    # 公司披露指标抽取（ant-data-onboarding 第 7 组）：每个指标一次短上下文调用，只抄录原文数字，代码核验后由人确认。
+    # 同一请求（模型、提示、段落）的回答缓存在结构化库里，不重复请求。
+    disclosure_extract: {model: deepseek/deepseek-v4.1-flash-1017, temperature: 0.0, max_tokens: 8192, structured_output_method: function_calling, reasoning: "off"}
     # 涌现命题归纳：低频（证据驱动，不设 cron），但要从一堆散落事实里归纳出可证伪命题，
     # 是判断活不是抽取活 → 走中档。产出只是给人看的待确认卡，不进因子也不进 Chief。
     claim_proposer: {model: deepseek/deepseek-v4.1-flash-1017, structured_output_method: function_calling, max_tokens: 4096, reasoning: "off"}

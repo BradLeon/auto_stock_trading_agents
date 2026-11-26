@@ -41,6 +41,7 @@ _SAFE_COMMANDS = {
     "evidence-observe", "macro-news-collect",
     "article-evidence-observe",      # article-witness-observations 2.3 (2026-11-13)
     "registration-ingest", "registration-backfill",
+    "disclosure-extract", "disclosure-confirm", "disclosure-reject", "disclosure-correct",
 }
 
 

@@ -41,6 +41,7 @@
 | `industry_dram_contract_price` | TrendForce 公开页面的 DRAM 半月合约价 session | 合约价格、页面发布日期、原始 session 与版本 |
 | `sp500_earnings_insight` | FactSet 周度 Earnings Insight 的已发布内部研究快照 | S&P 500 盈利/营收、利润率、指引、估值、评级，以及 11 个 GICS 行业背景 |
 | `private_company_events` | 经证据核验的私营公司事件（本轮暂不采集） | 融资、估值、ARR；当前应为 `no_coverage` |
+| `company_disclosure_metrics` | 发行人在招股书与定期报告里披露、XBRL 标签没有的经营指标，人工确认后发布（当前只有 ANT，实体键 ANTHROPIC） | RPO、承诺付款到期分布、算力费用、10 万美元客户数、NRR、渠道与收入结构 |
 
 这张表表示“系统注册了这些能力”，不表示当前数据库已经有数据。实际覆盖必须通过 `catalog` 和 `availability` 查询。
 

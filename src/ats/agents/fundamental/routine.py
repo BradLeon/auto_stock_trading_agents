@@ -462,6 +462,57 @@ def ensure_baseline(store, request) -> dict:
             **window}
 
 
+# --------------------------------------------------------------------------- #
+# A newly listed company before its first report (ant-data-onboarding 4.3)
+# --------------------------------------------------------------------------- #
+# A company whose registry entry declares `listed_since` is stated uncovered, not failed, until it has reported at
+# least once (actuals in its own dossier) and has a labelled expectation baseline. Nothing is switched by hand.
+GAP_TEXT = {"no_earnings_history": "无财报历史（尚无已发布的季度财报）",
+            "no_baseline": "首份财报已入库，预期基线尚未建立"}
+
+
+def _is_new_listing(symbol: str) -> bool:
+    from ...config import entity_meta
+
+    return bool(entity_meta(symbol).get("listed_since"))
+
+
+def _coverage_gap(store, symbol: str, baseline: dict) -> str:
+    """The reason a new listing is still uncovered, "" once it can be covered."""
+    symbol = symbol.upper()
+    reported = any(getattr(store.get_dossier(symbol, meta.get("fiscal_label", "")), "actuals", None)
+                   for meta in store.recent_dossiers(symbol, limit=40))
+    if not reported:
+        return "no_earnings_history"
+    if not baseline.get("fiscal_label") or not (baseline.get("narrative") or baseline.get("dim_keys")):
+        return "no_baseline"
+    return ""
+
+
+def _expected_report_date(symbol: str, baseline_state: dict) -> str:
+    from ...workflow.isolation import verified_isolation_root
+
+    if verified_isolation_root() is None:
+        from ...data.products.calendar import ScheduleCalendarProduct
+
+        published = ScheduleCalendarProduct().next_earnings_date(symbol, as_of=evaluation_now(timezone.utc))
+        if published:
+            return published
+    return str(baseline_state.get("date") or "")
+
+
+def _publish_coverage_gap(store, request, reason: str, baseline_state: dict, brief_id: str) -> str:
+    symbol = request.symbol.upper()
+    expected = _expected_report_date(symbol, baseline_state)
+    payload = {"entity": symbol, "metric": "narrative", "period": baseline_state.get("label") or "首份基线前",
+               "previous_value": None, "new_value": None,
+               "driver": f"基本面未覆盖：{GAP_TEXT[reason]}，本轮不给出预期更新。下次财报日期：{expected or '未知'}",
+               "coverage": {"status": "uncovered", "reason": reason, "expected_report_date": expected}}
+    refs = [brief_id, *(request.extra or {}).get("input_refs", [])]
+    return publish_expectation_update(store, payload, input_refs=sorted({str(ref) for ref in refs if ref}),
+                                      use_llm=False)
+
+
 from ...workflow.runtime_reads import scoped_read  # noqa: E402
 
 
@@ -472,18 +523,35 @@ def run_routine_pass(request) -> dict:
 
     store = get_store()
     from ...workflow.isolation import verified_isolation_root
+    from ...workflow.read_scope import ReadUnavailable, read_projection
 
+    new_listing = _is_new_listing(request.symbol)
     # The pre-earnings baseline is a production, calendar-driven step: it reads the live earnings calendar and
     # the evaluation clock. Inside a verified isolation root (fixed-input acceptance, shadow replay) neither is
     # an admitted input, so the step is not run there and the pass says so instead of consuming them.
-    baseline_state = ({"baseline": "skipped_in_isolation"} if verified_isolation_root() is not None
-                      else ensure_baseline(store, request))
+    if verified_isolation_root() is not None:
+        baseline_state = {"baseline": "skipped_in_isolation"}
+    else:
+        try:
+            baseline_state = ensure_baseline(store, request)
+        except ReadUnavailable as exc:
+            if not new_listing:
+                raise
+            # A new listing has no company financials to build from yet; that is part of the gap stated below.
+            baseline_state = {"baseline": "input_unavailable", "detail": str(exc)[:200]}
     baseline = load_baseline(store, request.symbol)
-    from ...workflow.read_scope import read_projection
 
     brief = read_projection(store, consumer="fundamental", role="information_brief",
                             scope=ProjectionScope(kind="entity", id=request.symbol))
     briefs = [brief] if brief else []
+    gap = _coverage_gap(store, request.symbol, baseline) if new_listing else ""
+    if gap:
+        projection = _publish_coverage_gap(store, request, gap, baseline_state,
+                                           (brief or {}).get("projection_id", ""))
+        built = [baseline_state["projection_id"]] if baseline_state.get("projection_id") else []
+        return {"mode": "routine", "symbol": request.symbol, "classified": [], "published": [*built, projection],
+                "baseline": baseline_state, "coverage": gap,
+                "summary": f"uncovered: {gap}"}
     if not briefs:
         return {"mode": "routine", "symbol": request.symbol,
                 "classified": [], "published": [], "baseline": baseline_state,

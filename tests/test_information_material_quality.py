@@ -373,3 +373,70 @@ def test_budget_deferred_is_not_a_quality_rejection_or_persisted_quarantine(tmp_
         assert repo.document_candidates(status='quarantined') == []
     finally:
         repo.close()
+
+
+def _issuer_article(title, body, *, source_id='trendforce_news', policy=None, provenance=None):
+    source = article_ingest._article_sources()[source_id]
+    now = datetime(2026, 11, 26, tzinfo=UTC)
+    ref = ArticleRef(url='fixture://scope', slug='scope', title=title, published_at=now.date())
+    material = article_ingest.Material(ref, body, provenance or {})
+    candidate = article_ingest._candidate(source, material, body, discovered_at=now, policy=policy or {})
+    return source, material, candidate
+
+
+def test_body_only_anthropic_mention_links_the_article_to_nvda_but_not_ant():
+    body = 'Anthropic ordered more accelerators and expanded its Claude deployment. ' * 20
+    _, _, candidate = _issuer_article('Nvidia raises accelerator capacity', body)
+    assert candidate.related_entities == ('NVDA',)
+    assert {row['entity'] for row in candidate.metadata['entity_evidence']} == {'NVDA'}
+    skipped = candidate.metadata['unassociated_evidence']
+    assert {(row['entity'], row['field']) for row in skipped} == {('ANT', 'body')}
+    assert body[skipped[0]['start']:skipped[0]['end']] in {'Anthropic', 'Claude'}
+
+
+@pytest.mark.parametrize('title,provenance', [
+    ('Claude gets a new frontier model', {}),
+    ('Frontier model release', {'subtitle': 'Anthropic ships its next model'}),
+    ('Frontier model release', {'lede': 'Anthropic ships its next model'}),
+])
+def test_headline_mention_of_anthropic_or_claude_links_the_article_to_ant(title, provenance):
+    _, _, candidate = _issuer_article(title, 'Industry benchmark facts. ' * 40, provenance=provenance)
+    assert candidate.related_entities == ('ANT',)
+
+
+@pytest.mark.parametrize('body,expected', [('Anthropic signed a cloud agreement. ' * 40, 'accepted'),
+                                           ('Industry product technology changed. ' * 40, 'quarantined')])
+def test_association_scope_does_not_change_admission(body, expected):
+    from ats.data.pipelines.unstructured.source_acceptance import load_policy
+
+    policy = load_policy('ibkr_news')
+    source, material, candidate = _issuer_article('Architecture discussion', body, source_id='ibkr_news',
+                                                  policy=policy)
+    _, state = article_ingest._admission(candidate, material, source=source, policy=policy,
+                                         human_review_approved=False, source_eligible=True)
+    assert state == expected
+    assert candidate.related_entities == ()
+
+
+def test_metadata_reconcile_applies_the_association_scope():
+    from ats.data.pipelines.unstructured.article_metadata import proposed_metadata
+
+    row = {'version': {'version_id': 'v1'}, 'title': 'Nvidia capacity', 'source': 'trendforce_news',
+           'quality': {}, 'published_at': '2026-11-26', 'completeness': 'full'}
+    proposal = proposed_metadata(row, 'Anthropic expanded Claude capacity. ' * 20, entities=['ANT', 'NVDA'])
+    assert proposal['related_entities'] == ['NVDA']
+    assert {item['entity'] for item in proposal['quality']['entity_evidence']} == {'NVDA'}
+
+
+def test_headline_scope_leaves_other_checks_and_issuers_unchanged(monkeypatch):
+    from ats.data.articles.material_quality import substantive_preview
+
+    assert association_evidence({'body': 'Anthropic expanded capacity.'}, ['ANT']) == []
+    assert association_evidence({'body': 'Anthropic expanded capacity.'}, ['ANT'], scoped=False)
+    assert association_evidence({'body': 'Microsoft expanded capacity.'}, ['MSFT'])
+    # A partial body naming only a headline-scoped issuer is still substantive material.
+    preview = 'Anthropic described how its deployment works. The change affects how customers buy capacity. ' * 3
+    assert substantive_preview(preview, minimum_chars=100)
+    monkeypatch.setattr('ats.config.entity_meta', lambda symbol: {'association_scope': 'title'})
+    with pytest.raises(ValueError, match='association_scope'):
+        association_evidence({'title': 'Anthropic'}, ['ANT'])

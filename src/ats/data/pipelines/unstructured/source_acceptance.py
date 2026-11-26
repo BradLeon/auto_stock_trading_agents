@@ -257,7 +257,8 @@ def assess_article_source(source_id: str, *, now: datetime | None = None,
             from ....config import load_entities
             from ...articles.material_quality import association_evidence
 
-            evidence = association_evidence({"title": ref.title, "body": visible.text}, list(load_entities()))
+            evidence = association_evidence({"title": ref.title, "body": visible.text}, list(load_entities()),
+                                            scoped=False)
             for mention in evidence:
                 if mention["field"] == "body":
                     mention.update(visible.locator(mention["start"], mention["end"]))

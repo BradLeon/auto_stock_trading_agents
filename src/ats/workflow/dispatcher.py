@@ -631,8 +631,12 @@ class Dispatcher:
         from ..agent.task_projection import reuse_decision
 
         if task.task_id == "fundamental-routine":
-            from .decision_requirements import validate_routine_value_contract
+            from .decision_requirements import is_coverage_gap, validate_routine_value_contract
             from .read_scope import ReadUnavailable
+            if is_coverage_gap(envelope.payload):
+                # A stated gap is re-evaluated every run, so coverage starts as soon as the first report and its
+                # baseline exist (and a pre-earnings window is never skipped by reuse).
+                return False, "coverage_gap_recompute"
             try:
                 validate_routine_value_contract(envelope.payload)
             except ReadUnavailable:

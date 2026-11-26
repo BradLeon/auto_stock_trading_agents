@@ -203,6 +203,24 @@ python -m ats.data.refresh tick --job <job>             # 立刻跑一次
   预算用完没轮到的记为“延后”而不是失败，下次排在最前。
 - 来源与数据集的完整说明见 [`STRUCTURED_DATA_OPERATIONS.md`](data/STRUCTURED_DATA_OPERATIONS.md)。
 
+### 5.1 注册类文件（招股书）
+
+S-1、S-1/A、424B4 不在任何定时任务里，用下面的命令手工入库。只处理 `config/data/unstructured.yaml` 的
+`registration_issuers` 里声明的发行人（当前只有 ANT）。
+
+```bash
+ats data registration-ingest --entity ANT --form S-1 --file <本地文件路径>   # 本地文件（HTML 或 SEC 完整提交文本）
+ats data registration-backfill --entity ANT                                # 从 SEC EDGAR 补采该发行人的各版文件
+ats data registration-filings --entity ANT                                 # 查版本链；加 --as-of YYYY-MM-DD 看某日已申报的版本
+```
+
+- 前两条是持久化写入，经受管队列执行，写生产库；第三条只读。
+- `registration-ingest`：封面没写申报日期时加 `--filing-date YYYY-MM-DD`（写明时可省略，给出时须一致），
+  知道 accession 号时加 `--accession`。注册人名称、表单类型、日期对不上或正文过短时记为 `quarantined`。
+- `registration-backfill` 会请求 sec.gov，需要仓库 `.env` 里有 `SEC_EDGAR_USER_AGENT`（队列工作进程自动读取）。
+  每次只下载还没有的版本；超时导致的 `partial` 直接重跑。
+- 重复执行返回 `no_change`，不产生新版本。入库本身不请求模型，不写事件日历，也不进财报事件材料。
+
 ## 6. 事件日历
 
 ```bash
@@ -217,6 +235,16 @@ ats events withdraw --event-id <id> --actor <谁> --reason "<依据>"
 两个来源只是精度不同（一方多给了具体钟点）时视为兼容并自动合并；日期或时段（盘前/盘中/盘后）
 真不一致时，被挡住的是另一来源那一条（`conflict`），日历里该事件仍按已采用的一条（通常是 Finnhub）存在；
 挂起的只是一条备选说法，距离财报日还远时可以不处理，临近时对照公司公告核一次，不一致再 `override`。
+
+**缺财季标签的财报日**（新上市公司常见）。来源只给日期、没给财季时，日历发布占位事件
+`earnings:<代码>:unlabeled:release`：它不会被确认为已发布、也不触发事件工作流，但仍让 SEC 申报发现按这个日期到期。
+对照公司公告后补标签；来源完全没有日期时人工登记；登错了用 `withdraw` 撤回。两条命令都必须给出非空的
+`--evidence-json`（例如公告链接）。
+
+```bash
+ats events label --event-id earnings:ANT:unlabeled:release --fiscal-label FY2026Q4 --actor <谁> --reason "<依据>" --evidence-json '{"source": "<公告链接>"}'
+ats events register --entity ANT --date YYYY-MM-DD --fiscal-label FY2026Q4 --actor <谁> --reason "<依据>" --evidence-json '{"source": "<公告链接>"}'
+```
 
 ## 7. 交易路径（已切换 S1–S5；实盘锁定）
 

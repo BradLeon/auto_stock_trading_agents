@@ -271,6 +271,11 @@ def attach(snapshot, requirements, detail):
     return requirements
 
 
+def is_coverage_gap(payload) -> bool:
+    """Whether a Routine projection states that the company is uncovered rather than reading it."""
+    return ((payload or {}).get("coverage") or {}).get("status") == "uncovered"
+
+
 def validate_routine_value_contract(payload):
     """A current qualitative update cannot pretend to contain measured KPI values."""
     if payload.get("metric") == "narrative":

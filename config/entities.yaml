@@ -117,6 +117,12 @@ entities:
     filings: sec
     code_ambiguous: true
     evidence_entity: ANTHROPIC
+    # 上市日。声明了它的新股，在首份财报入库并建立预期基线之前，基本面发布"未覆盖"状态（只允许持有或减仓），
+    # 之后自动转为正常覆盖，不需要改配置。
+    listed_since: "2026-11-19"
+    # 大量别家公司的报道顺带提到 Anthropic / Claude：只有标题、副标题、导语提到才把文章关联到 ANT
+    # （否则信息简报候选和模型调用会被无关文章占满）。不影响文章本身能否入库。
+    association_scope: headline
 
   MU:
     name: Micron Technology

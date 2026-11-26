@@ -495,6 +495,15 @@ class ActualsView(_Item):
     transcript_source: str = ""
 
 
+class CoverageGap(_Item):
+    """Why Fundamental gives no reading for a newly listed company yet. A projection carrying it is a stated gap,
+    never usable research: the decision treats the company as uncovered (hold or reduce only)."""
+
+    status: Literal["uncovered"] = "uncovered"
+    reason: Literal["no_earnings_history", "no_baseline"]
+    expected_report_date: str = ""      # next published earnings date, "" when unknown
+
+
 class FundamentalExpectationUpdatePayload(_Payload):
     """A metric reading or qualitative narrative change; unknown is never zero."""
 
@@ -511,9 +520,10 @@ class FundamentalExpectationUpdatePayload(_Payload):
     explanation: str = ""           # why the classifier put it in that class
     evidence_refs: list[str] = Field(default_factory=list)
     baseline: BaselineDetail | None = None
+    coverage: CoverageGap | None = None
 
     _OMIT_WHEN_EMPTY: ClassVar[tuple[str, ...]] = (
-        "change_class", "kpi", "explanation", "evidence_refs", "baseline")
+        "change_class", "kpi", "explanation", "evidence_refs", "baseline", "coverage")
 
     @field_validator("new_value", "previous_value", mode="before")
     @classmethod

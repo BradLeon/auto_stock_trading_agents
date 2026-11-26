@@ -117,12 +117,16 @@ def page_fields(html: str) -> dict[str, str]:
     return fields
 
 
-def association_evidence(fields: dict[str, str], entities: list[str]) -> list[dict]:
-    from .entity_association import entity_mentions
+def association_evidence(fields: dict[str, str], entities: list[str], *, scoped: bool = True) -> list[dict]:
+    """Literal issuer mentions per field. `scoped` applies each issuer's registered association scope; pass False
+    to ask only whether a text names an issuer at all (admission gates must not depend on the scope)."""
+    from .entity_association import entity_mentions, field_in_association_scope
 
     evidence = []
     for field, text in fields.items():
         for entity in entities:
+            if scoped and not field_in_association_scope(entity, field):
+                continue
             evidence.extend({**row, "field": field, "policy_version": POLICY_VERSION}
                             for row in entity_mentions(text, entity))
     return evidence
@@ -176,7 +180,7 @@ def substantive_preview(text: str, *, minimum_chars: int = 400) -> bool:
     if len(content) < minimum_chars:
         return False
     return bool(re.search(r"(?:\$\s*\d|\d(?:\.\d+)?\s*%|\d+\s+(?:billion|million))", content, re.I)
-                or association_evidence({"body": content}, list(load_entities())))
+                or association_evidence({"body": content}, list(load_entities()), scoped=False))
 
 
 def completeness_assessment(body: str, *, stored: str = "full") -> dict:

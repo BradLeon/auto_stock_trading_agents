@@ -10,6 +10,20 @@ from __future__ import annotations
 
 import re
 
+# A company named in passing in many other issuers' stories (Anthropic) can declare `association_scope: headline`
+# in the registry: only these fields then associate an article with it.
+HEADLINE_FIELDS = frozenset({"title", "subtitle", "lede"})
+
+
+def field_in_association_scope(symbol: str, field: str) -> bool:
+    """Whether a mention in `field` may associate an article with this issuer."""
+    from ..config import entity_meta
+
+    scope = str(entity_meta(symbol).get("association_scope") or "full")
+    if scope not in {"full", "headline"}:
+        raise ValueError(f"unknown association_scope {scope!r} for {symbol}")
+    return scope == "full" or field in HEADLINE_FIELDS
+
 
 def entity_aliases(symbol: str) -> list[str]:
     """Return strong, registered aliases for an issuer, longest first."""
@@ -77,4 +91,5 @@ def normalised_title(title: str) -> str:
     return re.sub(r"\s+", " ", value).strip().lower()
 
 
-__all__ = ["entity_aliases", "entity_mentions", "normalised_title", "title_mentions_entity"]
+__all__ = ["HEADLINE_FIELDS", "entity_aliases", "entity_mentions", "field_in_association_scope",
+           "normalised_title", "title_mentions_entity"]

@@ -137,16 +137,22 @@ def _candidate(source: Any, material: Material, body: str, *, discovered_at: dat
                policy: dict[str, Any]) -> ArticleCandidate:
     from ....config import load_entities
     from ...articles.material_quality import visible_analysis_view, association_evidence, POLICY_VERSION
+    from ...entity_association import field_in_association_scope
 
     provenance = dict(material.provenance)
     title = provenance.get("title") or material.ref.title
     view = visible_analysis_view(body, title=title, source=source.id)
-    evidence = association_evidence({"title": title,
+    mentions = association_evidence({"title": title,
         "lede": provenance.get("lede", ""), "subtitle": provenance.get("subtitle", ""),
-        "body": view.text}, list(load_entities()))
-    for row in evidence:
+        "body": view.text}, list(load_entities()), scoped=False)
+    for row in mentions:
         if row["field"] == "body":
             row.update(view.locator(row["start"], row["end"]))
+    # Mentions outside an issuer's association scope do not link the article to it, but they still count for
+    # whether the article names a registered issuer at all (the admission gate).
+    evidence, unassociated = [], []
+    for row in mentions:
+        (evidence if field_in_association_scope(row["entity"], row["field"]) else unassociated).append(row)
     native_id = provenance.get("native_id") or material.ref.slug
     canonical_url = provenance.get("canonical_url") or material.ref.url
     digest = hashlib.sha256((body or "").strip().encode("utf-8")).hexdigest()
@@ -181,7 +187,8 @@ def _candidate(source: Any, material: Material, body: str, *, discovered_at: dat
         related_entities=related, metadata={"provenance": provenance,
             "policy_version": POLICY_VERSION, "entity_evidence": evidence,
             "effective_chars": len(view.text), "cleaner_version": view.version,
-            "original_hash": view.original_hash, "visibility": visibility},
+            "original_hash": view.original_hash, "visibility": visibility,
+            **({"unassociated_evidence": unassociated} if unassociated else {})},
         discovered_at=discovered_at.isoformat(),
         candidate_id=hashlib.sha1(identity.encode("utf-8")).hexdigest()[:24],
         content_hash=digest,
@@ -225,7 +232,8 @@ def _admission(candidate: ArticleCandidate, material: Material, *,
         "entity_evidence_fields", ["title"])
     verified = any(row["field"] in allowed_evidence and
                    row["entity"] != candidate.expected_entity for row in
-                   candidate.metadata.get("entity_evidence", []))
+                   [*candidate.metadata.get("entity_evidence", []),
+                    *candidate.metadata.get("unassociated_evidence", [])])
     if (policy.get("policy") or {}).get("require_entity_verified") and not verified:
         issues.append(ValidationIssue("identity", "entity_association_not_verified"))
     review_required = bool((policy.get("policy") or {}).get(

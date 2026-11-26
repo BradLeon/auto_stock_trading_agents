@@ -410,3 +410,10 @@ def test_quiet_window_publishes_an_explicit_brief_instead_of_nothing(monkeypatch
     # without a model the run still publishes nothing (selected_no_model path is unchanged)
     offline = target_research.run(store, 'MSFT', config=CONFIG, since=NOW - timedelta(days=7), use_llm=False)
     assert offline['projection_id'] == '' and offline['status'] == 'selected_no_model'
+
+
+def test_headline_scoped_target_ignores_body_only_mentions():
+    passing = article('passing', title='Accelerator supply', body='Anthropic bought more capacity.')
+    headline = article('headline', title='Claude adds a new model', body='Anthropic released it today.')
+    rows, empty = selection.rank_articles([passing, headline], symbol='ANT', universe={'ANT'}, publishers=[])
+    assert [(row.article.id, row.rank) for row in rows] == [('headline', 0)] and empty == 0

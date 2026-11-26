@@ -24,16 +24,17 @@
 
 ## 4. 接入研究任务流（A4）
 
-- [ ] 4.1 `entity_mentions` 支持按实体声明 `association_scope: headline`，ANT 设为 headline（规格 `data/unstructured-ingestion`）。验证：新增测试，正文顺带提到 Anthropic 时不关联，标题提到 Claude 时关联。
-- [ ] 4.2 核对当前基本面未覆盖的 target 数量。验证：数量写入 `verification.md`；加上 ANT 后超过 4 个就停止并报告用户。
-- [ ] 4.3 基本面例行任务遇到"无财报历史"时，发布带原因的未覆盖投影（规格 `agent/fundamental-pead`）。验证：新增测试覆盖"首份财报前未覆盖、首份财报入库后自动转为覆盖"。
-- [ ] 4.4 与用户确认 `config/pead/ANT.yaml` 的打分维度与权重后写入（D6）。验证：PEAD 配置加载测试通过，权重合计为 1。
-- [ ] 4.5 `config/pead.yaml` 的 targets 加入 ANT；`config/sectors/ai_hardware.yaml` 的 L1_app 把 ANT 加入 tickers（备注写明与 GOOG 定价机制不同）、`private` 去掉 Anthropic；`config/risk.yaml` 登记 `instruments.ANT: {layer_key: L1_app}`，并改写 L1 上限注释。验证：配置加载、行业层与风控登记测试通过。
-- [ ] 4.6 更新 `docs/ARCHITECTURE.md` 中 L1 的描述，以及 `docs/OPERATIONS.md` 中注册文件入库命令的用法。验证：文档里的命令按写法能运行。
+- [x] 4.1 `entity_mentions` 支持按实体声明 `association_scope: headline`，ANT 设为 headline（规格 `data/unstructured-ingestion`）。验证：新增测试，正文顺带提到 Anthropic 时不关联，标题提到 Claude 时关联。
+- [x] 4.2 核对当前基本面未覆盖的 target 数量。验证：数量写入 `verification.md`；加上 ANT 后超过 4 个就停止并报告用户。
+- [x] 4.3 基本面例行任务遇到"无财报历史"时，发布带原因的未覆盖投影（规格 `agent/fundamental-pead`）。验证：新增测试覆盖"首份财报前未覆盖、首份财报入库后自动转为覆盖"。
+- [x] 4.4 与用户确认 `config/pead/ANT.yaml` 的打分维度与权重后写入（D6）。验证：PEAD 配置加载测试通过，权重合计为 1。
+- [x] 4.5 `config/pead.yaml` 的 targets 加入 ANT；`config/sectors/ai_hardware.yaml` 的 L1_app 把 ANT 加入 tickers（备注写明与 GOOG 定价机制不同）、`private` 去掉 Anthropic；`config/risk.yaml` 登记 `instruments.ANT: {layer_key: L1_app}`，并改写 L1 上限注释。验证：配置加载、行业层与风控登记测试通过。
+- [x] 4.6 更新 `docs/ARCHITECTURE.md` 中 L1 的描述，以及 `docs/OPERATIONS.md` 中注册文件入库命令的用法。验证：文档里的命令按写法能运行。
 
-## 5. 试运行与基线核对（A5、A6）
+## 5. 基线核对（A6）
 
-- [ ] 5.1 试运行一天（不下单）：信息简报、基本面、技术面、风控日报、主理人完整运行。验证：ANT 简报候选数和误匹配比例、基本面为"未覆盖：无财报历史"、技术面为历史不足占位、风控日报把 ANT 归入 L1、主理人周期进入且不阻断，全部写入 `verification.md`。
+> 原 5.1 试运行已移到第 16 组（2026-11-26 用户决定）。编号 5.2 保留，其他 change 按此引用。
+
 - [ ] 5.2 与用户逐项核对 Claude 文稿的上市时基线表（首版 S-1 + 424B4），回填文稿；以 424B4 为准记录解禁日期，供 `ant-decision-integration` 使用。验证：基线表每项都标为"已核对"，解禁日写入 `verification.md`。
 
 ## 6. XBRL 映射（B1）
@@ -176,3 +177,13 @@
 ## 15. 集成核对
 
 - [ ] 15.1 阶段关口：在后台跑数据层与研究任务流的回归测试。验证：结果与 `docs/TEST_BASELINE.md` 的基线对比，新增失败为 0。
+
+## 16. 启用前试运行（A5，原 5.1）
+
+> 顺序约束（2026-11-26 用户决定：代码先合并，启用配置留到最后）：
+> - 4.5 的三处启用配置（可交易名单、L1 层成员、风控归层）连同对应文档与测试单独放在分支 `feat/ant-activation`，试运行通过之前不合并进主工作树（定时任务直接运行主工作树，合并即生效）。
+> - 其余代码按组合并，数据通路先在定时任务里运行。
+> - 14.4、14.5 中随可交易名单生效的 ANT 任务（一致预期、公司财务、SEC 发现与正文等），要在启用之后验收。
+
+- [ ] 16.1 试运行一天（不下单）：信息简报、基本面、技术面、风控日报、主理人完整运行。验证：ANT 简报候选数和误匹配比例、基本面为"未覆盖：无财报历史"、技术面为历史不足占位、风控日报把 ANT 归入 L1、主理人周期进入且不阻断，全部写入 `verification.md`。
+- [ ] 16.2 启用：试运行通过并经用户确认后，把 `feat/ant-activation` 合并进主工作树。验证：配置与层、风控登记测试通过；合并后第一次信息简报、基本面、技术面与主理人定时运行的结果写入 `verification.md`。

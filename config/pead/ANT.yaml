@@ -1,0 +1,17 @@
+# Anthropic (ANT) — PEAD config. 2026-11-19 上市，首份季报约在 2027 年初。
+# 打分维度对应《ANT 投资观测体系与行动指南》的问题，替换通用的营收 / EPS 维度，让首份财报的实际值抽取直接产出
+# 观测体系要用的指标（openspec/changes/ant-data-onboarding 设计文档 D6）。维度与权重 2026-11-26 经用户确认。
+
+symbol: ANT
+company_name: "Anthropic"
+# fiscal_label 由财报日历派生（data/period.resolve_fiscal_label），无需手填。
+
+# 权重之和 = 1.00。没有"下季指引"一项：公司是否给指引尚未知，首份财报后再定。
+scorecard_dims:
+  - {key: arr_added,          weight: 0.25, label: 新增年化收入（本季年化收入较上季的增量）}
+  - {key: inference_margin,   weight: 0.20, label: 推理毛利（对外服务收入扣除推理算力成本后的毛利率，上升为好）}
+  - {key: compute_cost_ratio, weight: 0.15, label: 算力费用率（算力费用占收入比，下降为好）}
+  - {key: commitments,        weight: 0.15, label: 未来承诺付款（规模、到期结构与收入覆盖能力）}
+  - {key: non_coding_revenue, weight: 0.10, label: 非 coding 产品收入（规模与增速，收入结构是否分散）}
+  - {key: nrr,                weight: 0.10, label: NRR 净收入留存率}
+  - {key: large_customers,    weight: 0.05, label: 年付 10 万美元以上客户数}

@@ -301,7 +301,8 @@ def scan_projection_scopes(store, *, at=None,
     straight from Phase A's `reuse_decision` so the report never forks terms.
     """
     from ...agent.task_projection import reuse_decision
-    from ...workflow.decision_requirements import routine_producer_refs, validate_routine_value_contract
+    from ...workflow.decision_requirements import (is_coverage_gap, routine_producer_refs,
+                                                   validate_routine_value_contract)
     from ...workflow.read_scope import ReadUnavailable
 
     manifest = None
@@ -327,6 +328,7 @@ def scan_projection_scopes(store, *, at=None,
                         continue
                     references = [{"projection_id": ref, "producer_attempt": latest["agent_run_id"],
                                    "producer_run": latest["workflow_run_id"]} for ref in refs]
+            first_of_scope = len(detail)
             for selected in references or [None]:
                 projection_id = str(selected.get("projection_id", "")) if selected else ""
                 row = (_latest_row(store, role=plan["role"], scope=scope,
@@ -359,6 +361,8 @@ def scan_projection_scopes(store, *, at=None,
                         "reason": "Routine member differs from complete terminal producer"})
                     continue
                 reusable, reason = reuse_decision(envelope, scope=scope, at=at)
+                if is_coverage_gap(envelope.payload):
+                    reusable, reason = False, "uncovered"
                 detail.append({"task_id": task_id, "role": plan["role"],
                                "scope": scope.key,
                                "status": "fresh" if reusable else reason,
@@ -366,6 +370,11 @@ def scan_projection_scopes(store, *, at=None,
                                "as_of": envelope.as_of, "reason": reason,
                                "content_hash": envelope.content_hash,
                                "payload": envelope.payload})
+            # One run can publish a baseline and still state the company uncovered (a baseline built before its first
+            # report): the stated gap governs every member of that scope.
+            if any(row["status"] == "uncovered" for row in detail[first_of_scope:]):
+                for row in detail[first_of_scope:]:
+                    row.update(status="uncovered", reason="uncovered")
     return detail
 
 

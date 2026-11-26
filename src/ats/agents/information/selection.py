@@ -32,7 +32,7 @@ def target_update_fingerprint(article: Article, symbol: str) -> tuple | None:
     if not origin:
         return None
     paragraphs = tuple(' '.join(p.casefold().split()) for p in re.split(r'\n\s*\n', text)
-        if association_evidence({'body': p}, [symbol]))
+        if association_evidence({'body': p}, [symbol], scoped=False))
     return (article.source, origin.group(1).rstrip('.,'), paragraphs) if paragraphs else None
 
 

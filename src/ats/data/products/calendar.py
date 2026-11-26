@@ -18,6 +18,13 @@ class ScheduleCalendarProduct:
         self.store = store or ScheduleCalendarStore()
         self.config_dir = Path(config_dir or REPO_ROOT / "config")
 
+    def next_earnings_date(self, entity: str, *, as_of: datetime | None = None) -> str:
+        """The next published earnings date for one issuer (from a source or registered by hand), "" if unknown."""
+        point = as_of or datetime.now(timezone.utc)
+        prefix = f"earnings:{entity.upper()}:"
+        events = self.store.events(as_of=point, start=point.date(), event_types=("earnings",), limit=5000)
+        return next((row["event_date"] for row in events if row["event_id"].startswith(prefix)), "")
+
     def snapshot(self, *, as_of: datetime | None = None, start: date | None = None,
                  end: date | None = None, event_types: tuple[str, ...] = (),
                  include_cancelled: bool = False, limit: int = 500) -> dict[str, Any]:

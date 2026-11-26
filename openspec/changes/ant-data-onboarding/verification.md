@@ -177,3 +177,66 @@ CIK 2130357。结果 succeeded：入库 4 份，首版 S-1 因本地已有而跳
 用户决定（2026-11-26）：其他标的不补采。因此没有重新抓取 SPCX 的 10-Q 与财务数据，上述 19 份存量也不处理；实际值抽取的模型调用未执行。
 
 未验证、留到 ANT 首份 10-Q 发布后的真实验收：当前代码对一家新上市发行人的 10-Q 正文与财务数据采集，以及实际值抽取。已有的旁证只有生产历史记录：NVDA Q3 FY2027 在 11-19 抽取出收入 1,158.44 亿美元、EPS 2.68 和 6 个打分维度。
+
+## 4. 接入研究任务流（2026-11-26）
+
+**签字：用户 2026-11-26 确认**（4.1–4.6 的代码、配置、文档与测试结果，含 4.1 的关联范围取舍）。
+
+状态：4.1–4.6 完成（工作树，未提交、未合并）。
+
+### 4.1 关联范围
+
+- ANT 声明 `association_scope: headline`。新增测试：正文提到 Anthropic / Claude 的 NVDA 文章只关联 NVDA；标题、副标题、导语提到时关联 ANT；只在正文提到 Anthropic 的 IBKR 新闻照常准入、不关联 ANT；元数据重算与简报选材同样只看标题、副标题、导语。
+- 相关测试通过。顺带修正第 2 组遗留的一条失败测试（`test_managed_cache_miss_local` 的来源清单缺两个注册类来源）。
+- 解释上的取舍，供确认：正文里的 `$ANT` 之类股票代码也不建立关联。
+- 注册类文件在 ANT 进入 targets 后可能成为简报候选；424B4 日期为 11-19，合并时已超出 7 天回看，今后的注册类文件属于正常信息，未改代码。
+
+### 4.2 基本面未覆盖数量
+
+生产账本副本（只读复制，用后删除），2026-11-26 05:11 UTC，按生产配置用决策周期的同一函数计算：18 个 targets 未覆盖 **0** 个，最近 8 个决策周期冻结的 `fundamental_uncovered` 均为空。加入 ANT 后为 1 个，不超过上限 4。
+
+### 4.3 首份财报前的未覆盖状态
+
+改动前的行为：ANT 进入 targets 后，只要当天有信息简报，基本面例行任务就以“缺少上一版预期基线”失败。
+
+新增测试 10 条：首份财报前发布缺口（有无简报都发布）；带人工登记的下次财报日期；财报前建出基线仍为未覆盖；财报已入库无基线时说明原因而不失败；财报与基线齐备后自动转正常；财务数据读不到只对新股记缺口；其他公司行为不变；缺口投影不被复用；决策覆盖计算把 ANT 列为未覆盖。`test_phase_f_snapshot_dependencies` 的 22 个 error 与 `test_collection_boundary::test_technical_review_publishes_per_entity_projections` 在改动前的提交上同样存在。
+
+待定（首份财报发布前需要决定）：财报前若因数据不足没有建出基线，首份财报后 ANT 只在事件评审有效期内算覆盖，之后要等下一次财报前窗口或人工执行基线刷新。
+
+### 4.4 打分维度（用户 2026-11-26“按建议写入”）
+
+`config/pead/ANT.yaml`：新增年化收入 0.25、推理毛利 0.20、算力费用率 0.15、未来承诺付款 0.15、非 coding 产品收入 0.10、NRR 0.10、年付 10 万美元以上客户数 0.05，合计 1.00。没有“下季指引”一项，首份财报后再定。不手填财季标签；产业链同侪由层配置派生为 GOOG。加载与权重测试通过。
+
+### 4.5 可交易名单、L1 层、风控
+
+- `config/pead.yaml` targets 加 ANT（19 个，未超过日历单次 20 个）；`ai_hardware.yaml` 的 L1_app 加 ANT 及定价机制备注，`private` 只留 OpenAI；`risk.yaml` 登记 `instruments.ANT` 并改写 L1 上限注释（上限 10% 不变）。
+- 新增 `tests/test_ant_target_config.py`（5 项），`test_pead_roster` 名单加 ANT。
+- 依赖这些配置的测试 34 个文件：419 项通过，25 项失败。同样的 25 项在改动前的提交（`8d1e194`）上也失败；逐条比对失败信息，仅两处文字差异（`ai_hardware.yaml` 的内容哈希随文件变化，该项改动前已与记录值不符；另一处是集合打印顺序）。失败分布：研究关口 14、研究 4、层级复核 3，配置哈希、事件开关、层风险命题、L1 观察器声明各 1。其中层级复核与 L1 观察器声明的用例改动前即红，对本次改动没有检验力。
+- 第 3、4 组其余相关测试 11 个文件：210 项通过。
+
+用户 2026-11-26 决定代码先合并、启用留到最后：以上三处配置、`docs/agents/SECTOR_ANALYST.md` 的 L1 描述、`tests/test_ant_target_config.py` 与 `tests/test_pead_roster.py` 的改动单独在分支 `feat/ant-activation`，试运行（16.1）通过后合并（16.2）。
+
+启用后跟随 targets / 层名单自动生效的变化：
+
+| 项 | 变化 |
+|---|---|
+| `consensus_daily`、`company_financials_weekly`、`company_financials_sec_daily` | 自动纳入 ANT。首份 10-Q 前的结果（失败、隔离或无变化）未验证，启用后在 14.4 核对 |
+| `chain_evidence_daily` | 自动纳入 ANT。只处理近 7 天内已确认发布的财报，首份财报前为 `no_print_in_window`，不请求模型；注册类文件不触发它 |
+| 风控 | L1 上限开始约束 ANT 实际持仓 |
+| 层级与行业 | 层成员出现 ANT，命题证人仍为 ANTHROPIC；ANT 有规范财务数据前不进 L1 截面 |
+
+### 4.6 文档
+
+- `docs/ARCHITECTURE.md` 原本没有 L1 层的描述，只在 §9.2 补了新上市公司“未覆盖”；L1 的层描述在 `docs/agents/SECTOR_ANALYST.md`，已更新成员、读法与 L1 上限行（合计随之为 123%）。该表 L7 行仍是 11-06 规则取消前的 8%，不属本 change，未改。
+- `docs/OPERATIONS.md` 新增 §5.1 注册类文件命令，§6 补财季标签命令。
+- 命令按写法在工作树运行，数据库、队列、产物目录指向临时位置，用后删除：
+
+| 命令 | 结果 |
+|---|---|
+| `registration-ingest`（用户提供的首版 S-1） | succeeded，申报日期 10-26 |
+| `registration-filings`（含 `--as-of 2026-10-25`） | 返回 1 份；截至 10-25 为空 |
+| `registration-backfill` | 工作树没有 `.env`，以 `sec_user_agent_missing` 停止，没有请求 SEC；真实补采见第 2 组“生产写入” |
+| `events register` | 建出 `earnings:ANT:FY2026Q4:release` |
+| `events label` | 参数通过，临时库没有占位事件故报 `unknown calendar event`；成功路径由 `tests/test_calendar_unlabeled_earnings.py` 覆盖 |
+
+核对中发现文档初稿漏了财季标签命令必填的 `--evidence-json`，已改。经托管队列执行时工作进程自动读取仓库 `.env`；只有绕过队列的隔离运行需要手工导出 `SEC_EDGAR_USER_AGENT`。

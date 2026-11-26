@@ -14,7 +14,7 @@ from ats.chain import sources
 from ats.chain.corroborate import assess_layer
 from ats.data.sources import governed_observer as g
 from ats.memory import get_store
-from ats.schemas.chain import ClaimDef, Concept, SeriesPoint, SourceDef, Witness
+from ats.schemas.chain import ClaimDef, Concept, SourceDef, Witness
 
 NOW = datetime(2026, 10, 25, 9, 0, tzinfo=timezone.utc)
 
@@ -280,22 +280,6 @@ def test_every_snapshot_stays_traceable_from_the_ledger(monkeypatch):
     payloads = [row[0] for row in ledger.store.data_store().conn.execute(
         "SELECT raw_payload FROM data_measurement_points")]
     assert payloads and not any("snapshot" in payload for payload in payloads)
-
-
-def test_a_series_with_two_bases_per_document_keeps_publishing_both_bodies(monkeypatch):
-    """yoy and mom share one document id: neither is "restored", and repeating the print adds no version."""
-    source = SourceDef(id="tw_ic_exports", label="TW", adapter="tw_mof", entity="TW_IC_EXPORT", stance="regulator",
-                       observation_type="regulatory", cadence="monthly", concepts=["supply_tightness"],
-                       direction_from=["yoy", "mom"])
-    monkeypatch.setattr(sources, "load_sources", lambda: [source])
-    monkeypatch.setattr(sources, "fetch",
-                        lambda *a, **k: [SeriesPoint(period="2026-06", value=100.0, yoy=0.3, mom=-0.05)])
-    store = get_store()
-    for day in (1, 2, 3):
-        sources.collect(store, now=NOW + timedelta(days=day), source_ids={"tw_ic_exports"})
-    assert len(store.document_versions("tw_ic_exports:2026-06")) == 2
-    bodies = [row[0] for row in store.data_store().conn.execute("SELECT text FROM data_document_chunks")]
-    assert bodies and not any("取代版本" in body for body in bodies)
 
 
 def test_the_judge_receives_clusters_in_one_order_whatever_the_process():

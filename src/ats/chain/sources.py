@@ -262,9 +262,17 @@ def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPo
         repository.close()
 
 
-def _reading_text(source: SourceDef, obs: Observation) -> str:
-    return (f"{obs.evidence_span}\n\n来源：{source.label or source.id}（{source.adapter}）；"
-            f"口径期：{obs.period}；数值：{obs.value:g} {obs.unit}".rstrip())
+def _reading_text(source: SourceDef, readings: list[Observation]) -> str:
+    """The body of one reading document: every evidence line that cites it, then where the figure comes from.
+
+    A series with several bases (yoy and mom) is one document per print with one line each. Publishing a body per
+    basis under the same id left "latest version" ambiguous, so a fact could cite the other basis's line.
+    """
+    lines = dict.fromkeys(obs.evidence_span for obs in readings)
+    origins = dict.fromkeys(
+        f"来源：{source.label or source.id}（{source.adapter}）；"
+        f"口径期：{obs.period}；数值：{obs.value:g} {obs.unit}".rstrip() for obs in readings)
+    return "\n".join(lines) + "\n\n" + "\n".join(origins)
 
 
 def _content_hash(text: str) -> str:
@@ -276,7 +284,7 @@ def _restored_text(text: str, replaced_version_id: str) -> str:
 
 
 def _next_version_text(store, document_id: str, text: str) -> str | None:
-    """The body to publish for a document that carries exactly one reading; None when the reading is unchanged.
+    """The body to publish for a reading document; None when its readings are unchanged.
 
     A version is identified by its content and "latest" means last first published. A reading that goes back to an
     earlier value (A -> B -> A) would therefore re-use version A and leave B as latest, and the new fact would cite
@@ -298,12 +306,13 @@ def _next_version_text(store, document_id: str, text: str) -> str | None:
 
 def _publish_reading(store, source: SourceDef, obs: Observation, *, now: datetime,
                      text: str, snapshot_id: str = "") -> None:
-    """Publish the re-checkable reading an observation cites, as an immutable document version.
+    """Publish the re-checkable readings observations cite, as an immutable document version.
 
     A series has no filing to point at, but the evidence store only admits a neutral fact that cites a published
-    document version.  The reading line itself is the document: it carries the figure, period, agency and rule
+    document version.  The reading lines themselves are the document: they carry the figure, period, agency and rule
     status, and a changed print produces a new version under the same document id rather than rewriting history.
-    The publication note names the ledger snapshot the version was first read from.
+    `obs` is any one of them (they share the document, entity and period).  The publication note names the ledger
+    snapshot the version was first read from.
     """
     from types import SimpleNamespace
 
@@ -366,29 +375,27 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
         saved = 0
         observations = to_observations(source, points, now=now)
         snapshots = {_document_id(source, point): point.snapshot_id for point in points}
-        bodies: dict[str, set[str]] = {}
+        documents: dict[str, list[Observation]] = {}
         for obs in observations:
-            bodies.setdefault(obs.document_id, set()).add(_reading_text(source, obs))
-        for obs in observations:
-            text = _reading_text(source, obs)
-            # "Unchanged" and "restored" are only decidable when the document carries one reading. A series with
-            # several bases (yoy and mom) publishes one body per basis under the same id, as it always has.
-            if len(bodies[obs.document_id]) == 1:
-                text = _next_version_text(store, obs.document_id, text)
+            documents.setdefault(obs.document_id, []).append(obs)
+        for document_id, readings in documents.items():
+            # The whole body goes out once, before any fact cites it: a fact cites the document's latest version.
+            text = _next_version_text(store, document_id, _reading_text(source, readings))
             if text is not None:
-                _publish_reading(store, source, obs, now=now, text=text,
-                                 snapshot_id=snapshots.get(obs.document_id, ""))
-            # A governed-observer point names its own concept; a series feeds every concept its source declares.
-            for concept in ([obs.concept] if obs.concept else source.concepts):
-                row = obs.model_copy(update={"concept": concept})
-                # Re-derive the id: it is deterministic over (doc, entity, metric,
-                # period), and two concepts off one print must not collide.
-                row = row.model_copy(update={"id": Observation.deterministic_id(
-                    row.document_id, row.entity, f"{row.metric}:{concept}", row.period)})
-                if store.save_observation(
-                        row, projection_profile="structured_evidence",
-                        projection_version="v1"):
-                    saved += 1
+                _publish_reading(store, source, readings[0], now=now, text=text,
+                                 snapshot_id=snapshots.get(document_id, ""))
+            for obs in readings:
+                # A governed-observer point names its own concept; a series feeds every concept its source declares.
+                for concept in ([obs.concept] if obs.concept else source.concepts):
+                    row = obs.model_copy(update={"concept": concept})
+                    # Re-derive the id: it is deterministic over (doc, entity, metric,
+                    # period), and two concepts off one print must not collide.
+                    row = row.model_copy(update={"id": Observation.deterministic_id(
+                        row.document_id, row.entity, f"{row.metric}:{concept}", row.period)})
+                    if store.save_observation(
+                            row, projection_profile="structured_evidence",
+                            projection_version="v1"):
+                        saved += 1
         out[source.id] = saved
         # Every run's snapshots, including a run that stored nothing new: the ledger can still say what was read.
         read_from = sorted({point.snapshot_id for point in points if point.snapshot_id})

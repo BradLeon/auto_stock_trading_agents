@@ -5,7 +5,7 @@ same adjudication. What differs is only that a source declares its own stance, b
 no claim's witness table will ever name it.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ats.chain import sources
 from ats.memory import get_store
@@ -126,3 +126,136 @@ def test_a_series_does_not_inflate_the_cluster_count():
     clusters = build_clusters(claim, rows)
     assert len(clusters) == 1
     assert len(clusters[0].rows) == 6            # members kept, one voice
+
+
+# --- the version a fact cites: one document per print, one line per basis --------------------------------------------
+
+JUNE = "tw_ic_exports:2026-06"
+
+
+def _collect(monkeypatch, day: int, points=None) -> int:
+    monkeypatch.setattr(sources, "load_sources", lambda: [_source()])
+    monkeypatch.setattr(sources, "fetch", lambda *a, **k: points or _points())
+    return sources.collect(get_store(), now=NOW + timedelta(days=day))["tw_ic_exports"]
+
+
+def _revised_june() -> list[SeriesPoint]:
+    may, june = _points()
+    return [may, june.model_copy(update={"value": 25500.0, "yoy": 0.334, "mom": -0.050})]
+
+
+def _body(version_id: str) -> str:
+    return get_store().data_store().conn.execute(
+        "SELECT text FROM data_document_chunks WHERE version_id=? AND ordinal=0", (version_id,)).fetchone()[0]
+
+
+def _miscited() -> list[str]:
+    """Live facts whose cited version does not hold their own evidence line."""
+    return sorted(f"{fact['period']} {fact['metric']}" for fact in get_store().facts(limit=100)
+                  if fact["evidence_span"] not in _body(fact["document_version_id"]).split("\n"))
+
+
+def _sizes() -> dict[str, int]:
+    conn = get_store().data_store().conn
+    return {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in
+            ("data_document_versions", "data_document_publications", "data_evidence_facts",
+             "data_evidence_projections", "data_evidence_observations")}
+
+
+def test_both_bases_of_a_print_share_one_body_with_a_line_each(monkeypatch):
+    _collect(monkeypatch, 1)
+    (version,) = get_store().document_versions(JUNE)
+    assert _body(version["version_id"]) == (
+        "2026-06 台湾 IC 出口 25,385.00 百万美元，同比 +32.8%（tw_mof 2026-06）\n"
+        "2026-06 台湾 IC 出口 25,385.00 百万美元，环比 -5.4%（tw_mof 2026-06）\n"
+        "\n"
+        "来源：台湾 IC 出口（tw_mof）；口径期：2026-06；数值：25385 百万美元")
+    assert {f["document_version_id"] for f in get_store().facts(document_id=JUNE)} == {version["version_id"]}
+
+
+def test_a_single_reading_body_keeps_its_format():
+    """One-line documents (DRAM, governed observers) must hash as before, or every print gains a spurious version."""
+    source = _source(direction_from=["yoy"])
+    (obs,) = sources.to_observations(source, [SeriesPoint(period="2026-06", value=100.0, yoy=0.3)], now=NOW)
+    assert sources._reading_text(source, [obs]) == (
+        f"{obs.evidence_span}\n\n来源：台湾 IC 出口（tw_mof）；口径期：2026-06；数值：100")
+
+
+def test_repeat_collection_adds_nothing_and_every_fact_still_cites_its_own_line(monkeypatch):
+    _collect(monkeypatch, 1)
+    assert _miscited() == []
+    first = _sizes()
+    assert first["data_document_versions"] == first["data_document_publications"] == 2    # one per print
+
+    for day in (2, 3):
+        assert _collect(monkeypatch, day) == 0
+        assert _miscited() == []
+        assert _sizes() == first
+
+
+def test_a_revised_print_adds_one_version_that_both_bases_cite(monkeypatch):
+    _collect(monkeypatch, 1)
+    before = _sizes()
+
+    _collect(monkeypatch, 2, _revised_june())
+    _collect(monkeypatch, 3, _revised_june())
+
+    assert _sizes()["data_document_versions"] == before["data_document_versions"] + 1
+    assert _sizes()["data_evidence_facts"] == before["data_evidence_facts"] + 2
+    assert _miscited() == []
+    latest = get_store().latest_document_version(JUNE)["version_id"]
+    assert {f["document_version_id"] for f in get_store().facts(document_id=JUNE)} == {latest}
+    retired = [f for f in get_store().facts(document_id=JUNE, include_superseded=True) if f["superseded_at"]]
+    assert len(retired) == 2 and all(f["evidence_span"] in _body(f["document_version_id"]) for f in retired)
+
+
+def test_a_print_that_returns_to_an_earlier_value_cites_its_own_lines(monkeypatch):
+    _collect(monkeypatch, 1)
+    _collect(monkeypatch, 2, _revised_june())
+    replaced = get_store().latest_document_version(JUNE)["version_id"]
+
+    _collect(monkeypatch, 3)
+    assert _miscited() == []
+    assert f"取代版本 {replaced}" in _body(get_store().latest_document_version(JUNE)["version_id"])
+    restored = _sizes()
+
+    _collect(monkeypatch, 4)
+    assert _sizes() == restored and _miscited() == []
+
+
+def test_facts_left_citing_the_other_basis_are_replaced_without_rewriting_history(monkeypatch):
+    """The state production was left in: one body per basis under one id, so a second run re-cited yoy to the mom body."""
+    from ats.agents.evidence.adjudicator import build_context
+    from ats.chain.corroborate import build_clusters
+    from ats.schemas.chain import ClaimDef, Concept, Observation
+
+    source, store = _source(), get_store()
+    for day in (1, 2):
+        for obs in sources.to_observations(source, _points(), now=NOW + timedelta(days=day)):
+            sources._publish_reading(store, source, obs, now=NOW + timedelta(days=day),
+                                     text=sources._reading_text(source, [obs]))
+            for concept in source.concepts:
+                key = Observation.deterministic_id(obs.document_id, obs.entity, f"{obs.metric}:{concept}", obs.period)
+                store.save_observation(obs.model_copy(update={"concept": concept, "id": key}),
+                                       projection_profile="structured_evidence", projection_version="v1")
+    assert _miscited() == ["2026-05 tw_ic_exports_yoy", "2026-06 tw_ic_exports_yoy"]
+    claim = ClaimDef(id="c", kind="common", layer="L5_fab",
+                     concepts=[Concept(key="supply_tightness", desc="紧张")])
+
+    def judged_text() -> str:
+        return build_context(claim, build_clusters(claim, store.observations(entity="TW_IC_EXPORT", limit=50)))
+
+    prompt = judged_text()
+    observations = _sizes()["data_evidence_observations"]
+    old = {f["fact_id"]: f["document_version_id"] for f in store.facts(limit=100, include_superseded=True)}
+
+    assert _collect(monkeypatch, 3) == 0                             # same observation ids: nothing counted twice
+
+    assert _miscited() == []
+    assert _sizes()["data_evidence_observations"] == observations
+    assert judged_text() == prompt                                   # the adjudicator is asked exactly what it was
+    now_held = {f["fact_id"]: f["document_version_id"] for f in store.facts(limit=100, include_superseded=True)}
+    assert old.items() <= now_held.items()                           # earlier vintages kept, citations untouched
+    healed = _sizes()
+    _collect(monkeypatch, 4)
+    assert _sizes() == healed

@@ -69,6 +69,11 @@ CLIENT_ID = int(os.getenv("ATS_IBKR_NEWS_CLIENT_ID", "190"))
 URL_PREFIX = "ibkr-news"
 _SLICE_DAYS = 3                 # short enough that totalResults never truncates a slice
 _PER_SLICE = 100
+# 2026-11-26: TWS can list its news providers yet never answer `reqHistoricalNews` (11-17, 11-25; only a full
+# quit-and-relaunch of TWS clears it). Every slice then waits the whole timeout — 78 slices, ~16 minutes — before
+# the run is called failed. After this many requests without a single callback the sweep stops, the remaining
+# symbols are named as failed (so the Yahoo fallback covers them) and the run says why.
+_NO_CALLBACK_BREAKER = 3
 _OVERLAP_MINUTES = 10           # replay boundary rows; stable ids make this idempotent
 _HISTORICAL_NEWS_TIMEOUT_SECONDS = 12
 _PROVIDER_LOOKUP_ATTEMPTS = 3
@@ -497,8 +502,13 @@ def discover_with_status(*, pages: int = 3, symbols: list[str] | None = None,
     by_provider_article: dict[tuple[str, str], str] = {}
     by_title_time: dict[tuple[str, str], str] = {}
     failed_slices: list[dict[str, str]] = []
+    requests_sent = callbacks = 0
+    breaker = ""
 
     for sym in symbols:
+        if breaker:
+            failed_slices.append({"symbol": sym, "stage": "historical_news", "error": breaker})
+            continue
         try:
             c = Stock(sym, "SMART", "USD")
             _qualify(ib, c)
@@ -513,7 +523,7 @@ def discover_with_status(*, pages: int = 3, symbols: list[str] | None = None,
 
         # Newest slice first: if max_per_run bites, it should bite on the OLD end.
         edge = now
-        while edge > now - timedelta(days=span):
+        while edge > now - timedelta(days=span) and not breaker:
             start = max(now - timedelta(days=span), edge - timedelta(days=_SLICE_DAYS))
             query_start = start - timedelta(minutes=_OVERLAP_MINUTES)
             request_detail: dict[str, object] = {}
@@ -531,6 +541,7 @@ def discover_with_status(*, pages: int = 3, symbols: list[str] | None = None,
             # it, whereas a provider with no matching headlines returns an empty list.
             # Treating both as [] made an entitlement/network timeout look like a clean
             # "zero news" result and could publish an unobserved time slice.
+            requests_sent += 1
             if heads is None:
                 failed_slices.append({"symbol": sym, "stage": "historical_news",
                                       "slice_start": start.isoformat(),
@@ -538,6 +549,13 @@ def discover_with_status(*, pages: int = 3, symbols: list[str] | None = None,
                                           "request_failure",
                                           "empty_response_timeout_or_provider_failure"))})
                 heads = []
+                if not callbacks and requests_sent >= _NO_CALLBACK_BREAKER and \
+                        "request_failure" not in request_detail:
+                    breaker = "historical_news_no_callback"
+                    log.warning("ibkr_news: %d historical-news requests without any callback — stopping the "
+                                "sweep; TWS needs a full quit and relaunch", requests_sent)
+            else:
+                callbacks += 1
             for h in heads or ():
                 title = _clean_headline(h.headline)
                 provider = str(getattr(h, "providerCode", "") or "")
@@ -587,7 +605,8 @@ def discover_with_status(*, pages: int = 3, symbols: list[str] | None = None,
              "provider_lookup": provider_lookup,
              "symbols": symbols, "failed_slices": failed_slices,
              "lookback_days": span, "slice_days": _SLICE_DAYS,
-             "access": "read_only_tws"})
+             "access": "read_only_tws",
+             **({"breaker": breaker} if breaker else {})})
 
 
 def discover(*, pages: int = 3, symbols: list[str] | None = None,

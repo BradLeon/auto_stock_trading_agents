@@ -115,6 +115,17 @@ def assemble_context(state: ChiefDecisionState) -> dict:
                          fundamental_focus={key: plan.task_inputs.get(key) or []
                                             for key in ("event_entities", "fundamental_uncovered",
                                                         "technical_uncovered")})
+    if state.use_broker:
+        # 2026-11-26: name the collection points that are not current, first in the context (the model discounts
+        # them), at the top of the report, and — for a live cycle — in one Feishu message. Offline/test runs skip
+        # it: it reads the production collection ledger.
+        from ..runtime import input_freshness
+
+        stale = input_freshness.stale_sources(now=state.as_of)
+        if stale:
+            ctx.blocks = {input_freshness.BLOCK_TITLE: input_freshness.block(stale, now=state.as_of), **ctx.blocks}
+            if state.execute and not state.dry_run:
+                input_freshness.notify(state.cycle_id, stale, now=state.as_of)
     log.info("chief context: %s", ctx.stats())
     out.update(context_text=ctx.as_context(), context_stats=ctx.stats(),
                net_liquidation=ctx.net_liquidation, actionable_scores=[])

@@ -80,6 +80,13 @@ def transitions(rows, previous: dict[str, str]) -> dict[str, list]:
     return out
 
 
+# Failures only the operator can clear: the alert says what to do, not just that it failed (2026-11-26).
+ACTIONS = {
+    "ibkr_historical_news_no_callback":
+        "TWS 历史新闻无响应：请完整退出 TWS（Cmd+Q）后重开并登录；之后每小时的检查会自动补采",
+}
+
+
 def _line(r) -> str:
     """`- job：reason（最近一次 11-20 23:20 succeeded/…）` — the time matters: a job that last succeeded days ago
     and has not run since is overdue, and "最近：succeeded" alone reads like it just worked."""
@@ -88,7 +95,9 @@ def _line(r) -> str:
     status = (r.last_status or "无记录") + (f"/{reason}" if reason else "")
     at = getattr(r, "last_at", None)
     when = f"{at.astimezone(TAIPEI):%m-%d %H:%M} " if at else ""
-    return f"- {r.job_id}：{r.light_reason or LIGHT_CN[r.light]}（最近一次 {when}{status}）"
+    action = ACTIONS.get(str(r.last_reason or ""))
+    return f"- {r.job_id}：{r.light_reason or LIGHT_CN[r.light]}（最近一次 {when}{status}）" + (
+        f"\n  → {action}" if action else "")
 
 
 def change_message(changes: dict[str, list]) -> tuple[str, str] | None:

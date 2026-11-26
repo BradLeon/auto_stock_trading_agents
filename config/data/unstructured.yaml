@@ -256,9 +256,11 @@ sources:
       max_body_requests: 24
     policy:
       acquisition: yfinance_ticker_news
-      permission: public_pending_human_review
-      usage: internal_research_after_review
-      retention: candidate_until_review_then_immutable
+      # 2026-11-26（用户决定）：取消整批人工核对标题/链接——没有核对入口也没有提醒，Yahoo 文章从未发布过。
+      # 改为只靠下方逐篇自动把关（标题须命中公司/代码、正文 ≥800 字、须是文章本体），不合格的单篇跳过。
+      permission: public_automated_gates
+      usage: internal_research
+      retention: immutable
       fallback: {}
       freshness_policy: event_driven_official_disclosure
       entities: dynamic_pead_targets
@@ -272,7 +274,7 @@ sources:
       priority: availability_fallback
       fallback_for: ibkr_news
       fallback_mode: none
-      release_requires_human_title_url_review: true
+      release_requires_human_title_url_review: false
     ingestion:
       entity: YAHOO_FINANCE
       stance: regulator

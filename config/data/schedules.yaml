@@ -7,6 +7,9 @@ controller:
   ledger: var/data_refresh.sqlite
   misfire_grace_hours: 24
   max_run_seconds: 1800
+  # 2026-11-26: after a window's ordinary retries fail, try it again every hour, up to 6 more runs (still inside
+  # misfire_grace_hours). Source jobs only: derived jobs call the model and are not re-run on a timer.
+  catch_up: {domains: [structured, unstructured], attempts: 6, interval_seconds: 3600}
   # Fail closed during controller rollout. Enable each validated job explicitly.
   default_enabled: false
 structured:
@@ -573,8 +576,8 @@ unstructured:
         fallback_only: yfinance_live_news
         fallback_on: [unreachable, tws_unreachable, unauthorized, provider_unavailable,
                       rate_limited, request_rejected, failed_slices]
-        human_title_url_review_required: true
-      semantics: TWS headlines daily; Yahoo only for failed primary scope and held for human review
+        human_title_url_review_required: false   # 2026-11-26: per-article automatic gates only
+      semantics: TWS headlines daily; Yahoo only for failed primary scope, published after per-article gates
 # Derived jobs: facts the platform produces itself from admitted/official documents. They are
 # ledgered, retried and freshness-checked like source jobs but have no ingestion-run record, so
 # the command's own result packet is the evidence (status + reason).

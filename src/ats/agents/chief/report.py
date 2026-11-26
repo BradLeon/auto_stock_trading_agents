@@ -10,6 +10,15 @@ from .decide import ChiefResult
 log = logging.getLogger("ats.agents.chief.report")
 
 
+def _freshness_block(context_text: str) -> str:
+    """The stale-input block the Chief saw (runtime/input_freshness), for the top of the report."""
+    marker = "## 数据新鲜度（采集异常）\n"
+    if marker not in (context_text or ""):
+        return ""
+    rest = context_text.split(marker, 1)[1]
+    return rest.split("\n\n## ", 1)[0].strip()
+
+
 def render(result: ChiefResult) -> str:
     lines = [
         f"# 🤖 首席决策 — {result.as_of:%Y-%m-%d %H:%M} UTC（{result.cycle_id}）",
@@ -19,6 +28,9 @@ def render(result: ChiefResult) -> str:
         result.summary,
         "",
     ]
+    stale = _freshness_block(result.context_text)
+    if stale:
+        lines += ["> ⚠️ **输入数据滞后**", ">"] + [f"> {line}" for line in stale.splitlines()] + [""]
     if result.decisions:
         if result.outcome_note:
             lines += [f"> ⚠️ **以下建议没有形成订单，不在待审批里**：{result.outcome_note}", ""]

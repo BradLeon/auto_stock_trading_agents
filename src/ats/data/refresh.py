@@ -86,6 +86,12 @@ class RefreshJob:
     required_env: tuple[str, ...]
     approval_env: tuple[str, ...]
     retry_discovery_only: bool = False
+    # Same-day catch-up (2026-11-26): after the ordinary retries are spent, a failed window is tried again
+    # every `catch_up_interval_seconds` until `catch_up_attempts` more runs or the misfire grace ends. A source
+    # that is down for hours (TWS news, an expired login) is then collected the same day once it is back,
+    # instead of waiting for tomorrow's schedule.
+    catch_up_attempts: int = 0
+    catch_up_interval_seconds: int = 3600
     request_budget: int = 0           # derived jobs: requests one run may spend (0 = undeclared)
     entity: str = ""                  # set when expanded from an `entities:` list
 
@@ -212,8 +218,13 @@ def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
     sections = [("structured", raw.get("structured") or {}),
                 ("unstructured", raw.get("unstructured") or {}),
                 ("derived", raw.get("derived") or {})]
+    catch_up = controller.get("catch_up") or {}
+    catch_up_domains = set(catch_up.get("domains") or [])
     for domain, section in sections:
       for job_id, body, job_entity in _expand_jobs(section):
+        job_catch_up = {**({k: v for k, v in catch_up.items() if k != "domains"}
+                           if domain in catch_up_domains else {"attempts": 0}),
+                        **(body.get("catch_up") or {})}
         source_ids = tuple(body.get("sources") or ([body["source"]] if body.get("source") else []))
         dataset_ids = tuple(body.get("datasets") or [])
         if not source_ids or (domain == "structured" and not dataset_ids):
@@ -303,6 +314,8 @@ def load_plan(path: str | Path = DEFAULT_CONFIG) -> RefreshPlan:
                                ("public_terms_approval_env", "public_structured_page_policy_env")
                                if (body.get("scope") or {}).get(key)),
             retry_discovery_only=bool(body.get("retry_discovery_only", False)),
+            catch_up_attempts=max(0, int(job_catch_up.get("attempts") or 0)),
+            catch_up_interval_seconds=max(60, int(job_catch_up.get("interval_seconds") or 3600)),
             request_budget=int((body.get("request_budget") or {}).get("requests_per_run") or 0),
             entity=job_entity,
         ))
@@ -391,7 +404,8 @@ class RefreshLedger:
                 terminal.add("discovery_only")
             if row["status"] in terminal:
                 return None
-            if row["attempts"] >= job.max_attempts:
+            if row["attempts"] >= job.max_attempts + (
+                    job.catch_up_attempts if row["status"] == "failed" else 0):
                 return None
             if row["status"] == "running" and row["started_at"]:
                 age = now - datetime.fromisoformat(row["started_at"])
@@ -408,8 +422,11 @@ class RefreshLedger:
     def finish(self, key: str, attempt: int, started: datetime, ended: datetime,
                *, status: str, exit_code: int | None, reason: str, stdout_hash: str,
                refs: dict[str, list[str]], job: RefreshJob) -> None:
-        delay = job.backoff_seconds[min(attempt - 1, len(job.backoff_seconds) - 1)] \
-            if status == "failed" and job.backoff_seconds else 0
+        if status == "failed" and attempt >= job.max_attempts:
+            delay = job.catch_up_interval_seconds        # ordinary retries spent: hourly catch-up
+        else:
+            delay = job.backoff_seconds[min(attempt - 1, len(job.backoff_seconds) - 1)] \
+                if status == "failed" and job.backoff_seconds else 0
         next_retry = _iso(ended + timedelta(seconds=delay)) if status == "failed" else ""
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -769,8 +786,18 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 status, reason = "failed", "source_check_missing"
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and not refs["runs"]:
                 status, reason = "failed", "article_ingestion_run_missing"
+            elif action == "article-ingest" and (packet.get("discovery") or {}).get("breaker") == \
+                    "historical_news_no_callback":
+                # TWS answered nothing (2026-11-26). Yahoo may have filled in, but the primary source is down until
+                # the operator relaunches TWS: keep the run failed so the hourly catch-up retries it and the alert
+                # carries the action.
+                status, reason = "failed", "ibkr_historical_news_no_callback"
             elif action in {"article-ingest", "document-ingest", "fixed-ingest"} and packet_status == "quarantined":
                 status, reason = "quarantined", "article_admission_rejected"
+            elif action == "article-ingest" and packet_status == "pending_human_review" and refs["published"]:
+                # Some articles wait for review, the rest were published: the run did collect (11-24 published 23
+                # IBKR articles yet read as "discovery only" because of the Yahoo items held for review).
+                status, reason = "succeeded", "partial_review_held_back"
             elif action == "article-ingest" and packet_status == "pending_human_review":
                 status, reason = "discovery_only", "human_review_required"
             elif action == "article-ingest" and packet_status == "unreachable":

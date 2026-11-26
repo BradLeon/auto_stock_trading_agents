@@ -258,6 +258,28 @@ def events_calendar_command(args, *, parser) -> int:
                                      actor=args.actor, reason=args.reason, evidence=evidence)
         print(json.dumps(event, ensure_ascii=False, indent=2))
         return 0
+    if args.action in {"label", "register"}:
+        from ..data import fiscal
+
+        subject = "--event-id" if args.action == "label" else "--entity and --date"
+        if not ((args.event_id if args.action == "label" else args.entity and args.date)
+                and args.fiscal_label and args.actor and args.reason):
+            parser.error(f"events {args.action} requires {subject}, --fiscal-label, --actor and --reason")
+        year, quarter = fiscal.parse_label(args.fiscal_label)
+        if year is None or quarter is None:
+            parser.error("--fiscal-label must name a fiscal year and quarter, e.g. FY2026Q4")
+        try:
+            evidence = json.loads(args.evidence_json or "{}")
+            given = {"fiscal_year": year, "fiscal_quarter": quarter, "actor": args.actor,
+                     "reason": args.reason, "evidence": evidence}
+            event = (store.label_earnings_event(args.event_id, **given) if args.action == "label" else
+                     store.register_earnings_event(args.entity, event_date=args.date, **given))
+        except json.JSONDecodeError as exc:
+            parser.error(f"--evidence-json is invalid JSON: {exc}")
+        except (KeyError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(event, ensure_ascii=False, indent=2))
+        return 0
     if args.action == "cancel":
         if not args.event_id or not args.actor or not args.reason:
             parser.error("events cancel requires --event-id, --actor and --reason")
@@ -3614,13 +3636,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     evi.add_argument("--output", default="", help="layer/ai-production: Markdown 审阅文档路径")
     evi.add_argument("--chart-dir", default="", help="layer/ai-production: PNG/sidecar 输出目录")
-    ev = sub.add_parser("events", help="事件日历 (list / upcoming / refresh / status / candidates)")
+    ev = sub.add_parser("events", help="事件日历 (list / upcoming / refresh / status / candidates / label / register)")
     ev.add_argument("action", choices=["list", "upcoming", "refresh", "status",
-                                       "candidates", "override", "cancel", "withdraw"])
+                                       "candidates", "override", "cancel", "withdraw", "label", "register"])
+    ev.add_argument("--entity", default="", help="register: 证券代码")
+    ev.add_argument("--fiscal-label", default="", help="label/register: 财季标签，如 FY2026Q4")
     ev.add_argument("--days", type=int, default=30, help="upcoming window")
     ev.add_argument("--source", action="append", default=[], help="refresh: source ID，可重复")
     ev.add_argument("--event-id", default="")
-    ev.add_argument("--date", default="", help="override: 新日期 YYYY-MM-DD")
+    ev.add_argument("--date", default="", help="override/register: 日期 YYYY-MM-DD")
     ev.add_argument("--actor", default="")
     ev.add_argument("--reason", default="")
     ev.add_argument("--evidence-json", default="{}")

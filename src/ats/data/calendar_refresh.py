@@ -550,6 +550,10 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
             else:
                 raise ValueError(f"unregistered schedule calendar adapter {adapter!r}")
             discovered = len(candidates)
+            # Labelled prints first: whether a date without a label needs a placeholder depends on them. Then the
+            # earliest unlabelled date of each issuer first, since an issuer has one placeholder.
+            candidates = sorted(candidates, key=lambda c: (not c.event_id, "" if c.event_id else str(c.event_date)))
+            placed: set[str] = set()
             signatures: dict[str, tuple[str, ...]] = {}
             for candidate in candidates:
                 if not candidate.event_id:
@@ -560,6 +564,11 @@ def refresh_schedule_calendar(*, source_ids: Iterable[str] | None = None,
                     raise ValueError(
                         "conflicting_calendar_candidates_in_source_batch:" + candidate.event_id)
             for candidate in candidates:
+                if not candidate.event_id:
+                    resolved = repository.place_unlabeled_earnings(candidate)
+                    if resolved.event_id and resolved.event_id not in placed:
+                        placed.add(resolved.event_id)
+                        candidate = resolved
                 saved = repository.submit_candidate(candidate, at=now)
                 candidate_ids.append(saved["candidate_id"])
                 repository.record_candidate_observation(

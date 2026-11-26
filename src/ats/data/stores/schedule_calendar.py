@@ -31,6 +31,36 @@ def earnings_identity(entity: str, fiscal_year: int | None, fiscal_quarter: int 
     return f"earnings:{entity.upper()}:FY{int(fiscal_year)}Q{int(fiscal_quarter)}:{subevent}"
 
 
+# A source can give a print's date without saying which fiscal quarter it reports (a newly listed issuer). Such a
+# date is published under one placeholder per issuer: visible in the calendar and usable for filing discovery, but
+# never confirmed as released and never routed to an analysis until a fiscal label exists.
+NEARBY_PRINT_DAYS = 45      # half a quarter: closer than this, a date without a label belongs to a labelled print
+
+
+def unlabeled_earnings_identity(entity: str) -> str:
+    return f"earnings:{entity.upper()}:unlabeled:release"
+
+
+def fiscal_label_status(payload: Mapping[str, Any] | None) -> str:
+    """`missing` (placeholder), `manual` (an operator supplied it) or empty (the source stated it)."""
+    return str((((payload or {}).get("metadata") or {}).get("fiscal_label_status")) or "")
+
+
+def _earnings_entity(payload: Mapping[str, Any], event_id: str) -> str:
+    entity = str((payload.get("metadata") or {}).get("entity") or "")
+    parts = event_id.split(":")
+    if not entity and len(parts) > 2 and parts[0] == "earnings":
+        entity = parts[1]
+    return entity.upper()
+
+
+def _days_apart(first: object, second: object) -> int | None:
+    try:
+        return abs((date.fromisoformat(str(first)[:10]) - date.fromisoformat(str(second)[:10])).days)
+    except ValueError:
+        return None
+
+
 def macro_identity(series: str, reference_period: str, release_phase: str) -> str | None:
     if not series or not reference_period or not release_phase:
         return None
@@ -348,7 +378,8 @@ class ScheduleCalendarStore:
                         "SELECT DISTINCT source_id FROM schedule_event_sources WHERE event_id=? "
                         "AND event_version=?", (event_id, current["event_version"])).fetchall()}
                     if (signatures_conflict(tuple(old.get("signature", ())), candidate.trigger_signature())
-                            and candidate.source_id not in old_sources):
+                            and candidate.source_id not in old_sources
+                            and not (old.get("metadata") or {}).get("superseded_by")):
                         review_status, reason = "conflict", "cross_source_trigger_fields_disagree"
             conn.execute("INSERT INTO schedule_event_candidates(candidate_id,event_id,source_id,"
                          "source_url,source_event_ref,payload_hash,payload_json,signature_json,"
@@ -507,6 +538,8 @@ class ScheduleCalendarStore:
                              "review_reason='resolved_by_operator' WHERE event_id=? AND "
                              "review_status='conflict'", (event_id,))
             self._record_reviews(conn, event_id, now)
+            if candidate["event_type"] == "earnings" and candidate["status"] != "cancelled":
+                self._retire_placeholder_near(conn, event_id, candidate, at=at or datetime.now(timezone.utc))
             event = conn.execute("SELECT * FROM schedule_events WHERE event_id=? AND event_version=?",
                                  (event_id, event_version)).fetchone()
             return self._event_dict(conn, event)
@@ -582,6 +615,8 @@ class ScheduleCalendarStore:
             elif current["status"] != "planned":
                 raise ValueError(f"cannot confirm event in {current['status']!r} state")
             payload = json.loads(current["payload_json"])
+            if fiscal_label_status(payload) == "missing":
+                raise ValueError("release confirmation requires a fiscal label; add one with `ats events label`")
             prior_metadata = dict(payload.get("metadata", {}))
             prior_metadata["admitted_release_materials"] = refs
             payload["metadata"] = prior_metadata
@@ -670,6 +705,8 @@ class ScheduleCalendarStore:
                          "review_reason='operator_adjudication_withdrawn' WHERE event_id=? "
                          "AND review_reason='resolved_by_operator_override'", (event_id,))
             self._record_reviews(conn, event_id, _stamp(now))
+            if restores := (base.get("metadata") or {}).get("withdraw_restores"):
+                self._restore_placeholder(conn, restores, successor=event_id, at=now)
             override_id = hashlib.sha256(
                 f"{event_id}|withdraw|{event['event_version']}|{actor}".encode()).hexdigest()[:32]
             conn.execute("INSERT INTO schedule_event_overrides(override_id,event_id,actor,reason,"
@@ -680,6 +717,172 @@ class ScheduleCalendarStore:
             row = conn.execute("SELECT * FROM schedule_events WHERE event_id=? AND event_version=?",
                                (event_id, event["event_version"])).fetchone()
             return self._event_dict(conn, row)
+
+    # -- earnings prints without a fiscal label ------------------------------
+    def place_unlabeled_earnings(self, candidate: ScheduleEventCandidate) -> ScheduleEventCandidate:
+        """Give a dated earnings candidate without a fiscal quarter the identity it can be published under.
+
+        Near a print an operator labelled, it revises that print (the label stays). Near a print a source labelled,
+        it is left without identity (a stray second date, parked as before). Otherwise it becomes the issuer's
+        placeholder.
+        """
+        entity = str(candidate.metadata.get("entity") or "").upper()
+        if candidate.event_type != "earnings" or candidate.event_id or not entity or not candidate.event_date:
+            return candidate
+        placeholder = unlabeled_earnings_identity(entity)
+        near = []
+        for event in self.latest_events(limit=10_000):
+            if (event["event_type"] != "earnings" or event["event_id"] == placeholder
+                    or _earnings_entity(event["payload"], event["event_id"]) != entity):
+                continue
+            apart = _days_apart(event["event_date"], candidate.event_date)
+            if apart is not None and apart <= NEARBY_PRINT_DAYS:
+                near.append((apart, event))
+        if not near:
+            return candidate.model_copy(update={
+                "stable_identity": placeholder, "label": f"{entity} earnings（缺财季标签）",
+                "metadata": {**candidate.metadata, "fiscal_label": "", "fiscal_label_status": "missing"}})
+        manual = [item for item in near if fiscal_label_status(item[1]["payload"]) == "manual"]
+        if not manual:
+            return candidate
+        event = min(manual, key=lambda item: item[0])[1]
+        period = event["reference_period"]
+        return candidate.model_copy(update={
+            "stable_identity": event["event_id"], "label": event["label"], "reference_period": period,
+            "metadata": {**candidate.metadata, "fiscal_label": period, "fiscal_label_status": "manual"}})
+
+    @staticmethod
+    def _current(conn, event_id: str):
+        return conn.execute("SELECT * FROM schedule_events WHERE event_id=? AND valid_until='' "
+                            "ORDER BY event_version DESC LIMIT 1", (event_id,)).fetchone()
+
+    def _retire_placeholder(self, conn, placeholder: str, *, successor: str, at: datetime) -> None:
+        current = self._current(conn, placeholder)
+        if current is None or current["status"] != "planned":
+            return
+        payload = json.loads(current["payload_json"])
+        payload["status"] = "cancelled"
+        payload["metadata"] = {**payload.get("metadata", {}), "superseded_by": successor}
+        self._publish_override_snapshot(conn, placeholder, payload, at=at)
+
+    def _retire_placeholder_near(self, conn, event_id: str, payload: Mapping[str, Any], *,
+                                 at: datetime) -> None:
+        """A labelled print makes the placeholder for the same print redundant."""
+        entity = _earnings_entity(payload, event_id)
+        placeholder = unlabeled_earnings_identity(entity)
+        if not entity or event_id == placeholder:
+            return
+        current = self._current(conn, placeholder)
+        if current is None:
+            return
+        apart = _days_apart(current["event_date"], payload.get("event_date"))
+        if apart is not None and apart <= NEARBY_PRINT_DAYS:
+            self._retire_placeholder(conn, placeholder, successor=event_id, at=at)
+
+    def _restore_placeholder(self, conn, placeholder: str, *, successor: str, at: datetime) -> None:
+        current = self._current(conn, placeholder)
+        if current is None:
+            return
+        payload = json.loads(current["payload_json"])
+        if (payload.get("metadata") or {}).get("superseded_by") != successor:
+            return
+        payload["status"] = "planned"
+        payload["metadata"] = {k: v for k, v in payload["metadata"].items() if k != "superseded_by"}
+        self._publish_override_snapshot(conn, placeholder, payload, at=at)
+
+    def _publish_manual_earnings(self, conn, payload: Mapping[str, Any], *, actor: str, reason: str,
+                                 evidence: Any, restores: str, at: datetime) -> None:
+        """Publish an operator-labelled print and its override record; withdrawing the record cancels it."""
+        checked = ScheduleEventCandidate.model_validate({
+            **{k: v for k, v in payload.items() if k not in {"event_id", "signature"}},
+            "source_id": "manual-override", "fetched_at": _stamp(at)}).normalized()
+        event_id = checked["event_id"]
+        event = self._publish_override_snapshot(conn, event_id, dict(checked), at=at)
+        withdrawn = {**checked, "status": "cancelled",
+                     "metadata": {**checked["metadata"], "withdraw_restores": restores}}
+        override_id = hashlib.sha256(
+            f"{event_id}|{event['event_version']}|{actor}".encode()).hexdigest()[:32]
+        conn.execute("INSERT INTO schedule_event_overrides(override_id,event_id,actor,reason,"
+                     "evidence_json,action,base_snapshot_json,event_version,created_at) "
+                     "VALUES(?,?,?,?,?,'apply',?,?,?)",
+                     (override_id, event_id, actor, reason, _json(evidence), _json(withdrawn),
+                      event["event_version"], _stamp(at)))
+
+    @staticmethod
+    def _require_adjudication(actor: str, reason: str, evidence: Any) -> None:
+        if not actor.strip() or not reason.strip() or not evidence:
+            raise ValueError("a manual fiscal label requires actor, reason and evidence")
+
+    def label_earnings_event(self, event_id: str, *, fiscal_year: int, fiscal_quarter: int, actor: str,
+                             reason: str, evidence: Any, at: datetime | None = None) -> dict[str, Any]:
+        """Supply the fiscal label of a placeholder print: it moves to the labelled event identity."""
+        self._require_adjudication(actor, reason, evidence)
+        now = at or datetime.now(timezone.utc)
+        with self._tx() as conn:
+            current = self._current(conn, event_id)
+            if current is None:
+                raise KeyError(f"unknown calendar event {event_id!r}")
+            old = json.loads(current["payload_json"])
+            if fiscal_label_status(old) != "missing" or current["status"] != "planned":
+                raise ValueError("only a planned event that lacks a fiscal label can be labelled")
+            if conn.execute("SELECT 1 FROM schedule_event_candidates WHERE event_id=? "
+                            "AND review_status='conflict'", (event_id,)).fetchone():
+                raise ValueError("sources disagree on this date; settle it with `ats events override` first")
+            entity = _earnings_entity(old, event_id)
+            target = earnings_identity(entity, fiscal_year, fiscal_quarter)
+            if target is None:
+                raise ValueError("fiscal year and quarter (1-4) are required")
+            existing = self._current(conn, target)
+            if existing is not None and existing["status"] != "cancelled":
+                raise ValueError(f"{target} already exists; correct that event with `ats events override`")
+            period = f"FY{int(fiscal_year)}Q{int(fiscal_quarter)}"
+            payload = {**old, "stable_identity": target, "source_event_ref": event_id,
+                       "label": f"{entity} earnings {int(fiscal_year)} Q{int(fiscal_quarter)}",
+                       "reference_period": period,
+                       "metadata": {**old.get("metadata", {}), "entity": entity, "fiscal_label": period,
+                                    "fiscal_label_status": "manual",
+                                    "labeled_from": f"{event_id}@{current['event_version']}"}}
+            sources = conn.execute("SELECT candidate_id,source_id,source_url FROM schedule_event_sources "
+                                   "WHERE event_id=? AND event_version=?",
+                                   (event_id, current["event_version"])).fetchall()
+            self._publish_manual_earnings(conn, payload, actor=actor, reason=reason, evidence=evidence,
+                                          restores=event_id, at=now)
+            event = self._current(conn, target)
+            # The sources that stated the date stay attached, so their later revisions are not cross-source conflicts.
+            for source in sources:
+                conn.execute("INSERT OR IGNORE INTO schedule_event_sources(event_id,event_version,"
+                             "candidate_id,source_id,source_url,linked_at) VALUES(?,?,?,?,?,?)",
+                             (target, event["event_version"], source["candidate_id"], source["source_id"],
+                              source["source_url"], _stamp(now)))
+            self._retire_placeholder(conn, event_id, successor=target, at=now)
+            return self._event_dict(conn, event)
+
+    def register_earnings_event(self, entity: str, *, fiscal_year: int, fiscal_quarter: int,
+                                event_date: str, actor: str, reason: str, evidence: Any,
+                                at: datetime | None = None) -> dict[str, Any]:
+        """Enter a print no source lists yet, from the operator's evidence (e.g. the issuer's announcement)."""
+        self._require_adjudication(actor, reason, evidence)
+        entity = entity.strip().upper()
+        target = earnings_identity(entity, fiscal_year, fiscal_quarter)
+        if target is None:
+            raise ValueError("entity, fiscal year and quarter (1-4) are required")
+        now = at or datetime.now(timezone.utc)
+        period = f"FY{int(fiscal_year)}Q{int(fiscal_quarter)}"
+        with self._tx() as conn:
+            existing = self._current(conn, target)
+            if existing is not None and existing["status"] != "cancelled":
+                raise ValueError(f"{target} already exists; correct that event with `ats events override`")
+            placeholder = self._current(conn, unlabeled_earnings_identity(entity))
+            if placeholder is not None and placeholder["status"] == "planned":
+                raise ValueError(f"{placeholder['event_id']} is waiting for a label; use `ats events label`")
+            payload = {"event_type": "earnings", "stable_identity": target, "source_event_ref": target,
+                       "label": f"{entity} earnings {int(fiscal_year)} Q{int(fiscal_quarter)}",
+                       "reference_period": period, "event_date": event_date, "time_precision": "date",
+                       "status": "planned",
+                       "metadata": {"entity": entity, "fiscal_label": period, "fiscal_label_status": "manual"}}
+            self._publish_manual_earnings(conn, payload, actor=actor, reason=reason, evidence=evidence,
+                                          restores="", at=now)
+            return self._event_dict(conn, self._current(conn, target))
 
     @staticmethod
     def _event_dict(conn, row, *, as_of: datetime | None = None) -> dict[str, Any]:
@@ -818,5 +1021,6 @@ class ScheduleCalendarStore:
             conn.close()
 
 
-__all__ = ["MarketSession", "ScheduleCalendarStore", "ScheduleEventCandidate", "TimePrecision",
-           "earnings_identity", "fomc_identity", "macro_identity"]
+__all__ = ["NEARBY_PRINT_DAYS", "MarketSession", "ScheduleCalendarStore", "ScheduleEventCandidate", "TimePrecision",
+           "earnings_identity", "fiscal_label_status", "fomc_identity", "macro_identity",
+           "unlabeled_earnings_identity"]

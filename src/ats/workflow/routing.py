@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from ..config import REPO_ROOT
+from ..data.stores.schedule_calendar import fiscal_label_status
 from .planning import task_registry
 
 
@@ -89,6 +90,8 @@ def resolve_event_route(event: Mapping[str, Any], *, materials: list[Mapping[str
     event_id, version = str(event.get("event_id", "")), str(event.get("event_version", ""))
     if not event_id or not version:
         raise RouteError("routed events require stable event_id and event_version")
+    if event_type == "earnings" and fiscal_label_status(event.get("payload")) == "missing":
+        raise RouteError("earnings event lacks a fiscal label; no analysis is triggered until one is added")
     required = tuple(str(x) for x in match.get("required_material_kinds", ()))
     minimum_any = tuple(str(x) for x in match.get("minimum_material_kinds_any", ()))
     if match.get("required_admitted_material") and validate_materials:

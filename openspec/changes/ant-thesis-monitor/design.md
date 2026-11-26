@@ -9,6 +9,7 @@
 - 报告发布在 `workflow/report_publishers.py`，看板在 `runtime/dashboard/outputs.py`，飞书按状态变化推送的机制见提交 `0174d56`。
 - 公司风险项由 `agents/fundamental/material.py::build_register` 生成，只在建立财报基线时刷新；`MaterialReviewView.hit_items` 是自由字符串，不做校验。
 - 数据依赖全部来自 `ant-data-onboarding`。
+- 静态基线 `docs/research/ANT_COMPUTE_BASELINE.yaml`（截至 2026-09-30，2026-11-26 整理）把招股书披露值、由其算出的读数、持仓人的逐季承诺估算和自设判读线分开存放，供首份财报起人工对照。没有程序读取它，它不是本变更的数据源或阈值来源；估算和判读线要纳入监测须用户另行决定。其中 1a.a 读数用的是全部算力与基础设施费用，424B4 不拆推理与训练。
 
 ## Goals / Non-Goals
 

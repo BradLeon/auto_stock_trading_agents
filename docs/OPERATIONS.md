@@ -234,7 +234,12 @@ ats data disclosure-confirm --entity ANT --candidate <ID> --reviewer <审阅人>
 ats data disclosure-reject  --entity ANT --candidate <ID> --reviewer <审阅人> --note "<理由>"
 ats data disclosure-correct --entity ANT --candidate <ID> --reviewer <审阅人> --note "<理由>" --set period_end=2026-09-30
 ats data disclosure-series  --entity ANT                          # 已发布序列与各指标覆盖状态；只读
+ats data disclosure-derived --entity ANT                          # 由已发布值重算的派生比率；只读
 ```
+
+- 派生比率有三项：边际承诺强度、RPO 覆盖率、公司自报年化收入与 GAAP 季度收入×4 的差距。每行列出所用观测标识；
+  缺任一输入时为 `not_computable` 并写明缺哪项、哪个时点，不插值、不用相邻时点或到期表合计代替。
+  只有第四财季单季收入允许用“全年 − 前九个月”算出（`derived_revenue: true`）；年化收入增量为零或负数时边际承诺强度不给比值。
 
 - `--metric rpo.total,rpo.next_12m_share` 只处理指定指标；`--document <ID>` 指定任意已入库文件（例如日后的 10-Q）。
 - 写库的命令经持久化队列执行且只执行一次：失败后队列不会自动重跑，需要时由操作者重新发起。

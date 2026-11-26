@@ -290,6 +290,12 @@ def _build_packet(bundle: dict[str, Any], *, openrouter_bundle: dict[str, Any] |
     if not (bundle.get("comparability") or {}).get("across_companies", True):
         warnings.append("两家公司的最新可比口径不同：只并列趋势，不计算差额、倍数或排名。")
 
+    for company in companies:
+        publishers = sorted({str(item.get("source_label") or "") for item in company.get("series") or []})
+        if len(publishers) > 1:
+            warnings.append(f"{company.get('company')}：收入序列按来源分开（{'、'.join(publishers)}），"
+                            "趋势只在同一来源内计算，来源之间不拼接。")
+
     methodology_card = {
         "claim_id": COMMERCIALIZATION_CLAIM_ID,
         "claim_definition_version": claim_definition_version,
@@ -303,14 +309,17 @@ def _build_packet(bundle: dict[str, Any], *, openrouter_bundle: dict[str, Any] |
             {"source_id": "tickertrends_public_research",
              "usage": "2026 年 1—6 月历史回填（研究文章）+ 2026-07 起的研究笔记：每 7 天读取公开归档，保留其自身追踪值、"
                       "他人口径（Bloomberg/FT/Axios 等）、产品级 ARR 与季度收入，均按身份、产品范围、期间口径标注。",
-             "observation_identity": "第三方估算；raw label 写作 ARR 时规范化为年化运行率。"}],
+             "observation_identity": "第三方估算；raw label 写作 ARR 时规范化为年化运行率。"},
+            {"source_id": "company_disclosure_metrics",
+             "usage": "招股书与定期报告中经人工确认的收入和年化运行率（目前只有 Anthropic），单独成序列。",
+             "observation_identity": "公司披露；收入为 GAAP 口径，运行率为公司自定义经营指标。"}],
         "metric_definitions": {
             "reported_arr": "公司自行宣布的合同/订阅 ARR。",
             "annualized_revenue_run_rate": "由某一期间收入年化得到的运行率，不是审计收入。",
             "trailing_revenue": "已闭合期间实际记录的收入，不年化。",
             "forward_revenue_projection": "未来年度预测或目标，永不进入历史实际序列。"},
         "trend_rule": {
-            "cell_key": "公司 × 计量口径 × 观察身份 × 币种 × methodology regime × 期间口径 × 产品范围",
+            "cell_key": "公司 × 来源 × 计量口径 × 观察身份 × 币种 × methodology regime × 期间口径 × 产品范围",
             "minimum_points": 3, "minimum_days": 60,
             "direction_threshold": "净变化率绝对值 ≥ 10% 且斜率同向，且最近一个可比变化未构成 ≥10% 的反向变化",
             "slope": "按真实天数计算，不是按期数计算",
@@ -515,6 +524,25 @@ def _build_context(packet: dict[str, Any]) -> dict[str, Any]:
 # Chinese formal report
 # --------------------------------------------------------------------------- #
 
+def _parallel_series_lines(packet: dict[str, Any]) -> list[str]:
+    """Every company-level series side by side; a change of source is a different row, never one line."""
+    rows = []
+    for company in packet.get("companies") or []:
+        for item in company.get("series") or []:
+            points = "；".join(f"{point.get('period')} {_fmt_bn(point.get('value_usd_bn'))}"
+                              for point in item.get("points") or [])
+            mark = "（趋势序列）" if item.get("is_comparison") else ""
+            rows.append(
+                f"| {company.get('company')} | {item.get('source_label')}{mark} | {item.get('metric_label')} "
+                f"| {item.get('observation_identity_label')} | `{item.get('period_basis')}` | {points} "
+                f"| {_status_label(str(item.get('trend_status')))} |")
+    if not rows:
+        return []
+    return ["### 并列序列（按来源与口径分开，不拼接）", "",
+            "| 公司 | 来源 | 计量口径 | 观察身份 | 期间口径 | 离散点（USD 十亿） | 本序列方向 |",
+            "| --- | --- | --- | --- | --- | --- | --- |", *rows, ""]
+
+
 def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
     """Render the scoped commercialization report from the packet only."""
     lines: list[str] = []
@@ -591,11 +619,13 @@ def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
                 f"数据与复现：[sidecar]({_report_asset_ref(item.get('sidecar_path'))}) · "
                 f"rows hash `{item.get('rows_hash')}`", "",
             ])
-        lines.append("图中只连接同一可比 cell 的离散披露点；"
-                     "线段是方向辅助线，不是未披露月份的估计值。")
+        lines.append("图中只画每家公司的趋势序列（单一来源），只连接同一可比 cell 的离散披露点；"
+                     "其他来源列在下方并列序列表，不拼进同一条线。线段是方向辅助线，不是未披露月份的估计值。")
     else:
         lines.append(f"未生成图表：{packet.get('visualization_warning', '没有可绘制的可比观察。')}")
     lines.append("")
+
+    lines.extend(_parallel_series_lines(packet))
 
     openrouter = packet.get("openrouter")
     if openrouter is not None:
@@ -693,7 +723,7 @@ def render_ai_commercialization_markdown(packet: dict[str, Any]) -> str:
     lines.extend([
         ("## 八、指标公式、统计范围与数据缺口" if openrouter is not None
          else "## 七、指标公式、统计范围与数据缺口"), "",
-        "- 趋势 cell：`公司 × 计量口径 × 观察身份 × 币种 × methodology regime × 期间口径 × 产品范围`。",
+        "- 趋势 cell：`公司 × 来源 × 计量口径 × 观察身份 × 币种 × methodology regime × 期间口径 × 产品范围`。",
         f"- 最小点数 {trend_rule.get('minimum_points', 3)}；最小跨度 "
         f"{trend_rule.get('minimum_days', 60)} 天；"
         f"方向阈值：{trend_rule.get('direction_threshold', '')}。",

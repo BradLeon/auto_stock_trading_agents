@@ -372,17 +372,19 @@ def test_trend_keeps_projection_out_of_the_comparable_cell():
 
 def test_comparability_requires_the_same_measurement_identity():
     left = _record()
-    same = _record(source="b")
+    same = _record(period="2026-08")
     assert comparability(left, same)["comparable"] is True
     assert comparability(left, same)["version"] == COMPARABILITY_VERSION
 
-    other_metric = _record(metric=METRIC_TRAILING_REVENUE, source="b")
+    other_source = _record(source="b")
+    assert comparability(left, other_source)["allowed_use"] == "side_by_side_only"
+    other_metric = _record(metric=METRIC_TRAILING_REVENUE)
     assert comparability(left, other_metric)["allowed_use"] == "side_by_side_only"
-    other_identity = _record(identity="company_reported", source="b")
+    other_identity = _record(identity="company_reported")
     assert comparability(left, other_identity)["comparable"] is False
-    other_regime = _record(regime="company_reported_run_rate/v1", source="b")
+    other_regime = _record(regime="company_reported_run_rate/v1")
     assert comparability(left, other_regime)["comparable"] is False
-    other_company = _record(entity="ANTHROPIC", source="b")
+    other_company = _record(entity="ANTHROPIC")
     assert comparability(left, other_company)["comparable"] is False
     assert comparability(left, other_company)["directionally_comparable"] is True
 
@@ -488,8 +490,9 @@ def test_query_frame_and_bundle_share_one_rows_hash(tmp_path):
     products = _products(repository)
     bundle = products.frontier_labs_revenue_evidence_bundle(as_of=NOW)
     openai_rows = [row for row in bundle["history_rows"] if row["entity_id"] == "OPENAI"]
+    [cell] = [view["comparison_cell"] for view in bundle["companies"] if view["entity_id"] == "OPENAI"]
     frame = products.frontier_labs_revenue_series(
-        company="OPENAI", metric=METRIC_ANNUALIZED_RUN_RATE, as_of=NOW, as_frame=True)
+        company="OPENAI", metric=METRIC_ANNUALIZED_RUN_RATE, source_id=cell["source_id"], as_of=NOW, as_frame=True)
     assert list(frame["observation_id"]) == [row["observation_id"] for row in openai_rows]
     assert frame.attrs["rows_hash"] == rows_hash(openai_rows)
     assert frame.attrs["derivation_version"] == DERIVATION_VERSION

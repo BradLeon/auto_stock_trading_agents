@@ -4,7 +4,10 @@ Everything here is read-only over the unified structured store.  The module neve
 contacts Sacra or TickerTrends, never interpolates a missing month, never mixes a
 projection into a historical actual and never averages growth rates across
 companies.  Comparability is decided explicitly: two figures may sit side by side
-without being ranked, subtracted or fused.
+without being ranked, subtracted or fused.  A trend is computed inside one source:
+points of different sources are never joined into one line.  Revenue a company
+states in its own filings (confirmed company disclosures) forms its own series
+beside the third-party ones.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from typing import Any, Iterable, Sequence
 DATASET_ID = "frontier_ai_labs_revenue"
 SOURCE_SACRA = "sacra_public_company_profiles"
 SOURCE_TICKERTRENDS = "tickertrends_public_research"
+SOURCE_COMPANY_FILING = "company_disclosure_metrics"
 
 METRIC_REPORTED_ARR = "ai.frontier_lab.reported_arr"
 METRIC_ANNUALIZED_RUN_RATE = "ai.frontier_lab.annualized_revenue_run_rate"
@@ -28,9 +32,9 @@ IDENTITY_MEDIA = "media_reported"
 IDENTITY_ESTIMATE = "third_party_estimate"
 IDENTITY_PROJECTION = "projection"
 
-DERIVATION_VERSION = "frontier_ai_labs_revenue/v1"
+DERIVATION_VERSION = "frontier_ai_labs_revenue/v2"
 TREND_RULE_VERSION = "frontier_labs_revenue_trend/v1"
-COMPARABILITY_VERSION = "frontier_labs_revenue_comparability/v1"
+COMPARABILITY_VERSION = "frontier_labs_revenue_comparability/v2"
 HEADLINE_RULE_VERSION = "frontier_labs_revenue_headline/v1"
 SECTION_RULE_VERSION = "frontier_labs_revenue_section/v1"
 
@@ -54,6 +58,16 @@ CELL_METRIC_PREFERENCE = (
 # The section's governed trend basis is the monthly disclosure; weekly "as of" readings and closed quarters are
 # kept as supplementary cells instead of competing for it by sheer point count.
 CELL_BASIS_PREFERENCE = ("calendar_month", "instant", "quarter")
+# Between cells equal on metric, basis and point count, the same source order as the headline decides.
+SOURCE_PREFERENCE = (SOURCE_SACRA, SOURCE_TICKERTRENDS, SOURCE_COMPANY_FILING)
+# Filing metric -> (revenue metric, methodology regime, raw label, period bases). Year-to-date figures are left out:
+# they restate quarters already in the series.
+FILING_METRICS = {
+    "revenue.total": (METRIC_TRAILING_REVENUE, "company_filing_gaap_revenue/v1", "Revenue (GAAP)",
+                      ("quarter", "annual")),
+    "revenue.run_rate": (METRIC_ANNUALIZED_RUN_RATE, "company_reported_run_rate/v1", "Run-Rate Revenue",
+                         ("instant",)),
+}
 HISTORICAL_METRICS = (METRIC_ANNUALIZED_RUN_RATE, METRIC_REPORTED_ARR,
                       METRIC_TRAILING_REVENUE)
 
@@ -72,6 +86,7 @@ METRIC_LABELS = {
 SOURCE_LABELS = {
     SOURCE_SACRA: "Sacra 公开公司页面",
     SOURCE_TICKERTRENDS: "TickerTrends 公开文章与研究笔记",
+    SOURCE_COMPANY_FILING: "公司招股书与定期报告自报",
 }
 TREND_LABELS = {
     "expanding": "扩大",
@@ -137,11 +152,12 @@ def _product_scope(row: dict[str, Any]) -> str:
 
 
 def _cell_key(row: dict[str, Any]) -> tuple[str, ...]:
-    # period basis and product scope are part of the cell: a closed quarter, a month and a tracked day are not one
-    # series, and a product line (Claude Code, Codex) is never trended or ranked as its parent company.
+    # source, period basis and product scope are part of the cell: two publishers measure differently, a closed
+    # quarter, a month and a tracked day are not one series, and a product line (Claude Code, Codex) is never trended
+    # or ranked as its parent company.
     return (str(row.get("entity_id") or ""), str(row.get("metric_id") or ""),
             _identity(row), str(row.get("currency") or ""), _regime(row),
-            str(row.get("period_basis") or ""), _product_scope(row))
+            str(row.get("period_basis") or ""), _product_scope(row), str(row.get("source_id") or ""))
 
 
 def _iso_day(value: str) -> date | None:
@@ -305,6 +321,7 @@ def comparability(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]
     left_records = left.get("citation") or {}
     dimensions = {
         "entity_id": str(left.get("entity_id", "")) == str(right.get("entity_id", "")),
+        "source_id": str(left.get("source_id", "")) == str(right.get("source_id", "")),
         "metric_id": str(left.get("metric_id", "")) == str(right.get("metric_id", "")),
         "observation_identity": str(left.get("observation_identity", ""))
         == str(right.get("observation_identity", "")),
@@ -315,7 +332,8 @@ def comparability(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]
         "product_scope": str(left.get("product_scope", "")) == str(right.get("product_scope", "")),
         "reference_period": str(left.get("period", "")) == str(right.get("period", "")),
     }
-    comparable = (dimensions["metric_id"] and dimensions["observation_identity"]
+    comparable = (dimensions["source_id"]
+                  and dimensions["metric_id"] and dimensions["observation_identity"]
                   and dimensions["methodology_regime"] and dimensions["currency"]
                   and dimensions["period_basis"] and dimensions["product_scope"])
     same_entity = dimensions["entity_id"]
@@ -552,7 +570,54 @@ def _fetch_rows(repository, *, metric: str = "", entity_id: str = "",
         if product_scope != "*" and str(dimensions.get("product_scope") or "") != product_scope:
             continue
         selected.append(row)
+    for row in _filing_rows(repository, entity_id=entity_id, as_of=as_of):
+        dimensions = row["dimensions"]
+        if product_scope not in {"", "*"}:
+            break
+        if metric and row["metric_id"] != metric:
+            continue
+        if source_id and row["source_id"] != source_id:
+            continue
+        if observation_identity and dimensions["observation_identity"] != observation_identity:
+            continue
+        if methodology_regime and dimensions["methodology_regime"] != methodology_regime:
+            continue
+        if periods and row["period"] not in {str(item) for item in periods}:
+            continue
+        selected.append(row)
     return selected
+
+
+def _filing_rows(repository, *, entity_id: str = "", as_of: datetime | None = None) -> list[dict[str, Any]]:
+    """Confirmed revenue figures of the covered companies' own filings, in the shape of a store row."""
+    from ...config import ledger_entity
+    from ..pipelines.structured import disclosure_metrics
+    from . import company_disclosure_metrics
+
+    _, issuers = disclosure_metrics.load_config()
+    wanted = {entity_id} if entity_id else set(COMPANY_LABELS)
+    rows: list[dict[str, Any]] = []
+    for security in sorted(issuers):
+        company = ledger_entity(security)
+        if company not in wanted or company not in COMPANY_LABELS:
+            continue
+        for item in company_disclosure_metrics.series(repository, security, as_of=as_of):
+            mapped = FILING_METRICS.get(item["metric"])
+            if not mapped or item["period_basis"] not in mapped[3]:
+                continue
+            metric_id, regime, label, _ = mapped
+            rows.append({
+                "observation_id": item["observation_id"],
+                "series_id": f"filing:{company}:{item['metric']}:{item['period_basis']}", "artifact_id": "",
+                "source_id": SOURCE_COMPANY_FILING, "dataset_id": SOURCE_COMPANY_FILING, "entity_id": company,
+                "metric_id": metric_id, "period": item["period"], "period_start": "", "period_end": item["period"],
+                "period_basis": item["period_basis"], "value": item["value"], "currency": "USD", "unit": item["unit"],
+                "published_at": item["filing_date"], "known_at": item["known_at"], "quality_status": "accepted",
+                "dimensions": {"observation_identity": IDENTITY_COMPANY, "methodology_regime": regime,
+                               "raw_metric_label": f"{label} · {item['form_type']}", "product_scope": ""},
+                "raw": {"raw_quote": item["quote"], "value_qualifier": item["qualifier"]},
+            })
+    return rows
 
 
 def frontier_labs_revenue_series(products, *, company: str = "", metric: str = "",
@@ -620,16 +685,34 @@ def frontier_labs_revenue_cells(products, *, company: str = "", as_of=None,
             "observation_identity_label": IDENTITY_LABELS.get(str(key[2]), str(key[2])),
             "currency": str(key[3]), "methodology_regime": str(key[4]),
             "period_basis": str(key[5]), "product_scope": str(key[6]),
+            "source_id": str(key[7]), "source_label": SOURCE_LABELS.get(str(key[7]), str(key[7])),
             "point_count": len(records), "periods": sorted(
                 {str(item.get("period") or "") for item in records}),
             "rows": records,
         })
     rank = {metric: index for index, metric in enumerate(CELL_METRIC_PREFERENCE)}
     basis_rank = {basis: index for index, basis in enumerate(CELL_BASIS_PREFERENCE)}
+    source_rank = {source: index for index, source in enumerate(SOURCE_PREFERENCE)}
     cells.sort(key=lambda item: (rank.get(str(item["metric_id"]), len(rank)),
                                  basis_rank.get(str(item["period_basis"]), len(basis_rank)),
-                                 -int(item["point_count"]), str(item["metric_id"])))
+                                 -int(item["point_count"]),
+                                 source_rank.get(str(item["source_id"]), len(source_rank)),
+                                 str(item["metric_id"]), str(item["observation_identity"])))
     return cells
+
+
+def _series_view(cell: dict[str, Any], *, quality: dict[str, Any], is_comparison: bool) -> dict[str, Any]:
+    trend = revenue_trend(cell["rows"], quality=quality)
+    return {
+        **{key: cell[key] for key in (
+            "source_id", "source_label", "metric_id", "metric_label", "observation_identity",
+            "observation_identity_label", "methodology_regime", "period_basis", "point_count")},
+        "is_comparison": is_comparison,
+        "points": [{"period": row["period"], "value_usd_bn": row["value_usd_bn"],
+                    "observation_id": row["observation_id"]} for row in cell["rows"]],
+        "trend_status": trend["status"],
+        "net_change_rate": trend.get("net_change_rate"),
+    }
 
 
 def frontier_labs_company_view(products, *, company: str, as_of=None) -> dict[str, Any]:
@@ -660,8 +743,11 @@ def frontier_labs_company_view(products, *, company: str, as_of=None) -> dict[st
         "company": COMPANY_LABELS.get(str(company).upper(), str(company).upper()),
         "status": "ok" if cells else "unavailable",
         "headline": headline,
+        # Every company-level historical series on its own, each with the trend of its own points only.
+        "series": [_series_view(cell, quality=quality, is_comparison=cell is comparison) for cell in historical],
         "comparison_cell": (
-            {"metric_id": comparison["metric_id"],
+            {"source_id": comparison["source_id"], "source_label": comparison["source_label"],
+             "metric_id": comparison["metric_id"],
              "metric_label": comparison["metric_label"],
              "observation_identity": comparison["observation_identity"],
              "observation_identity_label": comparison["observation_identity_label"],
@@ -739,16 +825,19 @@ def frontier_labs_revenue_evidence_bundle(products, *, companies: Sequence[str] 
         left = views_with_cells[0]["comparison_cell"]
         right = views_with_cells[1]["comparison_cell"]
         comparable_across_companies = bool(
-            left["metric_id"] == right["metric_id"]
+            left["source_id"] == right["source_id"]
+            and left["metric_id"] == right["metric_id"]
             and left["observation_identity"] == right["observation_identity"]
             and left["methodology_regime"] == right["methodology_regime"]
             and left.get("period_basis", "") == right.get("period_basis", ""))
         comparison_pair = [
             {"entity_id": str(views_with_cells[0].get("entity_id") or ""),
+             "source_id": str(left["source_id"]),
              "metric_id": str(left["metric_id"]),
              "observation_identity": str(left["observation_identity"]),
              "methodology_regime": str(left["methodology_regime"])},
             {"entity_id": str(views_with_cells[1].get("entity_id") or ""),
+             "source_id": str(right["source_id"]),
              "metric_id": str(right["metric_id"]),
              "observation_identity": str(right["observation_identity"]),
              "methodology_regime": str(right["methodology_regime"])}]

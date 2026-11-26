@@ -16,7 +16,7 @@ from typing import Any
 
 from .chart_font import configure_font, find_cjk_font, glyph_report
 
-RENDERER_VERSION = "frontier_labs_revenue_renderer/v1"
+RENDERER_VERSION = "frontier_labs_revenue_renderer/v2"
 PALETTE = ["#C0392B", "#1F618D", "#117A65", "#7D3C98"]
 
 
@@ -74,11 +74,11 @@ def _chart_rows(company: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _panel(axis, rows: list[dict[str, Any]], *, title: str, color: str,
-           company: str, trend: dict[str, Any], gap: dict[str, Any]) -> None:
+           company: str, trend: dict[str, Any], gap: dict[str, Any], source: str) -> None:
     periods = [str(row.get("period") or "") for row in rows]
     values = [float(row.get("value_usd_bn") or 0.0) for row in rows]
     axis.plot(periods, values, marker="o", color=color, linewidth=2.0,
-              markersize=6, label="同一可比口径的离散披露点")
+              markersize=6, label=f"单一来源的离散披露点：{source}" if source else "同一可比口径的离散披露点")
     for index, row in enumerate(rows):
         identity = str(row.get("observation_identity_label") or "")
         axis.annotate(
@@ -145,7 +145,8 @@ def render_frontier_labs_revenue_charts(*, packet: dict[str, Any],
                    company=str(company.get("company") or ""),
                    trend={"status": (company.get("trend") or {}).get("status", ""),
                           "status_label": (company.get("trend") or {}).get("status_label", "")},
-                   gap=company.get("period_gap") or {})
+                   gap=company.get("period_gap") or {},
+                   source=str(cell.get("source_label") or ""))
         figure.suptitle("Frontier AI Labs 可比收入水平与趋势（离散披露点）", fontsize=13)
         figure.tight_layout(rect=(0, 0, 1, 0.94))
         path = output / "frontier_labs_revenue_trend.png"
@@ -154,7 +155,7 @@ def render_frontier_labs_revenue_charts(*, packet: dict[str, Any],
         chart_rows = [row for company in companies for row in _chart_rows(company)]
         descriptors.append(_sidecar(
             path, title="Frontier AI Labs 可比收入水平与趋势",
-            definition="同一可比 cell（公司 × 计量口径 × 观察身份 × methodology regime × 期间口径）内的离散披露点；"
+            definition="同一可比 cell（公司 × 来源 × 计量口径 × 观察身份 × methodology regime × 期间口径）内的离散披露点；"
                        "连线只表示方向，不表示未披露月份的估计值。",
             unit="USD 十亿美元", source="Sacra 公开公司页面 + TickerTrends 公开文章与研究笔记",
             rows=chart_rows, manifest=manifest,

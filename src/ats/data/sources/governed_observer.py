@@ -11,6 +11,10 @@ claim engine (corroboration, stance classes, adjudication, assessments) treats i
 
 Nothing here calls a model, and nothing here invents a period or a value: every figure and period comes from the
 packet's governed fields.
+
+The packet's snapshot id travels beside the reading (`SeriesPoint.snapshot_id`), never inside the evidence line.  A
+snapshot id changes on every collection (it hashes `as_of`), and the line is what document versions, facts and the
+claim judgement cache are keyed on: with the id in it, unchanged data looked new every day.
 """
 
 from __future__ import annotations
@@ -52,14 +56,14 @@ def _num(value: Any) -> float | None:
         return None
 
 
-def _manifest(packet: dict[str, Any]) -> str:
+def _snapshot_id(packet: dict[str, Any]) -> str:
     manifest = packet.get("snapshot_manifest") or packet.get("manifest") or {}
-    return str(manifest.get("snapshot_id") or manifest.get("manifest_id") or manifest.get("id") or "")[:12]
+    return str(manifest.get("snapshot_id") or manifest.get("manifest_id") or manifest.get("id") or "")
 
 
 def production_points(packet: dict[str, Any]) -> list[SeriesPoint]:
     points: list[SeriesPoint] = []
-    manifest = _manifest(packet)
+    snapshot_id = _snapshot_id(packet)
     for axis in packet.get("axis_overview") or []:
         spec = PRODUCTION_AXES.get(str(axis.get("axis_id") or ""))
         direction = _DIRECTION.get(str(axis.get("trend_status") or ""))
@@ -74,17 +78,16 @@ def production_points(packet: dict[str, Any]) -> list[SeriesPoint]:
         change = f"，期内净变化 {net:+.2f}pp" if net is not None else ""
         span = (f"{label} {axis.get('axis_label')}（{axis.get('source_id')}）{value:g}{unit and ' ' + unit}，"
                 f"趋势 {axis.get('trend_status')}{change}；统计主体：{axis.get('statistical_unit')}；"
-                f"分母：{axis.get('denominator')}"
-                + (f"（manifest {manifest}）" if manifest else ""))
+                f"分母：{axis.get('denominator')}")
         points.append(SeriesPoint(period=label, series=str(axis["axis_id"]), value=value, unit=unit,
                                   entity=entity, stance=stance, observation_type=kind, concept=concept,
-                                  direction=direction, evidence_span=span))
+                                  direction=direction, evidence_span=span, snapshot_id=snapshot_id))
     return points
 
 
 def commercialization_points(packet: dict[str, Any]) -> list[SeriesPoint]:
     points: list[SeriesPoint] = []
-    manifest = _manifest(packet)
+    snapshot_id = _snapshot_id(packet)
     for company in packet.get("companies") or []:
         trend = company.get("trend") or {}
         direction = _DIRECTION.get(str(trend.get("status") or ""))
@@ -104,12 +107,11 @@ def commercialization_points(packet: dict[str, Any]) -> list[SeriesPoint]:
         span = (f"{record.get('period')} {company.get('company')} 年化收入运行率 {value:g} USD bn{qualifier}，"
                 f"口径：{record.get('observation_identity_label') or identity}（{record.get('source_label')}）；"
                 f"可比序列 {trend.get('comparable_point_count')} 个披露点（{trend.get('first_period')}→"
-                f"{trend.get('last_period')}），趋势 {trend.get('status')}；缺失月份不插值"
-                + (f"（manifest {manifest}）" if manifest else ""))
+                f"{trend.get('last_period')}），趋势 {trend.get('status')}；缺失月份不插值")
         points.append(SeriesPoint(period=str(record.get("period") or ""), series=f"revenue_{entity.lower()}",
                                   value=value, unit="USD bn", entity=entity, source_entity=speaker,
                                   stance=stance, observation_type=kind, concept="frontier_revenue_scale_trend",
-                                  direction=direction, evidence_span=span))
+                                  direction=direction, evidence_span=span, snapshot_id=snapshot_id))
     routed = packet.get("openrouter") or {}
     facts = routed.get("facts") or {}
     trend = facts.get("trend") or {}
@@ -118,17 +120,18 @@ def commercialization_points(packet: dict[str, Any]) -> list[SeriesPoint]:
         change = _num(trend.get("change_rate"))
         move = f"，最近 4 周均值较前 4 周 {change * 100:+.1f}%" if change is not None else ""
         span = (f"{facts['latest_complete_week']} 周 OpenRouter 公共路由 token {tokens / 1e12:.1f} 万亿{move}，"
-                f"趋势 {trend.get('status')}；只表示路由用量与竞争格局，不是全市场用量或收入"
-                + (f"（manifest {manifest}）" if manifest else ""))
+                f"趋势 {trend.get('status')}；只表示路由用量与竞争格局，不是全市场用量或收入")
         points.append(SeriesPoint(
             period=str(facts["latest_complete_week"]), series="routed_tokens", value=tokens, unit="tokens",
             entity="OPENROUTER", stance="customer", observation_type="reported_actual", concept="routed_token_usage",
-            direction=_DIRECTION.get(str(trend.get("status")), "flat"), evidence_span=span))
+            direction=_DIRECTION.get(str(trend.get("status")), "flat"), evidence_span=span,
+            # The routed-usage bundle reads its own snapshot; the revenue snapshot does not hold these rows.
+            snapshot_id=_snapshot_id(routed) or snapshot_id))
     return points
 
 
 def raw_capability_points(packet: dict[str, Any]) -> list[SeriesPoint]:
-    manifest = _manifest(packet)
+    snapshot_id = _snapshot_id(packet)
     a, b = packet.get("a") or {}, packet.get("b") or {}
     dates = [str((item.get("current") or {}).get("release_date") or "")
              for item in list(a.get("benchmarks") or []) + list(b.get("benchmarks") or [])]
@@ -150,11 +153,11 @@ def raw_capability_points(packet: dict[str, Any]) -> list[SeriesPoint]:
         if direction is None:
             continue
         span = (f"{period} 前沿能力 benchmark（{packet.get('claim_id')}）{text}，规则状态 {status}；"
-                "benchmark 是能力的量化 proxy，不是综合智能排名；缺失不是零"
-                + (f"（manifest {manifest}）" if manifest else ""))
+                "benchmark 是能力的量化 proxy，不是综合智能排名；缺失不是零")
         points.append(SeriesPoint(period=period, series=series, value=value, unit="benchmarks",
                                   entity="FRONTIER_BENCHMARKS", stance="regulator", observation_type="research",
-                                  concept=concept, direction=direction, evidence_span=span))
+                                  concept=concept, direction=direction, evidence_span=span,
+                                  snapshot_id=snapshot_id))
     return points
 
 

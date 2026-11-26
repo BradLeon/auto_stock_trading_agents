@@ -80,6 +80,11 @@ def _span(source: SourceDef, point: SeriesPoint, basis: str, change: float | Non
             f"{label} {move}（{source.adapter} {point.period}{published}）")
 
 
+def _document_id(source: SourceDef, point: SeriesPoint) -> str:
+    suffix = f"_{point.series}" if point.series else ""
+    return f"{source.id}:{point.period}{suffix}"
+
+
 def to_observations(source: SourceDef, points: list[SeriesPoint], *,
                     now: datetime | None = None) -> list[Observation]:
     """One observation per (point, direction basis). Never raises.
@@ -97,7 +102,7 @@ def to_observations(source: SourceDef, points: list[SeriesPoint], *,
             suffix = f"_{point.series}" if point.series else ""
             try:
                 out.append(Observation(
-                    document_id=f"{source.id}:{point.period}{suffix}",
+                    document_id=_document_id(source, point),
                     source_url=source.adapter,
                     entity=entity, source_entity=(point.source_entity or entity).upper(),
                     metric=f"{source.id}{suffix}_{point.direction}", concept=point.concept,
@@ -117,7 +122,7 @@ def to_observations(source: SourceDef, points: list[SeriesPoint], *,
             metric = f"{source.id}{suffix}_{basis}"
             try:
                 out.append(Observation(
-                    document_id=f"{source.id}:{point.period}{suffix}",
+                    document_id=_document_id(source, point),
                     source_url=source.adapter,
                     entity=source.entity,
                     # The source speaks for itself: it is both the subject and the
@@ -257,23 +262,58 @@ def _platform_fetch(source: SourceDef, *, lookback_months: int) -> list[SeriesPo
         repository.close()
 
 
-def _publish_reading(store, source: SourceDef, obs: Observation, *, now: datetime) -> None:
+def _reading_text(source: SourceDef, obs: Observation) -> str:
+    return (f"{obs.evidence_span}\n\n来源：{source.label or source.id}（{source.adapter}）；"
+            f"口径期：{obs.period}；数值：{obs.value:g} {obs.unit}".rstrip())
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _restored_text(text: str, replaced_version_id: str) -> str:
+    return f"{text}\n恢复为此前读数（取代版本 {replaced_version_id}）"
+
+
+def _next_version_text(store, document_id: str, text: str) -> str | None:
+    """The body to publish for a document that carries exactly one reading; None when the reading is unchanged.
+
+    A version is identified by its content and "latest" means last first published. A reading that goes back to an
+    earlier value (A -> B -> A) would therefore re-use version A and leave B as latest, and the new fact would cite
+    B's body. Such a reading is published with one extra line naming the version it replaces: a new, citable
+    version, while the evidence line itself stays identical to A's.
+    """
+    versions = store.document_versions(document_id)          # newest first
+    if not versions:
+        return text
+    current = {_content_hash(text)}
+    if len(versions) > 1:
+        current.add(_content_hash(_restored_text(text, versions[1]["version_id"])))
+    if versions[0]["content_hash"] in current:
+        return None
+    if any(version["content_hash"] == _content_hash(text) for version in versions):
+        return _restored_text(text, versions[0]["version_id"])
+    return text
+
+
+def _publish_reading(store, source: SourceDef, obs: Observation, *, now: datetime,
+                     text: str, snapshot_id: str = "") -> None:
     """Publish the re-checkable reading an observation cites, as an immutable document version.
 
     A series has no filing to point at, but the evidence store only admits a neutral fact that cites a published
     document version.  The reading line itself is the document: it carries the figure, period, agency and rule
     status, and a changed print produces a new version under the same document id rather than rewriting history.
+    The publication note names the ledger snapshot the version was first read from.
     """
     from types import SimpleNamespace
 
-    text = (f"{obs.evidence_span}\n\n来源：{source.label or source.id}（{source.adapter}）；"
-            f"口径期：{obs.period}；数值：{obs.value:g} {obs.unit}".rstrip())
     store.save_document(SimpleNamespace(
         document_id=obs.document_id, symbol=obs.entity, period=obs.period, doc_type="series_reading",
         source=f"series:{source.id}", source_url=source.adapter, path=None, version_path=None, text=text,
-        sha256=hashlib.sha256(text.encode()).hexdigest(), fetched_at=now.isoformat(), external_id="",
+        sha256=_content_hash(text), fetched_at=now.isoformat(), external_id="",
         title=f"{source.label or source.id} {obs.period}", published_at="", related_entities=(),
-        completeness="full", truncation_reason="", carrier_format="plain_text", mime_source=""))
+        completeness="full", truncation_reason="", carrier_format="plain_text", mime_source=""),
+        note=f"governed_snapshot={snapshot_id}" if snapshot_id else "")
 
 
 def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None,
@@ -324,8 +364,20 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
             continue
         raw_saved = store.save_measurement_points(source, points, fetched_at=now)
         saved = 0
-        for obs in to_observations(source, points, now=now):
-            _publish_reading(store, source, obs, now=now)
+        observations = to_observations(source, points, now=now)
+        snapshots = {_document_id(source, point): point.snapshot_id for point in points}
+        bodies: dict[str, set[str]] = {}
+        for obs in observations:
+            bodies.setdefault(obs.document_id, set()).add(_reading_text(source, obs))
+        for obs in observations:
+            text = _reading_text(source, obs)
+            # "Unchanged" and "restored" are only decidable when the document carries one reading. A series with
+            # several bases (yoy and mom) publishes one body per basis under the same id, as it always has.
+            if len(bodies[obs.document_id]) == 1:
+                text = _next_version_text(store, obs.document_id, text)
+            if text is not None:
+                _publish_reading(store, source, obs, now=now, text=text,
+                                 snapshot_id=snapshots.get(obs.document_id, ""))
             # A governed-observer point names its own concept; a series feeds every concept its source declares.
             for concept in ([obs.concept] if obs.concept else source.concepts):
                 row = obs.model_copy(update={"concept": concept})
@@ -338,8 +390,11 @@ def collect(store, *, lookback_months: int = 6, concepts: set[str] | None = None
                         projection_version="v1"):
                     saved += 1
         out[source.id] = saved
+        # Every run's snapshots, including a run that stored nothing new: the ledger can still say what was read.
+        read_from = sorted({point.snapshot_id for point in points if point.snapshot_id})
         store.finish_ingestion(run_id, status="succeeded", discovered=len(points),
-                               accepted=raw_saved, at=now)
+                               accepted=raw_saved, at=now,
+                               note=f"governed_snapshot={','.join(read_from)}" if read_from else "")
         log.info("sources: %s -> %d raw point vintages, %d new observations",
                  source.id, raw_saved, saved)
     return out

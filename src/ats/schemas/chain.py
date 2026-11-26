@@ -581,3 +581,6 @@ class SeriesPoint(BaseModel):
     direction: str = ""
     evidence_span: str = ""
     source_entity: str = ""
+    # Ledger snapshot the reading was taken from. Lineage only: it changes on every collection, so it stays out of
+    # the evidence line and out of the measurement point's content hash.
+    snapshot_id: str = ""

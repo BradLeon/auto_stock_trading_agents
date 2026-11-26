@@ -754,8 +754,10 @@ class PlatformUnstructuredRepository:
                  getattr(source, "cadence", ""), stamp))
             published = point.published_at.isoformat() if point.published_at else ""
             # Exclude yoy/mom by construction: those are transformations, even when a
-            # provider happens to include them in the response DTO.
-            raw = point.model_dump(mode="json", exclude={"yoy", "mom"})
+            # provider happens to include them in the response DTO. `snapshot_id` is
+            # lineage that differs on every collection: hashing it would append a new
+            # vintage for an unchanged value.
+            raw = point.model_dump(mode="json", exclude={"yoy", "mom", "snapshot_id"})
             payload = json.dumps(raw, ensure_ascii=False, sort_keys=True)
             content_hash = hashlib.sha256(payload.encode()).hexdigest()
             point_id = hashlib.sha1(

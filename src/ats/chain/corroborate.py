@@ -534,6 +534,9 @@ def assess_layer(layer, rows_by_entity, *, cfg: dict | None = None,
         # tested on, and they meet on the concept key. That is what lets a source be
         # added without touching any claim, and vice versa.
         entities |= {s.entity for s in sources_for_concepts({c.key for c in claim.concepts})}
-        rows = [r for e in entities for r in rows_by_entity.get(e, [])]
+        # Sorted, not set order: row order decides cluster order, which is part of the adjudicator's prompt and so
+        # of its cache key. A set of strings iterates differently in every process (hash randomisation), which
+        # re-judged unchanged evidence after every restart.
+        rows = [r for e in sorted(entities) for r in rows_by_entity.get(e, [])]
         out.append(corroborate(claim, rows, cfg=cfg, as_of=as_of, judge=judge))
     return out

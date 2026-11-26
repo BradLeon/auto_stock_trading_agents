@@ -80,7 +80,7 @@ ANT 加入 `config/pead.yaml` 的 targets 后，现有的发现、正文、XBRL 
 - 实现前先查结构化存储是否已有可复用的候选、隔离状态（`structured_observations` 的状态字段）；有就复用，没有再新增候选表。
 
 D7 补注（7.1 结论与实现取舍，2026-11-26）：
-- 复用结构化存储里通用的 `structured_evidence_candidates`、`structured_evidence_reviews`、`structured_evidence_links` 三张表（改动前生产库中均为空），候选、审阅历史、发布链接都落在其中。既有 `EvidenceWorkbench` 绑定事件语义，复核逻辑另写 `disclosure_review.py`。`structured_candidates` 是供应方抓取的隔离区，不适用。
+- 复用结构化存储里通用的 `structured_evidence_candidates`、`structured_evidence_reviews`、`structured_evidence_links` 三张表（改动前生产库中候选与审阅两表为空，链接表有 1846 行其他数据的记录），候选、审阅历史、发布链接都落在其中。既有 `EvidenceWorkbench` 绑定事件语义，复核逻辑另写 `disclosure_review.py`。`structured_candidates` 是供应方抓取的隔离区，不适用。
 - 只新增一张表 `structured_document_extractions`：按请求缓存模型回答，并记录“未披露”“未定位”。
 - 请求身份是（模型名、skill 文本、送入的上下文）的哈希。文件版本、指标定义或定位结果变化会改变上下文；只改代码核验规则不会重新请求。失败的请求不缓存。
 - 观测挂在结构化实体 `ANTHROPIC`（D1），证券代码 `ANT` 保存在候选原始记录里。

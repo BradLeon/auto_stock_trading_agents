@@ -1,0 +1,197 @@
+# ANT 算力承诺与现金流基线（静态材料，截至 2026-09-30）
+#
+# 用途：首份财报起，拿新披露值对照本基线。
+# 性质：静态参考资料。没有任何程序读取本文件；它不是已发布的披露序列，也不是监测配置。
+#
+# 分四类，使用时不要混：
+#   disclosed   招股书直接披露，附原文
+#   computed    只用 disclosed 做加减乘除得到，写明算式；inferred: true 的另含推断
+#   estimates   持仓人的估算，招股书没有披露
+#   user_rules  持仓人在原表里设的判读线，尚未纳入行动指南
+#
+# 金额单位：十亿美元（billion USD）。原文表格以百万美元列示的，除以 1000。
+
+meta:
+  version: 1
+  prepared_on: 2026-11-26
+  entity: ANTHROPIC
+  security: ANT
+  as_of: 2026-09-30
+  origin_workbook:
+    name: "ANT 算力承诺 vs 收入现金流 季度跟踪.xlsx"
+    sheet: 季度跟踪
+    sha256: 4ee7650911ebb360fa22fcb4fc9cd34608e7b9018b3e6374fd8aa225dddc7907
+  filings:
+    S-1: {filed: 2026-10-26, note: 首版，财务截至 2026-06-30，发行与承诺数字留空}
+    S-1/A: {filed: 2026-11-02, note: 首次给出承诺总额；11-10 起改为终版数值}
+    424B4: {filed: 2026-11-19, note: 终版，下列数值默认取自本版}
+
+disclosed:
+  quarterly:   # 利润表季度数
+    source: 424B4
+    quotes:
+      - "Revenue $376 $787 $1,382 $2,040 $4,731 $11,555 $16,956"
+      - "Compute and infrastructure 944 1,390 2,047 2,945 3,387 5,558 9,863"
+    rows:
+      - {quarter: 2025Q1, revenue: 0.376, compute_and_infrastructure: 0.944}
+      - {quarter: 2025Q2, revenue: 0.787, compute_and_infrastructure: 1.390}
+      - {quarter: 2025Q3, revenue: 1.382, compute_and_infrastructure: 2.047}
+      - {quarter: 2025Q4, revenue: 2.040, compute_and_infrastructure: 2.945}
+      - {quarter: 2026Q1, revenue: 4.731, compute_and_infrastructure: 3.387}
+      - {quarter: 2026Q2, revenue: 11.555, compute_and_infrastructure: 5.558}
+      - {quarter: 2026Q3, revenue: 16.956, compute_and_infrastructure: 9.863}
+
+  balance_sheet:   # 现金及现金等价物、短期投资，不含受限现金
+    - {date: 2025-12-31, source: 424B4, cash: 17.388, short_term_investments: 2.889,
+       quote: "Cash and cash equivalents $3,141 $17,388 $95,562 Short-term investments — 2,889 36,283"}
+    - {date: 2026-06-30, source: S-1, cash: 112.389, short_term_investments: 19.262,
+       quote: "Cash and cash equivalents $3,141 $17,388 $112,389 Short-term investments — 2,889 19,262"}
+    - {date: 2026-09-30, source: 424B4, cash: 95.562, short_term_investments: 36.283,
+       quote: "Cash and cash equivalents $3,141 $17,388 $95,562 Short-term investments — 2,889 36,283"}
+
+  cash_flow:   # 累计数
+    - {id: ocf_6m26, source: S-1, value: 3.929,
+       quote: "Operating activities $(1,627) $(5,692) $(2,637) $(1,513) $3,929"}
+    - {id: ocf_9m26, source: 424B4, value: 6.569,
+       quote: "Operating activities $(1,627) $(5,692) $(2,637) $(2,024) $6,569"}
+    - {id: capex_ppe_6m26, source: S-1, value: 0.482,
+       quote: "Purchases of property and equipment (2) (15) (131) (18) (482)"}
+    - {id: capex_ppe_9m26, source: 424B4, value: 0.925,
+       quote: "Purchases of property and equipment (2) (15) (131) (111) (925)"}
+    - {id: lease_prepayments_9m26, source: 424B4, value: 1.955,
+       quote: "Prepayments for leased assets and equipment — — (54) (51) (1,955)",
+       note: 首版 S-1 没有单列这一行，当时包含在“其他投资活动”里（2025 全年 54 + 23 = 首版的 77，百万美元）}
+    - {id: other_investing_6m26, source: S-1, value: 0.337,
+       quote: "Other investing activities — (7) (77) (31) (337)"}
+
+  quarter_items:
+    - {id: short_term_compute_q3, source: 424B4, value: 5.0,
+       quote: "including $5.0 billion of compute under short-term commitments",
+       note: 原文称单价明显高于多年期承诺}
+    - {id: short_term_compute_9m26, source: 424B4, value: 6.5,
+       quote: "which includes $6.5 billion of compute under short-term commitments for the nine months ended September 30, 2026"}
+    - {id: noncash_donation_q3, source: 424B4, value: 2.0,
+       quote: "$2.0 billion of non-cash charges related to our donation matching program"}
+
+  contracted_demand:
+    - {id: rpo, source: 424B4, value: 13.8,
+       quote: "remaining performance obligations amounted to $13.8 billion."}
+    - {id: rpo_next_12m_share, source: 424B4, value: 0.75, qualifier: approximately,
+       quote: "The Company expects to recognize approximately 75% (unaudited) of this amount as revenue over the next 12 months"}
+
+  commitments_all_in:   # 全口径：含一年以内、未起租租赁和 9-30 之后签订的协议
+    total: {source: 424B4, value: 900.9, quote: "with an aggregate committed spend of approximately $900.9 billion"}
+    due_next_12m: {source: 424B4, value: 70.7,
+                   quote: "Approximately $70.7 billion of these commitments are due in the 12 months following September 30, 2026."}
+    incurred_before_2031: {source: 424B4, value: 451.6,
+                           quote: "approximately $451.6 billion expected to be incurred before December 31, 2030"}
+    excluded_without_fixed_amount: {source: 424B4, low: 150, high: 175,
+                                    quote: "We estimate these payments to be in the range of $150 billion to $175 billion."}
+    components:   # 五项相加等于全口径总额
+      - {id: contractual_table, value: 319.993, label: 到期表合计（剩余期限超过一年等）,
+         quote: "Total(4)(5) $319,993 $5,231 $29,165 $44,357 $47,752 $45,070 $148,418"}
+      - {id: short_term_at_0930, value: 17.4, label: 一年以内或一年内可无罚撤销,
+         quote: "Minimum payments under such contracts were approximately $17.4 billion as of September 30, 2026."}
+      - {id: leases_not_commenced, value: 451.2, label: 已签未起租租赁（未折现）,
+         quote: "with total estimated future undiscounted lease obligations of approximately $451.2 billion"}
+      - {id: signed_after_0930, value: 105.7, label: 9-30 之后签订的长期协议,
+         quote: "with aggregate future minimum payment obligations of approximately $105.7 billion"}
+      - {id: short_term_after_0930, value: 6.6, label: 9-30 之后签订的短期协议,
+         quote: "Minimum payments under such contracts are approximately $6.6 billion."}
+
+  contractual_table_by_year:   # 只是 components.contractual_table 的年度分布，不能代表全口径
+    source: 424B4
+    quote: "Total(4)(5) $319,993 $5,231 $29,165 $44,357 $47,752 $45,070 $148,418"
+    values: {"2026": 5.231, "2027": 29.165, "2028": 44.357, "2029": 47.752, "2030": 45.070, thereafter: 148.418}
+    note: 2026 列按 9-30 时点理解为剩余 3 个月，原文没有写明
+
+  offering:
+    - {id: net_proceeds, source: 424B4, value: 104.8,
+       quote: "net proceeds to us from this offering and the concurrent private placement will be approximately $104.8 billion",
+       note: 公开发行加同步私募，扣除费用后；不含超额配售权}
+    - {id: public_offering_shares, source: 424B4, value_shares: 956351354, price_usd: 83.00,
+       quote: "the sale and issuance by us of 956,351,354 shares of our Class A common stock in this offering"}
+    - {id: pro_forma_as_adjusted_cash, source: 424B4, value: 232.351,
+       quote: "Cash, cash equivalents, and short-term investments $131,845 $131,845 $232,351",
+       note: 备考数，已反映募资和限制性股票结算预扣税}
+
+  superseded:   # 早期版本的数值，只作追溯；行动指南的上市基线用的是这一组
+    - {id: total, source: S-1/A, value: 895.4, quote: "aggregate committed spend of approximately $895.4 billion"}
+    - {id: incurred_before_2031, source: S-1/A, value: 447.5, quote: "approximately $447.5 billion expected to be incurred before December 31, 2030"}
+    - {id: due_next_12m, source: S-1/A, value: 69.8, quote: "Approximately $69.8 billion of these commitments are due in the 12 months"}
+
+computed:
+  derived:
+    - {id: ocf_q3, value: 2.640, formula: ocf_9m26 - ocf_6m26}
+    - {id: capex_ppe_q3, value: 0.443, formula: capex_ppe_9m26 - capex_ppe_6m26}
+    - {id: fcf_q3, value: 2.197, formula: ocf_q3 - capex_ppe_q3, note: 与原表口径一致，未扣租赁预付款}
+    - {id: short_term_compute_6m26, value: 1.5, formula: short_term_compute_9m26 - short_term_compute_q3}
+    - {id: lease_prepayments_q3_at_least, value: 1.618, inferred: true,
+       formula: lease_prepayments_9m26 - other_investing_6m26,
+       note: 假设上半年这笔预付不超过当时的“其他投资活动”0.337；招股书没有单季数}
+    - {id: fcf_q3_after_prepayments_at_most, value: 0.579, inferred: true,
+       formula: fcf_q3 - lease_prepayments_q3_at_least}
+    - {id: public_offering_gross, value: 79.377, inferred: true,
+       formula: 956351354 * 83.00 / 1e9,
+       note: 原表“募资约 790 亿”与此数吻合，应是扣费前的公开发行部分}
+  indicator_readings:   # 行动指南指标在上市基线上的第一期读数
+    - {indicator: 1a.a, value: 0.5817, formula: compute_q3 / revenue_q3,
+       note: 全部算力与基础设施，招股书不拆推理与训练}
+    - {indicator: 1a.b, value: 1.042, formula: due_next_12m / (revenue_q3 * 4)}
+    - {indicator: 1b.b, value: 0.1464, formula: rpo * rpo_next_12m_share / due_next_12m}
+    - {indicator: cash_coverage, value: 1.865, formula: (cash_0930 + short_term_investments_0930) / due_next_12m,
+       note: 行动指南目前没有这一项}
+    - {indicator: cash_coverage_pro_forma, value: 3.286, formula: pro_forma_as_adjusted_cash / due_next_12m}
+
+estimates:
+  committed_payments_by_quarter:
+    owner: 持仓人
+    snapshot_as_of: 2026-09-30
+    method: 未记录。5 版招股书正文没有逐季承诺数字（图片内容未查），无法逐项核对
+    use: 作为假设与实际对照；不得写入披露序列，不得当作公司披露引用
+    caution: 只含截至快照日已签的承诺，之后每季新签约会使它偏低
+    values:
+      "2026Q4": 19.6
+      "2027Q1": 14.0
+      "2027Q2": 16.0
+      "2027Q3": 20.0
+      "2027Q4": 22.0
+      "2028Q1": 25.0
+      "2028Q2": 27.0
+      "2028Q3": 28.5
+      "2028Q4": 29.0
+      "2029Q1": 29.0
+      "2029Q2": 30.0
+      "2029Q3": 31.0
+      "2029Q4": 32.9
+      "2030Q1": 30.5
+      "2030Q2": 31.0
+      "2030Q3": 31.5
+      "2030Q4": 32.2
+    against_disclosed_totals:
+      - {span: 2026Q4–2027Q3, estimate: 69.6, disclosed: 70.7, disclosed_id: due_next_12m}
+      - {span: 2026Q4–2030Q4, estimate: 449.2, disclosed: 451.6, disclosed_id: incurred_before_2031}
+
+user_rules:
+  status: 持仓人原表中的判读线；未纳入行动指南和监测配置
+  rules:
+    - {metric: 全部算力与基础设施 / 收入, bullish_at_or_below: 0.48, bearish_at_or_above: 0.55}
+    - {metric: 期末现金及短投 / 未来 4 季预计付款, warn_below: 1.5}
+  differences_from_action_guide:
+    - 行动指南的 R1 看推理算力占比或承诺付款占收入比连续两季上升，不看绝对水平
+    - 行动指南用推理算力口径，本线用全部算力
+    - 行动指南没有现金覆盖类指标
+
+first_report_checks:   # 首份财报时对照什么（只列对照项，不预设结论）
+  - 2026Q4 收入、算力与基础设施费用、短期算力金额
+  - 未来 12 个月到期承诺（全口径）与本基线 70.7 的变化，以及五个组成部分各自的变化
+  - 2026Q4 实际算力相关支出与估算 19.6 对照；承诺付款与利润表费用口径不同，需并列付款现金流
+  - 租赁资产与设备预付款的单季金额
+  - RPO 与 12 个月内确认比例
+  - 期末现金及短投
+
+corrections_to_origin_workbook:
+  - {cell: G12, was: 2.66, now: 2.640, reason: 前九个月经营现金流减上半年}
+  - {cell: O12, was: IPO 净募资约 790 亿, now: 公开发行与同步私募净额约 104.8（1048 亿）, reason: 424B4 披露}
+  - {cell: O13, was: "IPO 后现金约 2,100 亿", now: "备考现金及短投 232.351（约 2,324 亿）", reason: 424B4 备考数，时点为 2026-09-30}
+  - {cell: A1, was: wo, now: 删除, reason: 误输入}

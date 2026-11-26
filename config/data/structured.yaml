@@ -308,11 +308,13 @@ entities:
     canonical_name: OpenAI
     aliases: [OpenAI, OpenAI Group, OpenAI Global]
     securities: []
+  # 2026-11-19 上市，证券代码 ANT（见 config/entities.yaml）。ANT 只用于交易直接相关的请求；这里和
+  # 证据账本、前沿实验室收入、评测、OpenRouter 等序列一样，继续以公司名 ANTHROPIC 为键。
   ANTHROPIC:
     kind: private_company
     canonical_name: Anthropic
-    aliases: [Anthropic, Anthropic PBC]
-    securities: []
+    aliases: [Anthropic, Anthropic PBC, ANT]
+    securities: [{symbol: ANT}]
 
 # Provider sources. `adapter` must match a controlled runtime adapter key.
 # `internal_request_budget` is our conservative limit, not a Provider SLA/QPS claim.

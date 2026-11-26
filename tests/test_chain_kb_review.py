@@ -117,16 +117,17 @@ def test_one_chatty_filing_is_not_a_theme():
 
 def test_undeclared_relation_is_how_new_topology_arrives():
     """`AMD → ANTHROPIC` was found exactly this way: an earnings release named a
-    partner that sat in no chain at all. Topology is annual-tenor knowledge — the most
+    partner that sat in no chain at all. (ANTHROPIC is now the listed ANT and folds to it,
+    so the example partner here is the still-private OPENAI.) Topology is annual-tenor knowledge — the most
     durable thing these detectors can produce."""
     store = get_store()
-    store.save_observation(_obs("NVDA", about="ANTHROPIC", metric="partnership",
+    store.save_observation(_obs("NVDA", about="OPENAI", metric="partnership",
                                 span="strategic partnership to deploy 2GW of MI450"))
     store.save_observation(_obs("NVDA", about="TSM", metric="foundry_capacity"))
 
     found = kb_review.undeclared_relations(load_sector_config("ai_hardware"), store)
     subjects = {f.subject for f in found}
-    assert "NVDA → ANTHROPIC" in subjects
+    assert "NVDA → OPENAI" in subjects
     assert "NVDA → TSM" not in subjects         # declared in NVDA's signal_chain
 
 
@@ -140,14 +141,14 @@ def test_a_speaker_with_no_chain_is_one_finding_not_one_per_counterparty():
     of the test is the chainless-speaker rollup, not AMD, so only the fixture moved.
     """
     store = get_store()
-    for other in ["ANTHROPIC", "TSM", "NVDA"]:
+    for other in ["OPENAI", "TSM", "NVDA"]:
         store.save_observation(_obs("META", about=other, metric=f"rel_{other}"))
 
     found = [f for f in kb_review.undeclared_relations(
         load_sector_config("ai_hardware"), store) if f.subject.startswith("META")]
     assert len(found) == 1
     assert "无 signal_chain" in found[0].subject
-    assert all(o in found[0].detail for o in ("ANTHROPIC", "TSM", "NVDA"))
+    assert all(o in found[0].detail for o in ("OPENAI", "TSM", "NVDA"))
 
 
 def _assessment(claim_id, judgements, *, layer="L5_fab"):
@@ -251,9 +252,9 @@ def test_one_broken_detector_does_not_silence_the_others(monkeypatch):
     the other five off the report — that failure mode is invisible, because a detector
     that reports nothing looks exactly like a detector that found nothing."""
     store = get_store()
-    store.save_observation(_obs("NVDA", about="ANTHROPIC", metric="partnership"))
+    store.save_observation(_obs("NVDA", about="OPENAI", metric="partnership"))
     monkeypatch.setattr(kb_review, "unmapped_clusters",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
 
     found = kb_review.review(load_sector_config("ai_hardware"), store, now=NOW)
-    assert any("ANTHROPIC" in f.subject for f in found)
+    assert any("OPENAI" in f.subject for f in found)

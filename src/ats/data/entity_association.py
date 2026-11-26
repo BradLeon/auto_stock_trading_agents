@@ -35,8 +35,12 @@ def entity_mentions(text: str, symbol: str) -> list[dict]:
     Short symbols need a stock marker or nearby financial context. Query contracts
     and product names are deliberately not evidence of an issuer mention.
     """
+    from ..config import canonical_entity, entity_meta
+
     mentions = []
     canonical = symbol.upper()
+    # A code that is also an ordinary word (ANT) needs the same stock context a one/two-letter code does.
+    ambiguous = bool(entity_meta(canonical_entity(symbol)).get("code_ambiguous"))
     for alias in entity_aliases(symbol):
         ticker = alias.upper() == canonical
         flags = 0 if ticker else re.IGNORECASE
@@ -45,7 +49,7 @@ def entity_mentions(text: str, symbol: str) -> list[dict]:
             if canonical == "ORCL" and alias.casefold() == "oracle" and re.match(
                     r"\s+of\s+(?:omaha|delphi)\b", text[match.end():], re.I):
                 continue
-            if ticker and len(canonical) <= 2:
+            if ticker and (len(canonical) <= 2 or ambiguous):
                 before = text[max(0, match.start()-24):match.start()]
                 around = text[max(0, match.start()-48):match.end()+48]
                 if not (before.endswith("$") or re.search(

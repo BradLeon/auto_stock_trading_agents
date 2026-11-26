@@ -140,3 +140,58 @@ def test_ai_hardware_uses_one_sector_ticker_per_company_and_tracks_l2_operators(
     demand = next(c for c in cloud.claims if c.id == "cloud_demand_still_accelerating")
     assert "CRWV" in demand.expected_witnesses()
     assert demand.stance_of("CRWV") == "incumbent"
+
+
+def test_anthropic_names_fold_onto_the_listed_ant_identity():
+    """ANT listed 2026-11-19: every way of writing the company is one witness, not two."""
+    from ats.config import canonical_entity, entity_meta
+
+    for name in ("ANT", "ANTHROPIC", "Anthropic", "Anthropic PBC", "Claude"):
+        assert canonical_entity(name) == "ANT", name
+    assert entity_meta("ANTHROPIC")["filings"] == "sec"
+    assert canonical_entity("OPENAI") == "OPENAI"          # the other private lab is untouched
+
+
+def test_the_evidence_ledger_records_ant_under_the_company_name():
+    """ANT is the security code; evidence, claims and witnesses say ANTHROPIC."""
+    from ats.config import canonical_entity, ledger_entity, load_sector_config
+
+    for name in ("ANT", "Anthropic", "Claude", "ANTHROPIC"):
+        assert ledger_entity(name) == "ANTHROPIC", name
+    assert canonical_entity("ANT") == "ANT"                      # the security side is unchanged
+    assert ledger_entity("Ant") == "Ant" and ledger_entity("NVDA") == "NVDA"
+    assert ledger_entity("HY9H") == "HY9H"                       # only declared companies are renamed
+    layer = next(l for l in load_sector_config("ai_hardware").layers if l.key == "L1_app")
+    claim = next(c for c in layer.claims if c.id == "ai_frontier_labs_commercialization")
+    witnesses = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
+    assert "ANTHROPIC" in witnesses and "ANT" not in witnesses
+
+
+def test_a_document_fetched_as_ant_is_offered_anthropics_claim_dimensions():
+    from ats.agents.evidence.observer import concept_menu
+
+    menu, keys = concept_menu("ANT")
+    assert "frontier_revenue_scale_trend" in keys and menu
+
+
+def test_ant_code_is_security_only_and_never_folds_ordinary_text():
+    """ANT is also the English word and Ant Group: only the company's names fold onto it."""
+    from ats.config import canonical_entity, entity_meta
+
+    assert canonical_entity("Ant") == "Ant" and canonical_entity("ANT GROUP") == "ANT GROUP"
+    assert canonical_entity("ANT") == "ANT"                       # the security code still resolves to itself
+    assert entity_meta("ANT")["name"] == "Anthropic"
+    assert canonical_entity("Anthropic") == canonical_entity("Claude") == "ANT"
+
+
+def test_bare_ant_in_text_needs_stock_context_but_the_company_name_does_not():
+    from ats.data.entity_association import entity_mentions
+
+    assert entity_mentions("Ant Group files for new listing", "ANT") == []
+    assert entity_mentions("ANT GROUP SEES PROFIT JUMP", "ANT") == []
+    assert entity_mentions("ANT unveils new model", "ANT") == []              # no stock context
+    assert [m["kind"] for m in entity_mentions("Shares of ANT rose 4% on Monday", "ANT")] == ["ticker"]
+    assert [m["kind"] for m in entity_mentions("Buy $ANT today", "ANT")] == ["ticker"]
+    named = entity_mentions("Anthropic ships Claude 5.5", "ANT")
+    assert {m["alias"].casefold() for m in named} == {"anthropic", "claude"}
+    assert {m["kind"] for m in named} == {"company_alias"}

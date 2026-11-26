@@ -715,3 +715,28 @@ def test_the_span_floor_does_not_hold_chinese_to_a_stricter_bar():
 
     assert _span_weight("2027 年产能大部分已预售") >= MIN_SPAN_WEIGHT
     assert _span_weight("up 175% this year") < MIN_SPAN_WEIGHT
+
+
+# --- a security whose ledger identity differs from its code (ANT / ANTHROPIC) ---- #
+def test_evidence_from_an_ant_document_is_recorded_under_anthropic(monkeypatch):
+    """One company, one witness: its own filing (fetched as ANT) and a third party writing "Claude" agree."""
+    monkeypatch.setattr(observer, "run_structured", lambda *a, **k: _view([
+        _row(entity="ANT", metric="revenue"), _row(entity="Claude", metric="usage")]))
+    obs, _ = observer.extract("ANT", "ant-doc", BODY, now=NOW)
+    assert {(o.entity, o.source_entity) for o in obs} == {("ANTHROPIC", "ANTHROPIC")}
+
+
+def test_a_bare_ant_in_someone_elses_document_is_not_taken_for_anthropic(monkeypatch):
+    monkeypatch.setattr(observer, "run_structured", lambda *a, **k: _view([
+        _row(entity="Ant", metric="payments"), _row(entity="Anthropic", metric="compute")]))
+    obs, _ = observer.extract("MU", "mu-doc", BODY, now=NOW)
+    assert {o.metric: o.entity for o in obs} == {"payments": "ANT", "compute": "ANTHROPIC"}
+    assert {o.source_entity for o in obs} == {"MU"}
+
+
+def test_the_ledger_answers_a_query_by_ticker_with_the_company_rows():
+    store = get_store()
+    store.save_observation(_obs(document_id="ant-doc", entity="ANTHROPIC", source_entity="ANTHROPIC"))
+    assert [r["entity"] for r in store.observations(entity="ANT")] == ["ANTHROPIC"]
+    assert store.supersede_document_observations("ant-doc", "ANT") == 1
+    assert store.observations(entity="ANTHROPIC") == []

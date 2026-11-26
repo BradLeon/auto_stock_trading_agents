@@ -296,7 +296,10 @@ def load_entities() -> dict:
 def _alias_index() -> dict[str, str]:
     idx: dict[str, str] = {}
     for canonical, meta in load_entities().items():
-        idx[canonical.upper()] = canonical
+        # An ambiguous code (ANT: also the English word and Ant Group) must not fold free text: "Ant" stays "Ant".
+        # The code still resolves to itself because an unknown symbol passes through unchanged.
+        if not (meta or {}).get("code_ambiguous"):
+            idx[canonical.upper()] = canonical
         for alias in (meta or {}).get("aliases", []) or []:
             idx[str(alias).upper()] = canonical
     return idx
@@ -333,6 +336,18 @@ def canonical_entity(symbol: str) -> str:
                 return idx[cand]
         return ticker            # unregistered, but at least stable across phrasings
     return symbol
+
+
+def ledger_entity(symbol: str) -> str:
+    """The name the evidence ledger records a security under.
+
+    A company may be traded under a code that is a poor evidence identity (ANT is also an ordinary word and reads
+    like Ant Group), so the registry can declare `evidence_entity`. Only such declared companies are renamed; every
+    other symbol passes through exactly as given. Callers pass identities they trust to mean this company -- free text
+    from a model goes through `canonical_entity` first, which never folds an ambiguous bare code.
+    """
+    meta = load_entities().get(canonical_entity(symbol)) or {}
+    return meta.get("evidence_entity") or symbol
 
 
 def entity_meta(symbol: str) -> dict:

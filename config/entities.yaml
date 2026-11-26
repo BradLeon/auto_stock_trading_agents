@@ -99,6 +99,25 @@ entities:
     market: US
     filings: sec
 
+  # 2026-11-19 上市（S-1 首版 2026-10-26）。两个名字分工：
+  #   · 证券身份 ANT：只用于交易直接相关的请求（行情、持仓、下单、风控、财报与监管文件、目标名单）。
+  #   · 名称身份 Anthropic / Claude：证据账本、命题、新闻、评测一律用它。账本键由 `evidence_entity`
+  #     声明（config.py::ledger_entity）：按 ANT 取到的公司文件抽出的证据记在 ANTHROPIC 下，按 ANT
+  #     查证据也读到同一批，同一家公司不会被拆成两个证人。
+  # ⚠️ `Claude` 是产品名而非公司名，作别名是为了让新闻里"Claude 发布 X"这类标题关联到 ANT；
+  # 误匹配比例由试运行统计，再决定是否保留（openspec/changes/ant-data-onboarding 设计文档 D4）。
+  # ⚠️ `code_ambiguous: true`：ANT 是证券登记代码，但 "ant" 也是普通英文词，且与蚂蚁集团（Ant Group）
+  # 同形。所以代码只用于证券侧（行情、持仓、风控、SEC、财报）；文本侧一律靠公司名（Anthropic /
+  # Claude）识别：① 文章里单独的 "ANT" 须带 `$ANT`、`NYSE/NASDAQ: ANT` 或邻近 shares/stock 等股票
+  # 语境才算提及；② `canonical_entity` 不把 "Ant" 折叠成 ANT（见 config.py::_alias_index）。
+  ANT:
+    name: Anthropic
+    aliases: [ANTHROPIC, "ANTHROPIC PBC", CLAUDE]
+    market: US
+    filings: sec
+    code_ambiguous: true
+    evidence_entity: ANTHROPIC
+
   MU:
     name: Micron Technology
     aliases: [MICRON, "MICRON TECHNOLOGY"]

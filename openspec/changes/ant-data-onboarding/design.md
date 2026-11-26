@@ -28,10 +28,12 @@
 
 ## Decisions
 
-### D1 规范身份用 ANT，ANTHROPIC 作别名
-沿用 SPCX（xAI 并入后上市）的先例：在 `config/entities.yaml` 登记 ANT，别名为 `ANTHROPIC`、`Anthropic`、`Anthropic PBC`、`Claude`；L1 证人与 `structured.yaml` 的私有实体改为指向 ANT；治理型观察器写入实体前经过 `canonical_entity`。
-- 不选"保留 ANTHROPIC 为规范身份、ANT 挂为证券"：可交易名单、风控标的、技术面都按代码索引，规范身份用代码最少改动。
-- 改动后重跑 L1 三个证据观察器，逐项比对统一前后的状态与读数（规格 `sector/chain-layers`）。
+### D1 证券代码 ANT 与证据身份 ANTHROPIC 分离（2026-11-26 用户确认，取代原"规范身份用 ANT"）
+- `config/entities.yaml` 登记 ANT（别名 `ANTHROPIC`、`Anthropic PBC`、`Claude`），用于交易直接相关的请求；加 `code_ambiguous: true`（裸 "ANT" 与普通词、蚂蚁集团同形，文章提及须带股票语境，名字折叠不收裸代码）和 `evidence_entity: ANTHROPIC`。
+- L1 证人、`sources.yaml`、治理型观察器、结构化实体保持 `ANTHROPIC` 不变。
+- 换名只发生在证据账本的入口：抽取写入（说话人；以及模型用名称别名或说话人自己指代的主体）、按实体读取与作废、命题维度菜单（`config.ledger_entity`）。他人文件里的裸 "ANT" 保持原样。
+- 理由：证据、命题、新闻、评测用公司名更不易误认；账本历史行与既有序列本来就以 `ANTHROPIC` 为键，不需要迁移。
+- 原方案（证据账本折叠为 ANT）在实施中撤回；撤回前定时任务写入生产的两行已于 2026-11-26 清理。
 
 ### D2 注册类文件：本地入库命令 + 按发行人补采
 - 新增运维命令（暂定 `ats data registration-ingest --entity ANT --form S-1 --file <path>`）。它把本地文件包装成与 SEC 正文入库相同的行结构，复用 `fetch_filing` 之后的准入与存储，注册人名称和申报日期从封面解析。

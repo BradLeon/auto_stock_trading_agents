@@ -4,10 +4,10 @@
 
 ## 1. 身份统一（A1）
 
-- [ ] 1.1 在 `config/entities.yaml` 登记 ANT（别名 ANTHROPIC、Anthropic、Anthropic PBC、Claude；`market: US`，`filings: sec`）。验证：实体加载测试通过，`canonical_entity("ANTHROPIC") == "ANT"`。
-- [ ] 1.2 `config/data/structured.yaml` 的 ANTHROPIC 私有实体改为指向 ANT；L1_app 证人改为 ANT。验证：配置加载测试通过；L1 命题的 `expected_witnesses()` 含 ANT、不含 ANTHROPIC。
-- [ ] 1.3 治理型观察器写入实体前做规范化（`governed_observer` 与 `chain/sources.to_observations`）。验证：新增测试，ANTHROPIC 的收入观测写入后实体为 ANT；同一证人不被计为两个说话人。
-- [ ] 1.4 重跑 L1 三个证据观察器，逐项比对统一前后的状态与读数（规格 `sector/chain-layers`）。验证：差异清单写入 `verification.md`，用户确认。
+- [x] 1.1 在 `config/entities.yaml` 登记 ANT（别名 ANTHROPIC、Anthropic PBC、Claude；`market: US`，`filings: sec`；`code_ambiguous`、`evidence_entity: ANTHROPIC`）。验证：实体加载测试通过；`ledger_entity("ANT") == "ANTHROPIC"`，"Ant" 不折叠，裸 "ANT" 无股票语境不算提及。
+- [x] 1.2 L1_app 证人、来源配置、治理型观察器保持 `ANTHROPIC`；`config/data/structured.yaml` 的 ANTHROPIC 实体增加别名 ANT 与 `securities: [{symbol: ANT}]`。验证：L1 命题的 `expected_witnesses()` 含 ANTHROPIC、不含 ANT。
+- [x] 1.3 证据账本入口换名（抽取写入、按实体读取与作废、命题维度菜单）。验证：ANT 文件抽出的证据记在 ANTHROPIC 下；按 ANT 查询读到同一批；他人文件里的裸 "Ant" 不归到 Anthropic。
+- [x] 1.4 用同一份数据对比登记 ANT 前后的 L1 三个证据观察器与命题证据簇（规格 `sector/chain-layers`）。验证：差异清单写入 `verification.md`，用户确认。
 
 ## 2. 注册类文件入库（A2）
 

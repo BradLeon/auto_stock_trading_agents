@@ -9,6 +9,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ....config import ledger_entity
+
 
 class PlatformUnstructuredRepository:
     """Expose consumer read contracts without falling through to ``memory.store``.
@@ -86,7 +88,7 @@ class PlatformUnstructuredRepository:
         if not include_superseded:
             sql += " AND superseded_at IS NULL"
         if entity:
-            sql += " AND entity=?"; args.append(entity.upper())
+            sql += " AND entity=?"; args.append(ledger_entity(entity.upper()))
         if metric:
             sql += " AND metric=?"; args.append(metric)
         if since:
@@ -127,7 +129,7 @@ class PlatformUnstructuredRepository:
                 args.append(as_of.isoformat())
         elif not include_superseded:
             sql += " AND superseded_at IS NULL"
-        for column, value in (("entity", entity.upper() if entity else None),
+        for column, value in (("entity", ledger_entity(entity.upper()) if entity else None),
                               ("document_id", document_id)):
             if value:
                 sql += f" AND {column}=?"; args.append(value)
@@ -694,7 +696,7 @@ class PlatformUnstructuredRepository:
                                         at=None) -> int:
         """Retire the previous extraction of one document by one speaker (rows kept)."""
         stamp = (at or datetime.now().astimezone()).isoformat(timespec="seconds")
-        source = (source_entity or "").upper()
+        source = ledger_entity((source_entity or "").upper())
         cur = self._write(
             "UPDATE data_evidence_observations SET superseded_at=? "
             "WHERE document_id=? AND source_entity=? AND superseded_at IS NULL",

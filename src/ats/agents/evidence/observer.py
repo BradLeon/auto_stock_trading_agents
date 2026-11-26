@@ -96,7 +96,10 @@ def concept_menu(symbol: str, sector: str = "ai_hardware") -> tuple[str, set[str
     except Exception as exc:  # noqa: BLE001 - a missing sector config must not block extraction
         log.warning("concept menu unavailable (%s): %s", sector, exc)
         return "", set()
-    sym = symbol.upper()
+    # A claim may declare the company by its ledger name (a witness) or by its ticker (a cross-section member).
+    from ...config import ledger_entity
+
+    names = {symbol.upper(), ledger_entity(symbol.upper())}
     lines, keys = [], set()
     for layer in cfg.layers:
         for claim in layer.claims:
@@ -104,7 +107,7 @@ def concept_menu(symbol: str, sector: str = "ai_hardware") -> tuple[str, set[str
             # a shorter, sharper menu classifies better than the whole sector's.
             speaks = claim.expected_witnesses() | {w.entity.upper() for w in claim.witnesses}
             speaks |= set(claim.entities)
-            if sym not in speaks:
+            if not names & speaks:
                 continue
             for c in claim.concepts:
                 if c.key in keys:
@@ -380,11 +383,17 @@ def extract(symbol: str, document_id: str, text: str, *, source_url: str = "",
             log.info("evidence %s: unknown concept %r -> unmapped", symbol, concept)
             concept = ""
         try:
-            from ...config import canonical_entity
+            from ...config import canonical_entity, ledger_entity
 
+            speaker, subject = symbol.upper(), v.entity.strip().upper()
+            about = canonical_entity(subject)
+            # Rename to the ledger identity only when the model's words resolve to the company: through a name alias
+            # (CLAUDE) or because it is the speaker itself. A bare ambiguous code in someone else's document stays.
+            if about != subject or subject == speaker:
+                about = ledger_entity(about)
             out.append(Observation(
                 document_id=document_id, source_url=source_url,
-                entity=canonical_entity(v.entity.strip().upper()), source_entity=symbol.upper(),
+                entity=about, source_entity=ledger_entity(speaker),
                 metric=v.metric.strip().lower(),
                 concept=concept, period=(v.period or period or "").strip(),
                 observation_type=v.observation_type, stance=v.stance,

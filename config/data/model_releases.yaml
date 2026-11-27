@@ -1,0 +1,122 @@
+# 模型发布登记：各实验室模型的官方发布日期。人工维护，git 留痕。
+# 规格 openspec data/model-release-registry；读取入口 ats.data.model_releases。
+#
+# 规则：
+# - status: confirmed 的记录必须附实验室自己域名上的公告链接（见 official_domains）；
+#   只有媒体报道的写 status: candidate，不参与任何计时，也不作为旗舰。
+# - 某实验室的"当前旗舰" = 已确认、tier 为 general_flagship、发布日期不晚于查询日的最新一条。
+#   没有登记的实验室，评测矩阵里整列显示"旗舰未登记"。
+# - source_aliases 是各评测来源对同一个模型的精确叫法（不做前缀或相似匹配；
+#   末尾的推理档位 max/high/… 会自动识别）。
+# - 更正日期时不要删旧值：改上面的字段，并在 corrections 里追加一条
+#   {corrected_at, reason, previous: {release_date: 旧值}}，按旧时点回放仍返回旧值。
+#
+# 字段：
+# - lab_id: ANTHROPIC
+#   model_id: claude-example-1
+#   display_name: Claude Example 1
+#   tier: general_flagship          # general_flagship | other
+#   release_date: 2026-01-24
+#   announcement_url: https://www.anthropic.com/news/...
+#   status: confirmed               # confirmed | candidate
+#   registered_at: 2026-01-25T09:00:00Z
+#   source_aliases: [claude-example-1]
+version: 1
+
+official_domains:
+  OPENAI: [openai.com]
+  ANTHROPIC: [anthropic.com, claude.com]
+  GOOGLE: [blog.google, deepmind.google, ai.google.dev, developers.googleblog.com, cloud.google.com]
+  XAI: [x.ai]
+  DEEPSEEK: [deepseek.com, github.com/deepseek-ai, huggingface.co/deepseek-ai]
+  MOONSHOT: [moonshot.ai, moonshot.cn, kimi.com, github.com/MoonshotAI, huggingface.co/moonshotai]
+  TENCENT: [tencent.com, github.com/Tencent-Hunyuan, huggingface.co/tencent]
+  ZAI: [z.ai, bigmodel.cn, github.com/zai-org, huggingface.co/zai-org]
+  ALIBABA: [qwen.ai, qwenlm.github.io, alibabacloud.com, github.com/QwenLM, huggingface.co/Qwen]
+
+releases:
+  # 2026-11-27 登记的现任旗舰，用户同日在对话里确认；公告链接与日期逐条在实验室官网核对。
+  - lab_id: OPENAI
+    model_id: gpt-6.2-astra
+    display_name: GPT-6.2 Astra
+    tier: general_flagship
+    release_date: 2026-11-17
+    announcement_url: https://openai.com/index/introducing-gpt-6-2-astra-sol/
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [gpt-6-2-astra]
+  - lab_id: ANTHROPIC
+    model_id: claude-fable-5.2
+    display_name: Claude Fable 5.2
+    tier: general_flagship
+    release_date: 2026-11-09
+    announcement_url: https://www.anthropic.com/claude-fable-and-mythos-5-2
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [claude-fable-5-2]
+  # 日期取全面开放日；10-28 首次公布时只限量开放给网络安全防御方。
+  # 11-18 发布的 Gemini 4 Neon 官方定位在 Carbon 与 Hydrogen 之间，不作旗舰。
+  - lab_id: GOOGLE
+    model_id: gemini-4-carbon
+    display_name: Gemini 4 Carbon
+    tier: general_flagship
+    release_date: 2026-11-10
+    announcement_url: https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-carbon-now-available/
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+  - lab_id: XAI
+    model_id: grok-4.7
+    display_name: Grok 4.7
+    tier: general_flagship
+    release_date: 2026-09-21
+    announcement_url: https://x.ai/news/grok-4-7
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [grok-4-7]
+  # 官网与 API 现行版本；09-10 的初版是另一个版本，成绩不并入。V4.1-Pro 尚未发布。
+  - lab_id: DEEPSEEK
+    model_id: deepseek-v4.1-flash-1017
+    display_name: DeepSeek V4.1 Flash 1017
+    tier: general_flagship
+    release_date: 2026-10-17
+    announcement_url: https://api-docs.deepseek.com/news/news261017/
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [deepseek-v4-1-flash-1017]
+  # 日期按公告论坛帖的 UTC 时间（北京时间为 10-24）。
+  - lab_id: MOONSHOT
+    model_id: kimi-k3.1-pro
+    display_name: Kimi K3.1 Pro
+    tier: general_flagship
+    release_date: 2026-10-23
+    announcement_url: https://www.kimi.com/en/blog/kimi-k3-1-pro
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [kimi-k3-1-pro]
+  - lab_id: TENCENT
+    model_id: hy4
+    display_name: Tencent Hy4
+    tier: general_flagship
+    release_date: 2026-11-04
+    announcement_url: https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [tencent-hy4]
+  # 发布时只向编程套餐订阅用户开放，API 待安全评估。
+  - lab_id: ZAI
+    model_id: glm-5.4
+    display_name: GLM-5.4
+    tier: general_flagship
+    release_date: 2026-11-23
+    announcement_url: https://autoclaw.z.ai/en/blog/model/GLM-5.4/
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z
+    source_aliases: [glm-5-4]
+  - lab_id: ALIBABA
+    model_id: qwen4-max
+    display_name: Qwen4-Max
+    tier: general_flagship
+    release_date: 2026-11-16
+    announcement_url: https://www.alibabacloud.com/en/press-room/alibaba-unveils-qwen4-max
+    status: confirmed
+    registered_at: 2026-11-27T07:31:33Z

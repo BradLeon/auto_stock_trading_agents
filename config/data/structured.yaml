@@ -176,8 +176,10 @@ feature_flags:
     # L1 商业化与原始能力观察器的来源。
     openrouter_rankings: platform
     openrouter_pricing: platform         # 每日模型标价快照，只用于估算花费份额与价格变化
+    epoch_capabilities_index: platform   # Epoch 能力指数周快照，不进百分比评测矩阵
     sacra_public_company_profiles: platform
     tickertrends_public_research: platform
+    artificial_analysis_indices: platform  # AA 官方免费接口周快照；仅内部使用，不供模型任务
     frontier_ai_capability: platform
     frontier_ai_capability_official_lab: platform
   consumers:
@@ -461,6 +463,53 @@ sources:
       requests_per_run: 3
       timeout_seconds: 30
       max_file_bytes: 10485760
+      retry_attempts: 2
+  epoch_capabilities_index:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Epoch AI
+    upstream: Epoch Capabilities Index published model scores
+    adapter: epoch_capabilities_index
+    datasets: [epoch_capabilities_index_models]
+    cadence: weekly
+    retention: query_slice
+    constraints:
+      endpoint: https://epoch.ai/data/eci_scores.csv
+      authentication: none
+      timezone: UTC
+      history: snapshots_from_first_collection
+      license: CC_BY_4.0_attribution_required
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 3
+      timeout_seconds: 30
+      max_file_bytes: 5242880
+      retry_attempts: 2
+  artificial_analysis_indices:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: Artificial Analysis
+    upstream: Artificial Analysis official Data API, free tier language model list
+    adapter: artificial_analysis_indices
+    datasets: [artificial_analysis_model_indices]
+    cadence: weekly
+    retention: query_slice
+    constraints:
+      endpoint: https://artificialanalysis.ai/api/v2/language/models/free
+      authentication: api_key_env_ARTIFICIAL_ANALYSIS_API_KEY
+      timezone: UTC
+      history: snapshots_from_first_collection
+      license: internal_use_only_attribution_required
+      raw_redistribution: forbidden
+      ai_development_or_training_use: forbidden_without_consent
+      on_access_end: purge_raw_data_within_30_days
+      website_scraping: forbidden
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 8
+      requests_per_day_upstream: 100
+      timeout_seconds: 30
+      max_file_bytes: 5242880
       retry_attempts: 2
   frontier_ai_capability:
     catalog_status: current_partial
@@ -936,6 +985,42 @@ datasets:
         max_snapshot_gap_days: 2
         no_price_warning_token_share: 0.20
     acceptance_samples: [OPENROUTER_MODEL:ANTHROPIC:CLAUDE-OPUS-5.5-20260921]
+  epoch_capabilities_index_models:
+    catalog_status: current_partial
+    entities: [EPOCH_MODEL]
+    expected_cadence: weekly
+    primary_sources: [epoch_capabilities_index]
+    fallback_sources: []
+    core_metrics: [ai.epoch.capabilities_index]
+    quality:
+      snapshot_model_identity_unique: true
+      calibration_anchors_fail_closed: {Claude 3.5 Sonnet: 130, GPT-5: 150}
+      min_listed_models: 150
+      release_date_from_listed_date_forbidden: true
+      percent_matrix_membership: excluded
+      methodology_regime: epoch_eci_anchored/v1
+      license: CC_BY_4.0_attribution_required
+    acceptance_samples: [EPOCH_MODEL:CLAUDE-FABLE-5.2]
+  artificial_analysis_model_indices:
+    catalog_status: current_partial
+    entities: [AA_MODEL]
+    expected_cadence: weekly
+    primary_sources: [artificial_analysis_indices]
+    fallback_sources: []
+    core_metrics: [ai.aa.intelligence_index, ai.aa.finance_and_accounting_index, ai.aa.strategy_and_ops_index, ai.aa.legal_index, ai.aa.healthcare_and_medical_index, ai.aa.engineering_index, ai.aa.economics_index, ai.aa.intelligence_index_cost_per_task, ai.aa.intelligence_index_run_cost]
+    quality:
+      snapshot_model_identity_unique: true
+      complete_pagination_required: true
+      index_major_version_fail_closed: 5
+      min_listed_models: 300
+      min_models_with_intelligence_index: 50
+      null_is_not_zero: true
+      release_date_from_listed_date_forbidden: true
+      percent_matrix_membership: excluded
+      model_consumers: none
+      methodology_regime: aa_free_data_api/v2
+      license: internal_use_only_attribution_required
+    acceptance_samples: [AA_MODEL:F0AA413F-E8AE-4FCD-9C48-0E049F4F3128]
   frontier_ai_capability_benchmarks:
     catalog_status: current_partial
     entities: [FRONTIER_MODEL]
@@ -1454,6 +1539,46 @@ metric_definitions:
     {value_type: integer, unit_family: count, cadence: daily, period_basis: utc_day,
      entity_scope: [openrouter_model], required_dimensions: [model_permaslug, author, is_other, is_free_route, reference_date, methodology_regime],
      description: OpenRouter public routed prompt plus completion tokens for the model and UTC date; not global volume or revenue.}
+  ai.epoch.capabilities_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [epoch_model], required_dimensions: [model_name, organization, epoch_listed_date, methodology_regime],
+     description: Epoch Capabilities Index estimate on the collection date; arbitrary scale, not a percent score.}
+  ai.aa.intelligence_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime, index_version],
+     description: "Artificial Analysis Intelligence Index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.finance_and_accounting_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime],
+     description: "Finance and accounting capability index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.strategy_and_ops_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime],
+     description: "Strategy and operations capability index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.legal_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime],
+     description: "Legal capability index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.healthcare_and_medical_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime],
+     description: "Healthcare and medical capability index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.engineering_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime],
+     description: "Engineering capability index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.economics_index:
+    {value_type: number, unit_family: index, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime],
+     description: "Economics capability index on the collection date; 0 to 100 composite, not a percent score."}
+  ai.aa.intelligence_index_cost_per_task:
+    {value_type: number, unit_family: currency, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime, index_version],
+     description: "USD average cost per task of running the Intelligence Index, as published by Artificial Analysis; never derived from token prices."}
+  ai.aa.intelligence_index_run_cost:
+    {value_type: number, unit_family: currency, cadence: weekly, period_basis: snapshot,
+     entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime, index_version],
+     description: "USD total cost of one Intelligence Index run, as published by Artificial Analysis; never derived from token prices."}
   ai.openrouter.price.input:
     {value_type: number, unit_family: currency_per_item, cadence: daily, period_basis: utc_day,
      entity_scope: [openrouter_model], required_dimensions: [model_permaslug, model_id, author, methodology_regime],
@@ -1702,6 +1827,18 @@ provider_mappings:
     vendor_adoption_pct: ai.ramp.vendor_adoption_share
   openrouter_rankings:
     total_tokens: ai.openrouter.total_tokens
+  epoch_capabilities_index:
+    eci: ai.epoch.capabilities_index
+  artificial_analysis_indices:
+    intelligence_index: ai.aa.intelligence_index
+    finance_and_accounting_index: ai.aa.finance_and_accounting_index
+    strategy_and_ops_index: ai.aa.strategy_and_ops_index
+    legal_index: ai.aa.legal_index
+    healthcare_and_medical_index: ai.aa.healthcare_and_medical_index
+    engineering_index: ai.aa.engineering_index
+    economics_index: ai.aa.economics_index
+    intelligence_index_cost_per_task: ai.aa.intelligence_index_cost_per_task
+    intelligence_index_run_cost: ai.aa.intelligence_index_run_cost
   openrouter_pricing:
     input_price: ai.openrouter.price.input
     output_price: ai.openrouter.price.output

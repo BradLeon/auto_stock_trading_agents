@@ -81,6 +81,8 @@
 | `sacra_public_company_profiles` | Sacra 公开公司页<br>`sacra.com/c/openai/`、`sacra.com/c/anthropic/` | 每轮每页**只探测一次**，原始 HTML 存为 constrained snapshot；后续解析/入库/报告离线复用该 artifact。静态 HTML 缺 Revenue 段时允许单次受控 browser snapshot 回退 | 免费、免登录；**明令禁止**付费 API 与 MCP | 每 7 天 | `frontier_ai_labs_revenue_p7d_refresh` |
 | `tickertrends_public_research` | TickerTrends 公开研究文<br>`blog.tickertrends.io/api/v1/posts/anthropic-vs-openai-arr-tracking` | 每周期一次公开 Substack post API；判变依据是准入数值的**语义指纹**而非页面字节（`body_html` 每次重新序列化）。离线路线仍保留冻结 seed `tests/fixtures/.../tickertrends_anthropic_vs_openai_arr_tracking.json` | 免费、免鉴权；**禁止**付费 API 与 MCP | 每 7 天（与 Sacra 同一研究对象，共用发现组） | `frontier_ai_labs_revenue_p7d_refresh`（每 7 天，组 `frontier_ai_labs_revenue`） |
 | `openrouter_rankings` | OpenRouter Rankings Data API<br>`openrouter.ai/api/v1/datasets/rankings-daily` | 文档化的每日 token 数据集；14 天重叠窗口回补；不抓页面、不推 request share | 需免费 bearer key `OPENROUTER_API_KEY`；数据许可 CC BY 4.0 | 上游日更，**我方每 7 天**（2026-09-19 起） | `openrouter_rankings_p7d_ingest`（每 7 天） |
+| `epoch_capabilities_index` | Epoch AI<br>`epoch.ai/data/eci_scores.csv` | 每 7 天下载一次公开 CSV，整份存为当日快照；固定点变动即拒收 | 免费、免鉴权；CC BY 4.0 须署名 | 上游随评测更新，**我方每 7 天** | `epoch_capabilities_index_p7d_ingest` |
+| `artificial_analysis_indices` | Artificial Analysis 官方免费数据接口<br>`artificialanalysis.ai/api/v2/language/models/free` | 每 7 天分页取完整模型列表（现为 4 页），整份存为当日快照；指数换主版本即拒收 | 免费密钥 `ARTIFICIAL_ANALYSIS_API_KEY`（每天 100 次）；仅内部使用、须署名、不得转发原始数据 | 上游随评测更新，**我方每 7 天** | `artificial_analysis_indices_p7d_ingest` |
 | `frontier_ai_capability` | LiveBench、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、OSWorld 2.0、AutomationBench、SciCode、CritPt、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam 的公开 Git/CSV/JSON/HTML | 一轮批量探测 11 条公开路线，再本地解析；Git 记 commit/blob SHA，JSON/HTML 记 ETag/Last-Modified、结构指纹与 payload hash；无条件请求（etag/last_modified/git_sha/payload_sha256） | 免费；AA 付费 API **非必需**；公开结构化页面需双门禁 fail-closed | 事件驱动，**我方每 7 天**（2026-09-19 起，取消热度分级） | `..._model_discovery_p7d`、`..._benchmark_probe_p7d`、`..._official_release_probe_p7d`、`..._full_audit_p7d` |
 | `frontier_ai_capability_official_lab` | OpenAI/Anthropic/Google/xAI/DeepSeek/Moonshot/Tencent/Z.ai/Alibaba 官方发布与 model card | 只发现官方自报身份与分数，**永不覆盖**第三方观察 | 免费 | 事件驱动，**我方每 7 天**（2026-09-19 起） | `..._official_release_probe_p7d` |
 
@@ -231,6 +233,31 @@ L1 观察器不读这个来源；它供 ANT 观测使用（`openrouter_model_pri
 - **必须注意**：`NA` 是显式状态（`not_evaluated` / `pending_publication` / `not_self_reported` / `not_applicable` / `non_comparable` / `source_unavailable` / `withdrawn`），**不得当零分**；不同 task set、harness、grader 或 metric semantic 的分数进事件账本（AutomationBench、OSWorld 2.0、Toolathlon Verified、SpreadsheetBench 2），**不得混入统一矩阵或横向排名**；不同 Lab 的近似版本不能填充精确旗舰列。
 - **权限现实**：Artificial Analysis 付费 API 从未作为前置条件；2026-09-17 实测其 `/api/v2/language/models` 在免费计划下返回 HTTP 403（`requires a Pro subscription`）。公开结构化页面的使用需同时满足 `ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES` 与 `ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED` 两个门禁，任一关闭即 fail-closed；禁止浏览器视觉抓取，禁止绕过登录或付费墙。`fixture=true` 或 synthetic 数据只能用于解析测试，禁止进入 platform。
 - **当前状态**：最近一次探测为 `unreachable`（`no_entitled_or_allowed_capability_slice`），即当轮无合规切片；库内 245 条成绩观察来自公开 Git/JSON 路线，覆盖至 2026-09-18。**这不等于来源没有数据**，也不得把 NA 解释成没有数据。
+
+### 3.7.1 `epoch_capabilities_index` — Epoch 能力指数
+
+L1 观察器不读这个来源；它供 ANT 观测使用（`epoch_capability_index`）。
+
+- 来源是 Epoch AI 的公开文件 `epoch.ai/data/eci_scores.csv`，免鉴权，每 7 天一次。许可 CC BY 4.0，引用时署名"Epoch AI, Epoch Capabilities Index"。
+- 文件给出每个模型当前的指数估计和可信区间。Epoch 会随新评测结果重新拟合，所以每次采集整份存成当日快照；**快照历史从首次采集开始**，读取默认给查询时点能看到的最新快照。
+- 指数标度任意，固定点为 Claude 3.5 Sonnet = 130、GPT-5 = 150。任一固定点缺失或偏移超过 0.05，整次采集按口径变化拒收。
+- **不进 11×9 百分比矩阵，也不参与 A/B 判定和 L1 读数。**
+- 文件里的日期记为 `epoch_listed_date`，不当发布日期；发布日期和旗舰仍只取自 `config/data/model_releases.yaml`。
+- 机构名按固定对照表归到九家实验室（多机构取第一个），其余机构保留原名、不归属。
+- 某模型从文件里消失后，新快照不再列出它。
+
+### 3.7.2 `artificial_analysis_indices` — Artificial Analysis 指数
+
+L1 观察器和任何模型任务都不读这个来源；读取入口 `artificial_analysis_model_indices` 只供本人查看。
+
+- 只走官方免费接口。网站[条款](https://artificialanalysis.ai/terms-of-use)禁止脚本查询和抓取，本来源不请求任何网页。
+- 内容：智能指数、六个行业能力指数（财务会计、战略运营、法律、医疗、工程、经济）、跑完智能指数的每任务成本与总成本（USD）。接口没给的值不记，不当零分。
+- **单项评测分数（含 GDPval-AA、Harvey LAB-AA、APEX-Agents-AA）不在免费档**，需付费订阅；这里不从别处填补。
+- 指数换主版本（现为 5）整次拒收。智能指数与成本带指数版本号；能力指数单独定版，接口不返回版本。
+- 接口里的发布日期记为 `aa_listed_release_date`，不当发布日期。实验室归属按创建者固定编号对照。
+- 同一模型的不同推理档位（名称括号内）是不同行。
+- 数据条款（[Data Platform Terms](https://artificialanalysiscdn.com/legal/ProDataPlatformTerms.pdf) v1.1，2026-08-19）：内部使用包括本人研究与决策；公开引用须署名；未经书面同意不得用数据开发、训练或改进 AI 系统；订阅或访问终止后 30 天内删除原始数据（`purge-source`）。
+- 快照历史从首次采集开始。
 
 ---
 

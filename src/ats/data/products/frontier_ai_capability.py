@@ -16,15 +16,15 @@ import json
 from statistics import stdev
 from typing import Any, Iterable
 
-from ..sources.frontier_ai_capability import (
-    BENCHMARKS, BENCHMARK_METHODS, COHORT_VERSION, DEFAULT_FLAGSHIP_MODEL_IDS,
-    DEFAULT_FLAGSHIP_MODEL_NAMES, LABS,
+from ..model_releases import (
+    UNREGISTERED_LABEL, ModelReleaseRegistry, load_model_releases, release_date_fields,
 )
+from ..sources.frontier_ai_capability import BENCHMARKS, BENCHMARK_METHODS, COHORT_VERSION, LABS
 
 DATASET_ID = "frontier_ai_capability_benchmarks"
 SOURCE_ID = "frontier_ai_capability"
 METRIC_ID = "ai.frontier_capability.score"
-DERIVATION_VERSION = "frontier_ai_raw_capability/v1"
+DERIVATION_VERSION = "frontier_ai_raw_capability/v2"
 CLAIM_VERSION = "v1"
 THRESHOLD_PCT = 50.0
 DELTA_MIN_PP = 2.0
@@ -95,28 +95,41 @@ def _rows(products, *, as_of=None, include_vintages: bool = False) -> list[dict[
                                             accepted_only=True, limit=2_000_000)
 
 
-def _score_record(row: dict[str, Any]) -> dict[str, Any]:
+def _score_record(row: dict[str, Any], registry: ModelReleaseRegistry,
+                  as_of=None) -> dict[str, Any]:
     dims = _dims(row)
     lab_id = str(dims.get("lab_id") or "")
-    model_release_id = str(dims.get("model_release_id") or dims.get("model_id") or "")
-    configured_release_id = DEFAULT_FLAGSHIP_MODEL_IDS.get(lab_id, "")
+    stored_release_id = str(dims.get("model_release_id") or dims.get("model_id") or "")
+    details_slug = str(dims.get("details_url") or "").split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    release = registry.resolve(
+        lab_id, (details_slug, dims.get("model_id"), dims.get("model_name"), stored_release_id),
+        as_of=as_of)
+    flagship = registry.flagship(lab_id, as_of=as_of)
+    is_flagship = release is not None and flagship is not None and release.model_id == flagship.model_id
+    cost = _raw(row).get("cost") or {}
+    # Stored dimensions may still carry the score date as ``release_date`` and an
+    # older flagship flag; neither is read.
     return {
         "observation_id": str(row.get("observation_id") or ""), "artifact_id": str(row.get("artifact_id") or ""),
         "lab_id": lab_id, "lab": str(dims.get("lab_label") or dims.get("lab_id") or ""),
         "model_id": str(dims.get("model_id") or ""), "model_name": str(dims.get("model_name") or dims.get("model_id") or ""),
-        "model_release_id": model_release_id,
-        "model_release_name": (DEFAULT_FLAGSHIP_MODEL_NAMES.get(lab_id, model_release_id)
-                               if model_release_id == configured_release_id else
-                               str(dims.get("model_release_name") or dims.get("model_name") or model_release_id)),
+        "model_release_id": release.model_id if release else stored_release_id,
+        "model_release_name": (release.display_name if release else
+                               str(dims.get("model_release_name") or dims.get("model_name")
+                                   or stored_release_id)),
         "evaluation_variant_id": str(dims.get("evaluation_variant_id") or dims.get("model_id") or ""),
         "model_lineage": str(dims.get("model_lineage") or dims.get("model_id") or ""),
-        "release_date": str(dims.get("release_date") or ""),
+        **release_date_fields(release),
         "available": bool(dims.get("available", True)),
-        "flagship": bool(dims.get("flagship", True)),
-        "flagship_source": str(dims.get("flagship_source") or ""),
+        "flagship": is_flagship,
+        "flagship_source": "release_registry" if is_flagship else "",
         "benchmark_id": str(dims.get("benchmark_id") or ""),
         "benchmark": str(dims.get("benchmark_label") or dims.get("benchmark_id") or ""),
         "score": float(row.get("value") or 0.0), "score_unit": "percent",
+        # Empty when the source publishes no cost; it is never priced from tokens.
+        "cost_value": cost.get("value"), "cost_currency": str(cost.get("currency") or ""),
+        "cost_basis": str(cost.get("basis") or ""),
+        "cost_source_url": str(cost.get("source_url") or ""),
         "method_version": str(dims.get("method_version") or ""),
         "comparability_group": str(dims.get("comparability_group") or ""),
         "harness": str(dims.get("harness") or ""), "grader": str(dims.get("grader") or ""),
@@ -176,42 +189,10 @@ def frontier_diagnostics(matrix: dict[str, Any]) -> dict[str, Any]:
             "research_frontier": "global"}
 
 
-def _model_catalog(records: Iterable[dict[str, Any]], entities: Iterable[dict[str, Any]] = ()) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for record in records:
-        key = (record["lab_id"], record["model_id"])
-        out["%s:%s" % key] = {"lab_id": record["lab_id"], "lab": record["lab"],
-                               "model_id": record["model_id"], "model_name": record["model_name"],
-                               "model_release_id": record.get("model_release_id") or record["model_id"],
-                               "model_release_name": record.get("model_release_name") or record["model_name"],
-                               "model_lineage": record["model_lineage"],
-                               "release_date": record.get("release_date", ""),
-                               "available": bool(record.get("available", True)),
-                               "flagship": bool(record.get("flagship", True)),
-                               "flagship_source": record.get("flagship_source", "")}
-    for entity in entities:
-        if str(entity.get("kind") or "") != "frontier_model":
-            continue
-        try:
-            meta = json.loads(entity.get("metadata_json") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            meta = {}
-        lab = str(meta.get("lab_id") or "")
-        model_id = str(meta.get("model_id") or "")
-        if lab and model_id:
-            out.setdefault(f"{lab}:{model_id}", {"lab_id": lab, "lab": dict(LABS).get(lab, lab),
-                                                   "model_id": model_id,
-                                                   "model_release_id": str(meta.get("model_release_id") or model_id),
-                                                   "model_name": str(meta.get("display_name") or entity.get("canonical_name") or model_id),
-                                                   "model_lineage": str(meta.get("lineage") or model_id),
-                                                   "available": bool(meta.get("available", True)),
-                                                   "flagship": bool(meta.get("flagship", True)),
-                                                   "flagship_source": str(meta.get("flagship_source") or "")})
-    return out
-
-
 def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -> dict[str, Any]:
-    rows = [_score_record(row) for row in _rows(products, as_of=as_of, include_vintages=include_vintages)]
+    registry = load_model_releases()
+    rows = [_score_record(row, registry, as_of)
+            for row in _rows(products, as_of=as_of, include_vintages=include_vintages)]
     # Keep only the latest observation per model/benchmark/method when callers
     # requested all vintages; lineage remains available in candidate_observations.
     latest: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -226,11 +207,6 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
                 priority.get(incumbent.get("source_type", ""), 0), incumbent["known_at"]):
             latest[key] = record
     records = list(latest.values())
-    try:
-        entities = products.structured.entities()
-    except AttributeError:
-        entities = []
-    models = _model_catalog(records, entities)
     coverage_meta: dict[tuple[str, str, str], dict[str, Any]] = {}
     try:
         for item in products.structured.frontier_capability_coverage():
@@ -245,41 +221,24 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
     # A configured nine-lab panel is always rendered even if one source is empty.
     by_lab: dict[str, dict[str, Any]] = {}
     for lab_id, lab_label in LABS:
-        lab_models = [item for item in models.values() if item["lab_id"] == lab_id
-                      and item.get("available", True)]
-        # An official release discovery or explicit override may advance the
-        # active release without a code change. The configured registry is a
-        # truthful fallback when the official-release source has no coverage;
-        # benchmark publication dates never select the flagship by themselves.
-        configured_id = DEFAULT_FLAGSHIP_MODEL_IDS.get(lab_id, "")
+        # The active release is the lab's latest confirmed general flagship in
+        # the release registry; benchmark publication dates never select it.
+        flagship = registry.flagship(lab_id, as_of=as_of)
+        active_release_id = flagship.model_id if flagship else ""
         current = {"lab_id": lab_id, "lab": lab_label,
-                   "model_id": configured_id, "model_release_id": configured_id,
-                   "model_name": DEFAULT_FLAGSHIP_MODEL_NAMES.get(lab_id, configured_id),
-                   "model_lineage": configured_id, "available": True,
-                   "flagship": True, "flagship_source": "configured_cohort"}
-        source_rank = {"official_lab_release": 3, "operator_override": 3,
-                       "official_release": 3, "configured_registry": 2,
-                       "configured_cohort": 1}
-        active_models = [item for item in lab_models if item.get("flagship", False)
-                         and source_rank.get(str(item.get("flagship_source") or ""), 0) > 0]
-        if active_models:
-            representative = max(active_models, key=lambda item: (
-                source_rank.get(str(item.get("flagship_source") or ""), 0),
-                item.get("release_date") or "", item.get("model_release_id") or item["model_id"]))
-            release_id = str(representative.get("model_release_id") or representative["model_id"])
-            current.update(representative)
-            current["model_release_id"] = release_id
-            current["model_id"] = release_id
-            current["model_name"] = (DEFAULT_FLAGSHIP_MODEL_NAMES.get(lab_id, release_id)
-                                     if release_id == configured_id else
-                                     str(representative.get("model_release_name")
-                                         or representative.get("model_name") or release_id))
-        active_release_id = str(current.get("model_release_id") or configured_id)
+                   "model_id": active_release_id, "model_release_id": active_release_id,
+                   "model_name": (flagship.display_name if flagship
+                                  else f"{lab_label}（旗舰未登记）"),
+                   "model_lineage": active_release_id, "available": flagship is not None,
+                   "flagship": flagship is not None,
+                   "flagship_source": "release_registry" if flagship else "unregistered",
+                   **release_date_fields(flagship)}
         cells = []
         for benchmark in BENCHMARKS:
             candidates = [item for item in records
                           if item["lab_id"] == lab_id
                           and item["benchmark_id"] == benchmark
+                          and active_release_id
                           and item.get("model_release_id") == active_release_id]
             # Source class is the first-order selector. Within the same source
             # class, raw capability uses the highest published configuration;
@@ -317,10 +276,11 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
                     release_match = ("latest_evaluated_lab_fallback" if record.get("uniform_matrix", True)
                                      else "latest_evaluated_event_fallback")
             if record is None:
-                metadata = coverage_meta.get((lab_id, current["model_id"], benchmark), {}) if current else {}
+                metadata = coverage_meta.get((lab_id, current["model_id"], benchmark), {})
                 state = str(metadata.get("coverage_state") or "not_evaluated")
-                cells.append({"lab_id": lab_id, "lab": lab_label, "model_id": current["model_id"] if current else "",
-                              "model_name": current["model_name"] if current else "", "benchmark_id": benchmark,
+                cells.append({"lab_id": lab_id, "lab": lab_label, "model_id": current["model_id"],
+                              "na_reason": "" if flagship else "flagship_unregistered",
+                              "model_name": current["model_name"], "benchmark_id": benchmark,
                               "benchmark": BENCHMARK_METHODS[benchmark]["label"], "score": None,
                               "display": "NA", "coverage_state": state if state in NA_STATES else "not_evaluated",
                               "source_type": str(metadata.get("source_type") or ""),
@@ -359,6 +319,14 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
                                                   "ratio": numeric_count / (len(LABS) * len(BENCHMARKS)),
                                                   "states": coverage_counts},
             "candidate_observations": rows,
+            "unregistered_flagship_labs": [lab_id for lab_id, entry in by_lab.items()
+                                           if not entry["model"]["model_release_id"]],
+            # Anything that times from a release date must skip these models.
+            "unregistered_release_models": [
+                {"lab_id": lab_id, "model_release_id": release_id, "reason": UNREGISTERED_LABEL}
+                for lab_id, release_id in sorted({
+                    (row["lab_id"], row["model_release_id"]) for row in rows
+                    if row["release_date_status"] == "unregistered"})],
             "event_observations": [row for row in rows if not row.get("uniform_matrix", True)],
             "rows_hash": _hash(matrix_rows),
             "lineage": {"derivation_version": DERIVATION_VERSION,
@@ -596,7 +564,9 @@ def query_scores(products, *, lab_id: str = "", model_id: str = "", benchmark_id
                  inference_config: str = "", reasoning_effort: str = "", measurement_scope: str = "",
                  include_vintages: bool = True) -> list[dict[str, Any]]:
     """Return immutable score vintages with explicit comparability filters."""
-    rows = [_score_record(row) for row in _rows(products, as_of=as_of, include_vintages=include_vintages)]
+    registry = load_model_releases()
+    rows = [_score_record(row, registry, as_of)
+            for row in _rows(products, as_of=as_of, include_vintages=include_vintages)]
     predicates = (("lab_id", lab_id), ("model_id", model_id), ("benchmark_id", benchmark_id),
                   ("method_version", method_version), ("source_type", source_type),
                   ("comparability_group", comparability_group), ("harness", harness),
@@ -618,7 +588,9 @@ def event_ledger(products, *, benchmark_id: str = "", model_id: str = "", lab_id
     identity.  Consumers may filter a single benchmark/model, but there is no
     aggregate or ranking operation here by design.
     """
-    rows = [_score_record(row) for row in _rows(products, as_of=as_of, include_vintages=include_vintages)]
+    registry = load_model_releases()
+    rows = [_score_record(row, registry, as_of)
+            for row in _rows(products, as_of=as_of, include_vintages=include_vintages)]
     return [row for row in rows
             if row.get("event_only")
             and (not benchmark_id or row.get("benchmark_id") == benchmark_id)

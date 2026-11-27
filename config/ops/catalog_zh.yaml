@@ -36,6 +36,18 @@ jobs:
     source: Anthropic Economic Index 公开数据（Hugging Face 仓库）
     used_by: L1 产业采用观测器 → 层分析 L1
     if_broken: L1 缺"AI 在做哪些工作"的结构读数。发布不定期，长时间"无新数据"属正常。
+  epoch_capabilities_index_p7d_ingest:
+    label: Epoch 能力指数
+    what: 每周记录 Epoch AI 公布的各模型综合能力指数及可信区间。
+    source: Epoch AI 公开数据文件（CC BY 4.0）
+    used_by: 模型领先性判断 → ANT 观测
+    if_broken: 领先性读数停在上一快照。固定点变动会按口径变化拒收，需核对 Epoch 方法说明。
+  artificial_analysis_indices_p7d_ingest:
+    label: Artificial Analysis 指数
+    what: 每周记录各模型的智能指数、六个行业能力指数和跑完智能指数的成本。
+    source: Artificial Analysis 官方免费数据接口（仅内部使用，须署名）
+    used_by: 模型领先性与单任务成本的人工查看；不供模型任务读取
+    if_broken: 指数停在上一快照。401 或 403 检查密钥；指数换主版本会拒收，需核对方法说明。
   openrouter_pricing_p1d_ingest:
     label: OpenRouter 模型标价
     what: 每天记录 OpenRouter 公开模型列表里各模型的输入与输出单价。

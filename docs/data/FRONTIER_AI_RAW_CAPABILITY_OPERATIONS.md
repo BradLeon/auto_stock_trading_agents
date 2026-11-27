@@ -17,6 +17,8 @@
 
 所有原始响应以 artifact 保存，解析结果以 `benchmark_score` observation 追加写入。相同评测身份数值变化产生新 vintage，绝不就地覆盖。公开来源 404/429、网络故障和方法换版只降低本次覆盖或隔离候选，不删除最近有效数据。
 
+2026-11-27 补充：免费计划另有 `/api/v2/language/models/free`，提供综合与能力指数、指数成本和单价（不含单项评测）。它由单独来源 `artificial_analysis_indices` 采集，不进本矩阵，见 [L1 数据源 3.7.2](L1_OBSERVER_DATA_SOURCES.md#372-artificial_analysis_indices--artificial-analysis-指数)。
+
 ## 固定面板与 NA
 
 Labs：OpenAI、Anthropic、Google/Google DeepMind、xAI、DeepSeek、Moonshot/Kimi、Tencent、Z.ai/GLM、Alibaba/Qwen。Benchmark：LiveBench、AutomationBench-AA、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、SciCode、CritPt、OSWorld 2.0、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam。内部 ID `automationbench_aa` 只表示统一 AutomationBench-AA 方法，不代表必须购买 AA API。FrontierMath Erdős、FrontierScience Research、群体智慧和安全对齐本版本明确排除。
@@ -24,6 +26,12 @@ Labs：OpenAI、Anthropic、Google/Google DeepMind、xAI、DeepSeek、Moonshot/K
 报告始终输出 11×9 表格（benchmark 为行、九家旗舰模型为列）。无数值单元格显示 `NA`，底层保留 `not_evaluated`、`pending_publication`、`not_self_reported`、`not_applicable`、`non_comparable`、`source_unavailable` 或 `withdrawn`，不得把 NA 当零分。每家 Lab 的近似版本不能填充精确旗舰列。
 
 AutomationBench、OSWorld 和 SpreadsheetBench 2 的不同 task set、harness、tool setting、grader 或 metric semantic 同时写入事件账本；事件证据可查询、可画图，但不得混入统一矩阵或横向排名。
+
+## 发布日期、旗舰与成本
+
+- 发布日期和现任旗舰只取自 `config/data/model_releases.yaml`（人工维护，须带实验室官方公告链接）。旗舰是该实验室截至查询日最近一次已确认的 `general_flagship`。查不到的模型标"发布日期未登记"；某实验室没有登记时，旗舰列显示"旗舰未登记"，数值单元格为 NA（原因 `flagship_unregistered`）。成绩日期、抓取日期不充当发布日期。
+- 新旗舰发布后要先登记，矩阵才会换列；登记缺失不影响 A/B 判定与事件账本。
+- 来源随成绩公开成本时一起保存（USD，`per_task` 或 `full_evaluation`），来源没给就为空，不用 token 价格估算，估算字段也不采用。
 
 ## A/B 规则
 

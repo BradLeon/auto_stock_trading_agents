@@ -1,0 +1,94 @@
+# Test data only: invented dates and links for the capability tests.
+version: 1
+official_domains:
+  OPENAI: [openai.com]
+  ANTHROPIC: [anthropic.com]
+  GOOGLE: [blog.google]
+  XAI: [x.ai]
+  DEEPSEEK: [deepseek.com]
+  MOONSHOT: [moonshot.ai]
+  TENCENT: [tencent.com]
+  ZAI: [z.ai]
+  ALIBABA: [qwen.ai]
+releases:
+  - lab_id: OPENAI
+    model_id: gpt-6-astra
+    display_name: GPT-6 Astra
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://openai.com/news/gpt-6-astra
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [openai/gpt-6-astra]
+  - lab_id: ANTHROPIC
+    model_id: claude-fable-5.1
+    display_name: Claude Fable 5.1
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://anthropic.com/news/claude-fable-5.1
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [claude-fable-5-1, fable-5.1, anthropic/claude-fable-5-1]
+  - lab_id: GOOGLE
+    model_id: gemini-3.8-flash
+    display_name: Gemini 3.8 Flash
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://blog.google/news/gemini-3.8-flash
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [gemini-3-8-flash, gemini/gemini-3.8-flash]
+  - lab_id: XAI
+    model_id: grok-4.6
+    display_name: Grok 4.6
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://x.ai/news/grok-4.6
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [grok-4-6, xai/grok-4.6]
+  - lab_id: DEEPSEEK
+    model_id: deepseek-v4.1-flash
+    display_name: DeepSeek V4.1 Flash
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://deepseek.com/news/deepseek-v4.1-flash
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [deepseek-v4-1-flash]
+  - lab_id: MOONSHOT
+    model_id: kimi-k3
+    display_name: Kimi K3
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://moonshot.ai/news/kimi-k3
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [kimi-kimi-k3]
+  - lab_id: TENCENT
+    model_id: hy4
+    display_name: Tencent Hy4
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://tencent.com/news/hy4
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [tencent/hy4]
+  - lab_id: ZAI
+    model_id: glm-5.3
+    display_name: GLM-5.3
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://z.ai/news/glm-5.3
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [glm-5-3, anthropic/glm-5.3]
+  - lab_id: ALIBABA
+    model_id: qwen3.8-max
+    display_name: Qwen3.8 Max
+    tier: general_flagship
+    release_date: 2026-09-01
+    announcement_url: https://qwen.ai/news/qwen3.8-max
+    status: confirmed
+    registered_at: 2026-09-02T00:00:00Z
+    source_aliases: [qwen3-8-max, qwen3.8-max-0902]

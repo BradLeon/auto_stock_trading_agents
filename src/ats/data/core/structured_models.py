@@ -298,6 +298,25 @@ class DiscoveryResult(BaseModel):
     _checked_aware = field_validator("checked_at")(_aware)
 
 
+class RevisionRule(BaseModel):
+    """How an adapter says that two readings of one measurement are the same vintage.
+
+    Declared by adapters whose series dimensions or raw payload also carry facts about the fetch itself. Admission
+    compares a record with the latest stored vintage of the same source, entity and metric that agrees on the `match`
+    dimensions (and on the period when `match_period`). When value, quality, publication time, series basis and every
+    dimension and raw key outside the ignore lists are equal, the reading is `unchanged` and nothing is appended.
+    """
+
+    match: list[str]
+    match_period: bool = True
+    ignore_dimensions: list[str] = Field(default_factory=list)
+    ignore_raw: list[str] = Field(default_factory=list)
+    # The `pinned` dimensions are compared after all when either reading's `pin_dimension` holds one of `pin_values`.
+    pin_dimension: str = ""
+    pin_values: list[str] = Field(default_factory=list)
+    pinned: list[str] = Field(default_factory=list)
+
+
 class NativeRecord(BaseModel):
     entity_id: str
     provider_field: str
@@ -314,6 +333,9 @@ class NativeRecord(BaseModel):
     dimensions: dict[str, Any] = Field(default_factory=dict)
     raw: dict[str, Any] = Field(default_factory=dict)
     slice_key: str = ""
+    # An instruction to admission, not part of what the source said: left out of dumps, so identities derived from a
+    # record do not depend on it. None appends a vintage whenever the content differs.
+    revision_rule: RevisionRule | None = Field(default=None, exclude=True)
 
     _event_time_aware = field_validator("event_time")(_aware)
     _published_at_aware = field_validator("published_at")(_aware)

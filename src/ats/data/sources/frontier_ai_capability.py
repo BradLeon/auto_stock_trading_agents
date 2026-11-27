@@ -33,7 +33,7 @@ from urllib.request import ProxyHandler, Request, build_opener, urlopen
 from ..core.structured_models import (
     AdapterArtifact, AdapterBatch, AdapterFailure, DiscoveryResult,
     DiscoveryStatus, FetchRequest, IngestionStatus, NativeRecord,
-    ReferenceEntityInput, ReleaseCandidate,
+    ReferenceEntityInput, ReleaseCandidate, RevisionRule,
 )
 
 SOURCE_ID = "frontier_ai_capability"
@@ -451,6 +451,30 @@ def _date_from_text(value: Any, fallback: str) -> str:
     return fallback
 
 
+def _score_date(value: Any, fetched_date: str) -> dict[str, Any]:
+    """The score date the source states, else the fetch day marked as our own observation."""
+    stated = _date_from_text(value, "")
+    return {"score_as_of": stated or fetched_date, "score_date_observed": not stated}
+
+
+# What the fetch itself contributes to a score's dimensions and raw payload: our fetch day, whichever route named the
+# model first, the transport and links, and a flagship flag that depends on which routes this run read. A change in
+# these alone is not a new reading of the score; any other difference is (see `RevisionRule`).
+REVISION_IGNORED_DIMENSIONS = ("score_as_of", "release_date", "model_name", "flagship", "flagship_source",
+                               "source_transport", "source_url", "details_url")
+REVISION_IGNORED_RAW = ("provider_row", "model", "method", "meta", "source_url")
+# A flagship set by a person or an official release is a decision, so setting or clearing it is a new reading.
+PINNED_FLAGSHIP_SOURCES = ("operator_override", "official_release", "official_lab_release")
+
+
+def _revision_rule(*, date_observed: bool) -> RevisionRule:
+    """A score is one measurement per model and benchmark, and per score date when the source states one."""
+    return RevisionRule(match=["benchmark_id"], match_period=not date_observed,
+                        ignore_dimensions=list(REVISION_IGNORED_DIMENSIONS), ignore_raw=list(REVISION_IGNORED_RAW),
+                        pin_dimension="flagship_source", pin_values=list(PINNED_FLAGSHIP_SOURCES),
+                        pinned=["flagship", "flagship_source"])
+
+
 def _public_model(models: dict[tuple[str, str], dict[str, Any]], *, lab: str,
                   model_id: str, display_name: str, score_date: str,
                   source_url: str, model_release_id: str = "") -> None:
@@ -493,7 +517,7 @@ def _parse_livebench_csv(payload: bytes, *, source_url: str, fetched_date: str) 
         model_id = _clean_model_id(model_text)
         rows.append({"lab_id": lab, "model_id": model_id, "model_name": _display_model(model_text),
                      "benchmark_id": "livebench", "score": round(sum(scores) / len(scores), 4),
-                     "score_as_of": _date_from_text(source_url, fetched_date),
+                     **_score_date(source_url, fetched_date),
                      "source_type": "third_party_evaluation", "measurement_scope": "model_capability_proxy",
                      "source_transport": "official_csv", "source_url": source_url,
                      "sample_size": None, "confidence_low": None, "confidence_high": None,
@@ -524,7 +548,7 @@ def _parse_terminal_submission(obj: dict[str, Any], *, source_url: str, fetched_
     model_id = _clean_model_id((obj.get("source_filter") or {}).get("model_name") or model_name)
     return {"lab_id": lab, "model_id": model_id, "model_name": _display_model(model_name),
             "benchmark_id": benchmark_id, "score": accuracy,
-            "score_as_of": _date_from_text(metadata.get("date") or metadata.get("display_date"), fetched_date),
+            **_score_date(metadata.get("date") or metadata.get("display_date"), fetched_date),
             "source_type": "third_party_evaluation", "measurement_scope": "model_agent_stack_capability",
             "source_transport": source_transport, "source_url": source_url,
             "sample_size": metrics.get("n_trials"),
@@ -584,7 +608,7 @@ def _parse_generic_public_json(payload: bytes, *, source_url: str, fetched_date:
         model_id = _clean_model_id(model_name)
         rows.append({"lab_id": lab, "model_id": model_id, "model_name": _display_model(model_name),
                      "benchmark_id": benchmark_id, "score": score,
-                     "score_as_of": _date_from_text(item.get("date") or item.get("as_of"), fetched_date),
+                     **_score_date(item.get("date") or item.get("as_of"), fetched_date),
                      "source_type": source_type, "measurement_scope": measurement_scope,
                      "source_transport": source_transport, "source_url": source_url,
                      "sample_size": item.get("n_trials") or item.get("trials"),
@@ -641,7 +665,7 @@ def _parse_terminal_bench_science_json(payload: bytes, *, source_url: str,
             "model_name": _display_model(model_name),
             "benchmark_id": "terminal_bench_science_01",
             "score": score,
-            "score_as_of": _date_from_text(metadata.get("model_release_date") or metadata.get("date"), fetched_date),
+            **_score_date(metadata.get("model_release_date") or metadata.get("date"), fetched_date),
             "source_type": "third_party_evaluation",
             "measurement_scope": "model_agent_stack_capability",
             "source_transport": "public_json_nested",
@@ -678,7 +702,7 @@ def _parse_osworld_json(payload: bytes, *, source_url: str, fetched_date: str) -
     if not isinstance(decoded, dict) or not isinstance(decoded.get("results"), list):
         return [], {"record_count": 0, "parser_drift": True, "structured_only": True}
     rows: list[dict[str, Any]] = []
-    updated = _date_from_text(decoded.get("updatedAt"), fetched_date)
+    updated = _score_date(decoded.get("updatedAt"), fetched_date)
     for item in decoded["results"]:
         if not isinstance(item, dict):
             continue
@@ -699,7 +723,7 @@ def _parse_osworld_json(payload: bytes, *, source_url: str, fetched_date: str) -
             "model_name": _display_model(model_name),
             "benchmark_id": "osworld_2",
             "score": score,
-            "score_as_of": updated,
+            **updated,
             "source_type": "third_party_evaluation",
             "measurement_scope": "model_agent_stack_capability",
             "source_transport": "public_json_nested",
@@ -781,7 +805,7 @@ def _parse_aa_dataset_documents(documents: list[Any], *, source_url: str, fetche
                 "model_name": _display_model(model_name),
                 "benchmark_id": benchmark_id,
                 "score": round(score, 6),
-                "score_as_of": fetched_date,
+                **_score_date("", fetched_date),
                 "source_type": "third_party_evaluation",
                 "measurement_scope": measurement_scope,
                 "source_transport": "public_html_jsonld",
@@ -956,7 +980,7 @@ def _parse_aa_flight_models(payload: bytes, *, source_url: str, fetched_date: st
             "model_name": _display_model(model_name),
             "benchmark_id": benchmark_id,
             "score": round(score * 100.0, 6),
-            "score_as_of": fetched_date,
+            **_score_date("", fetched_date),
             "source_type": "third_party_evaluation",
             "measurement_scope": str(BENCHMARK_METHODS[benchmark_id].get(
                 "measurement_scope") or "model_capability_proxy"),
@@ -1113,7 +1137,7 @@ def _parse_toolathlon_page(payload: bytes, *, source_url: str, fetched_date: str
             "model_name": _display_model(model_name),
             "benchmark_id": "toolathlon_verified",
             "score": score,
-            "score_as_of": _date_from_text(item.get("Date"), fetched_date),
+            **_score_date(item.get("Date"), fetched_date),
             "source_type": "third_party_evaluation",
             "measurement_scope": "model_agent_stack_capability",
             "source_transport": "official_html_table",
@@ -1142,7 +1166,7 @@ def _parse_toolathlon_page(payload: bytes, *, source_url: str, fetched_date: str
         if lab and 0 <= score <= 100:
             parsed.append({"lab_id": lab, "model_id": _clean_model_id(model_name),
                            "model_name": model_name, "benchmark_id": "toolathlon_verified",
-                           "score": score, "score_as_of": fetched_date,
+                           "score": score, **_score_date("", fetched_date),
                            "source_type": "third_party_evaluation",
                            "measurement_scope": "model_agent_stack_capability",
                            "source_transport": "official_html", "source_url": source_url,
@@ -1201,7 +1225,7 @@ def _parse_readme_scores(payload: bytes, *, source_url: str, fetched_date: str,
         } else "model_capability_proxy"
         parsed[model_id] = {"lab_id": lab, "model_id": model_id, "model_name": model_name,
                             "benchmark_id": benchmark_id, "score": score,
-                            "score_as_of": _date_from_text(text, fetched_date),
+                            **_score_date(text, fetched_date),
                             "source_type": "third_party_evaluation", "measurement_scope": scope,
                             "source_transport": "git_readme", "source_url": source_url,
                             "method_version": BENCHMARK_METHODS[benchmark_id]["method_version"],
@@ -1289,7 +1313,9 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
         model = model_by_key.get((lab, model_id))
         if model is None:
             raise FrontierCapabilityError(f"model_identity_unresolved:{lab}:{model_id}")
-        period = _date(row.get("score_as_of") or row.get("date"), fallback=fetched_at.date().isoformat())
+        stated_date = row.get("score_as_of") or row.get("date")
+        date_observed = bool(row.get("score_date_observed")) or not stated_date
+        period = _date(stated_date, fallback=fetched_at.date().isoformat())
         method = method_by_id[benchmark]
         method_version = str(row.get("method_version") or method.get("method_version") or "v1")
         group = str(row.get("comparability_group") or method.get("comparability_group") or f"{benchmark}/{method_version}")
@@ -1374,7 +1400,8 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
             entity_id=f"FRONTIER_MODEL:{lab}:{model_id}".upper(), provider_field="benchmark_score",
             period=period, period_start=period, period_end=period, value=value,
             unit="percent", period_basis="benchmark_score_as_of",
-            published_at=_timestamp(row.get("published_at")), dimensions=dims, raw=raw))
+            published_at=_timestamp(row.get("published_at")), dimensions=dims, raw=raw,
+            revision_rule=_revision_rule(date_observed=date_observed)))
     observed_keys = {(r.dimensions.get("lab_id"), r.dimensions.get("model_id"),
                       r.dimensions.get("benchmark_id")) for r in records}
     coverage_hints = []

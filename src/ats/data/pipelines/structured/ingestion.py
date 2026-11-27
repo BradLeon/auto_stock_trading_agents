@@ -19,9 +19,13 @@ from ...core.structured_models import (
     EntityRelationInput,
     ObservationInput,
     QualityStatus,
+    RevisionRule,
     SeriesIdentity,
 )
 from ...stores.structured.repository import SQLiteStructuredRepository
+
+# Written into a vintage's raw payload by admission under a `RevisionRule`; names the vintage it replaced.
+SUPERSEDES_KEY = "supersedes_observation_id"
 
 
 class StructuredAdapter(Protocol):
@@ -40,6 +44,17 @@ class CentralAdmission:
         payload = f"{batch.source_id}|{batch.dataset_id}|" + json.dumps(
             record.model_dump(mode="python"), sort_keys=True, default=str)
         return hashlib.sha1(payload.encode()).hexdigest()[:24]
+
+    def _current_vintage(self, observation: ObservationInput, rule: RevisionRule) -> dict | None:
+        """The latest stored vintage, in whichever series, of the measurement `observation` reads."""
+        series = observation.series.model_dump(mode="json")
+        rows = self.repository.observations(
+            dataset_id=series["dataset_id"], source_id=series["source_id"], entity_id=series["entity_id"],
+            metric_id=series["metric_id"], as_of=observation.known_at, latest_only=False, limit=1_000_000)
+        matching = [row for row in rows
+                    if (not rule.match_period or row["period"] == observation.period)
+                    and all(_row_dimensions(row).get(name) == series["dimensions"].get(name) for name in rule.match)]
+        return max(matching, key=lambda row: (row["known_at"], row["fetched_at"]), default=None)
 
     def admit(self, *, batch: AdapterBatch, request: FetchRequest,
               record: NativeRecord, artifact_id: str, run_id: str,
@@ -150,7 +165,17 @@ class CentralAdmission:
             quality_status=quality, quality={"reason_codes": ["cross_source_conflict"]
                                              if quality == QualityStatus.CONFLICT else []},
             raw=record.raw)
-        vintage = self.repository.save_observation(observation)
+        rule = record.revision_rule
+        current = self._current_vintage(observation, rule) if rule else None
+        if current is not None and _same_reading(current, observation, rule):
+            observation_id, created = current["observation_id"], False
+        else:
+            if current is not None:
+                # A return to an earlier value must be a new vintage, not a content-hash collision with the old one.
+                observation = observation.model_copy(update={
+                    "raw": {**observation.raw, SUPERSEDES_KEY: current["observation_id"]}})
+            vintage = self.repository.save_observation(observation)
+            observation_id, created = vintage.id, vintage.created
         if quality == QualityStatus.CONFLICT:
             for other in conflict_rows:
                 if math.isclose(float(other["value"]), numeric,
@@ -173,8 +198,8 @@ class CentralAdmission:
             currency=record.currency, status="accepted", reason_codes=[],
             artifact_id=artifact_id, raw=record.raw, at=batch.fetched_at)
         return AdmissionResult(candidate_id=candidate_id, status="accepted",
-                               observation_id=vintage.id, metric_id=metric_id,
-                               created=vintage.created)
+                               observation_id=observation_id, metric_id=metric_id,
+                               created=created)
 
 
 def _row_dimensions(row: dict) -> dict:
@@ -193,6 +218,28 @@ def _same_regime(row: dict, record: NativeRecord) -> bool:
     left = str(_row_dimensions(row).get("methodology_regime") or "")
     right = str((record.dimensions or {}).get("methodology_regime") or "")
     return not (left and right and left != right)
+
+
+def _same_reading(row: dict, observation: ObservationInput, rule: RevisionRule) -> bool:
+    """Does `observation` say nothing that the stored vintage `row` does not already say?"""
+    series = observation.series.model_dump(mode="json")
+    published = datetime.fromisoformat(row["published_at"].replace("Z", "+00:00")) if row["published_at"] else None
+    if float(row["value"]) != observation.value or published != observation.published_at \
+            or row["quality_status"] != observation.quality_status.value \
+            or any(row[name] != series[name] for name in ("unit", "currency", "period_basis", "adjustment")):
+        return False
+    stored, new = _row_dimensions(row), series["dimensions"]
+    ignored = set(rule.ignore_dimensions)
+    if rule.pin_dimension and {stored.get(rule.pin_dimension), new.get(rule.pin_dimension)} & set(rule.pin_values):
+        ignored -= set(rule.pinned)
+
+    def kept(values: dict, skip: set[str]) -> str:
+        return json.dumps({key: value for key, value in values.items() if key not in skip},
+                          sort_keys=True, default=str)
+
+    skip_raw = {*rule.ignore_raw, SUPERSEDES_KEY}
+    return kept(stored, ignored) == kept(new, ignored) and \
+        kept(json.loads(row["raw_payload"] or "{}"), skip_raw) == kept(observation.raw, skip_raw)
 
 
 def _is_transport_error(exc: BaseException) -> bool:

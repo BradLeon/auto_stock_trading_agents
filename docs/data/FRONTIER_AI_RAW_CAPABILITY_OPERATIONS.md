@@ -11,9 +11,14 @@
 
 ## 来源与更新
 
-首选 benchmark 维护方/独立第三方的免费公开 Git/CSV/JSON/README/结构化 HTML 结果：LiveBench、AutomationBench-AA、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、SciCode、CritPt、OSWorld 2.0、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2 和 Humanity's Last Exam。Terminal-Bench 4.0 以 Harbor Hub 匿名 `leaderboard-read` JSON 为主源，可取得 model、agent、effort、accuracy、95% CI 与 trial 数；官方 GitHub `leaderboard/submissions/*.json` 只作审计/故障回退。EnterpriseOps-Gym 仅保留历史事件，不在默认矩阵。运行时一次批量探测各来源，再在本地解析；Git 记录 commit/blob SHA，JSON/HTML 记录 ETag/Last-Modified（若有）、结构指纹与 payload hash，README 表格记录 commit、路径和解析范围。Artificial Analysis 仅在明确授权且设置 `ATS_FRONTIER_AI_USE_AA=1` 时作为可选增强源，不是平台前置条件；其无需登录的公开结构化页面也必须同时通过 `ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES` 与 `ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED` 门禁，任一关闭即 fail-closed。官方 Lab release/model card 与 Scale HLE 可作为 `lab_self_reported`/`competitor_reported` 候选，但不会覆盖第三方结果。模型发现、成绩探测每日运行；新模型 0–30 天每日、31–90 天每三日、之后每周；每周执行全量方法/模型审计。
+首选 benchmark 维护方/独立第三方的免费公开 Git/CSV/JSON/README/结构化 HTML 结果：LiveBench、AutomationBench-AA、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、SciCode、CritPt、OSWorld 2.0、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2 和 Humanity's Last Exam。Terminal-Bench 4.0 以 Harbor Hub 匿名 `leaderboard-read` JSON 为主源，可取得 model、agent、effort、accuracy、95% CI 与 trial 数；官方 GitHub `leaderboard/submissions/*.json` 只作审计/故障回退。EnterpriseOps-Gym 仅保留历史事件，不在默认矩阵。运行时一次批量探测各来源，再在本地解析；Git 记录 commit/blob SHA，JSON/HTML 记录 ETag/Last-Modified（若有）、结构指纹与 payload hash，README 表格记录 commit、路径和解析范围。Artificial Analysis 仅在明确授权且设置 `ATS_FRONTIER_AI_USE_AA=1` 时作为可选增强源，不是平台前置条件；其无需登录的公开结构化页面也必须同时通过 `ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES` 与 `ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED` 门禁，任一关闭即 fail-closed。官方 Lab release/model card 与 Scale HLE 可作为 `lab_self_reported`/`competitor_reported` 候选，但不会覆盖第三方结果。模型发现、成绩探测与全量方法/模型审计均每 7 天运行一次（见 `config/data/schedules.yaml`）。
 
 2026-09-17 对部署环境中的 key 做了真实只读权限探测：使用 Artificial Analysis 要求的 `x-api-key` 头访问 `/api/v2/language/models` 返回 HTTP 403，响应为 `Language models list requires a Pro subscription`；错误的 Bearer 头会返回 401。因而 Free 计划不能通过该 API 获取模型/benchmark 明细；这不影响免费公开 benchmark 路线。Free 页面仍可人工查看基础 benchmark、模型比较图和排行榜，但截图或页面抓取不等价于 API/export 权限；生产采集不依赖 AA 页面视觉元素，不绕过登录或付费墙。浏览器/Computer Use 仅用于发现公开端点和人工核验，不作为正式分数来源。
+
+两条路由的特别约定：
+
+- **LiveBench：停在 v1，已停更。** 读取官网固定文件 `https://livebench.ai/v1/table_2026_06_25.csv`（2026-06-25 版）。原先读取的 GitHub 仓库 `LiveBench/new-livebench` 已在 2026-10 删除；livebench.ai 现主推 LiveBench 2.0，方法不同，不得并入本序列。看板绿灯只表示这个文件还取得到，不表示成绩仍在更新；之后发布的模型不会出现在这一行。访问依据（2026-11-27 核查）：robots.txt 全部允许，未找到使用条款页，也没有对数据文件的明示授权；每周几次请求。官方若发布禁止自动访问的条款，应停用该路由。
+- **Toolathlon Verified：只取 2026-06-30（Verified 发布日）及之后的成绩。** 同一页面下方的旧版榜单存档与 Verified 不可比，解析时丢弃；此前已入库的存档行保留在库中，产品读取时过滤。请求必须只声明接受 HTML：该站按 `Accept` 返回内容，偏好纯文本时返回没有表格标记的 Markdown。
 
 所有原始响应以 artifact 保存，解析结果以 `benchmark_score` observation 追加写入。相同评测身份数值变化产生新 vintage，绝不就地覆盖。公开来源 404/429、网络故障和方法换版只降低本次覆盖或隔离候选，不删除最近有效数据。
 
@@ -39,6 +44,14 @@ A 在同一可比组比较 current/previous global frontier；正式确认要求
 
 B 按三级要求递进：（1）多数任务解锁，默认要求 95% 置信下界高于 50%；（2）人类基准跨越；（3）经济可用门槛。后两级只有 benchmark 注册表预先定义阈值、口径和来源时才判断，没有定义即省略。只有点估计超过已定义阈值时为 `provisional_crossing`。LiveBench、AutomationBench-AA、OSWorld Partial 只报告 A；Terminal-Bench、Terminal-Bench-Science、SciCode、CritPt、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam 只有已注册的严格指标才报告 B。结果同时标注 `model_capability_proxy` 或 `model_agent_stack_capability`，两类不得合并。
 
+## 版本与 no_change
+
+写入前，每条成绩与同一来源、模型、benchmark（来源给出成绩日期时再加日期）的最新版本比较；相同则记 `unchanged`、不追加版本，整批相同记 `no_change`。抓取日、模型显示名、发布日期、抓取方式、网址和旗舰标记单独变化不算新版本；分数、随同发布的成本、置信区间、样本数、方法与评测配置、模型发布版本、可用/撤回状态、来源类型、跨来源冲突状态，以及官方发布记录设置的旗舰发生变化才追加。改回旧值也追加新版本。
+
+页面不给成绩日期时（当前为五个 Artificial Analysis 页面），`score_as_of` 是首次看到该分数的日期，分数变化前保持不变。被忽略的字段保留写入该版本时的值；读取时旗舰与发布日期只查模型发布登记，库内旧的旗舰标记和发布日期不读取。每次抓取仍单独归档原始载荷并写准入记录。
+
+发布登记上线前写入的成绩，序列维度里带发布日期；同一成绩之后的新读数（分数修订、补上成本等）会落在另一个序列。最新值读取时，同一来源、模型、benchmark、可比组、同一期间一旦有更晚的新读数，旧序列那一条不再返回；带历史版本的查询仍保留全部。
+
 ## 报告与重放
 
 `ats data ai-raw-capability --format markdown --chart-dir <dir>` 生成中文结论、11×9 矩阵、事件账本、A/B 表格、十一张方法卡和 PNG/CSV/JSON/sidecar。图表和报告共用 `rows_hash`、observation IDs、artifact IDs、cohort/method versions。`frontier_ai_capability` evidence bundle 会写入 snapshot manifest，并把当次矩阵、事件账本、A/B 判定和图表输入作为不可变 derived payload 一并保存；可用 `DataProducts.replay_frontier_ai_capability_snapshot(snapshot_id)` 离线复核。离线复核应使用保存的原始 artifact、数据库和 sidecar；若 hash 不一致，报告为可复现性失败。
@@ -57,4 +70,8 @@ unset ALL_PROXY all_proxy
 
 ## 故障处理
 
-先运行 `ats data frontier-capability-health` 查看最近成功时间、覆盖率和 ingestion history。来源不可用时保持旧值并标记 stale；解析失败、身份不清、值域越界或 breaking method change 进入候选隔离。修复后重新运行 daily probe/full audit；不得通过手工填分、跨方法插值或把 self-report 升级为第三方成绩。
+单条路由失败（HTTP 错误、网络故障、解析漂移、解析出 0 行或门禁关闭）不会连累其他路由：其余路由照常入库，采集 run 记 `partial`，note 写 `route_failed:<benchmark>:<原因>`；刷新账本记 `succeeded`，原因 `partial_route_failed:<benchmark 列表>`；看板与飞书对该任务亮“注意”并列出路由名，同一任务连续两次转“异常”，恢复后推送“已恢复”。网络类故障先在路由内重试一次。全部路由失败时任务记 `failed`。官方 Lab 页面来源（`frontier_ai_capability_official_lab`）的单页错误目前仍只记在原始归档元数据 `route_errors` 里，不改变任务状态。
+
+有意停用一条路由（例如条款不允许自动访问）：把 benchmark ID 写进 `ATS_FRONTIER_AI_DISABLED_BENCHMARKS`（逗号分隔，三个采集任务都生效）。停用的路由不发请求、不算失败，归档元数据记 `disabled`；库内旧成绩保留，矩阵仍显示最后一次取得的值，不再更新。只从 `ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS` 删名不等于停用，仍按失败报告。名单里有未知 ID 时整次采集失败。某个任务选中的路由全部停用时该任务会记失败，应同时在 `config/data/schedules.yaml` 停用该任务。
+
+定位原因：看采集 run 的 note，或原始归档元数据里的 `route_errors` 与 `sources`。随后运行 `ats data frontier-capability-health` 查看最近成功时间、覆盖率和 ingestion history。来源不可用时保持旧值并标记 stale；解析失败、身份不清、值域越界或 breaking method change 进入候选隔离。修复后重新运行 daily probe/full audit；不得通过手工填分、跨方法插值或把 self-report 升级为第三方成绩。

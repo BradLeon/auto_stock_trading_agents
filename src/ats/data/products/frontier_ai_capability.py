@@ -19,7 +19,9 @@ from typing import Any, Iterable
 from ..model_releases import (
     UNREGISTERED_LABEL, ModelReleaseRegistry, load_model_releases, release_date_fields,
 )
-from ..sources.frontier_ai_capability import BENCHMARKS, BENCHMARK_METHODS, COHORT_VERSION, LABS
+from ..sources.frontier_ai_capability import (
+    BENCHMARKS, BENCHMARK_METHODS, COHORT_VERSION, LABS, SERIES_START,
+)
 
 DATASET_ID = "frontier_ai_capability_benchmarks"
 SOURCE_ID = "frontier_ai_capability"
@@ -87,12 +89,47 @@ def _chart_data(matrix: dict[str, Any], a: dict[str, Any], b: dict[str, Any]) ->
     }
 
 
+def _in_series(row: dict[str, Any]) -> bool:
+    """Whether a stored score belongs to its benchmark's current series.
+
+    Scores ingested before the parser applied the same boundary stay in the
+    store; they are excluded here instead of being rewritten.
+    """
+    dims = _dims(row)
+    start = SERIES_START.get(str(dims.get("benchmark_id") or ""))
+    return not start or str(dims.get("score_as_of") or row.get("period") or "") >= start
+
+
+def _without_replaced_series(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop a score from an older series identity once the same measurement has a later reading.
+
+    Scores stored before the release registry carry a ``release_date`` dimension that collection no longer writes. A
+    later reading therefore opens a new series, and "latest per series" alone would keep showing the replaced value.
+    """
+    def measurement(row: dict[str, Any]) -> tuple[str, ...]:
+        dims = _dims(row)
+        return tuple(str(value or "") for value in (
+            row.get("source_id"), row.get("entity_id"), row.get("metric_id"), row.get("period"),
+            dims.get("benchmark_id"), dims.get("comparability_group")))
+
+    newest: dict[tuple[str, ...], str] = {}
+    for row in rows:
+        if "release_date" not in _dims(row):
+            key = measurement(row)
+            newest[key] = max(newest.get(key, ""), str(row.get("known_at") or ""))
+    return [row for row in rows if "release_date" not in _dims(row)
+            or str(row.get("known_at") or "") > newest.get(measurement(row), "")]
+
+
 def _rows(products, *, as_of=None, include_vintages: bool = False) -> list[dict[str, Any]]:
     # Third-party AA scores and official Lab self-reports share one governed
     # dataset but retain distinct source identities for source-priority logic.
-    return products.structured.observations(dataset_id=DATASET_ID, source_id=None,
+    rows = products.structured.observations(dataset_id=DATASET_ID, source_id=None,
                                             as_of=as_of, latest_only=not include_vintages,
                                             accepted_only=True, limit=2_000_000)
+    if not include_vintages:
+        rows = _without_replaced_series(rows)
+    return [row for row in rows if _in_series(row)]
 
 
 def _score_record(row: dict[str, Any], registry: ModelReleaseRegistry,
@@ -129,7 +166,7 @@ def _score_record(row: dict[str, Any], registry: ModelReleaseRegistry,
         # Empty when the source publishes no cost; it is never priced from tokens.
         "cost_value": cost.get("value"), "cost_currency": str(cost.get("currency") or ""),
         "cost_basis": str(cost.get("basis") or ""),
-        "cost_source_url": str(cost.get("source_url") or ""),
+        "cost_source_url": str(dims.get("source_url") or "") if cost else "",
         "method_version": str(dims.get("method_version") or ""),
         "comparability_group": str(dims.get("comparability_group") or ""),
         "harness": str(dims.get("harness") or ""), "grader": str(dims.get("grader") or ""),

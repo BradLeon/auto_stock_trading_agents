@@ -22,7 +22,9 @@ import json
 import math
 import os
 import re
+import time
 from html.parser import HTMLParser
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Callable, Sequence
 from urllib.parse import urlencode
@@ -32,7 +34,7 @@ from urllib.request import ProxyHandler, Request, build_opener, urlopen
 from ..core.structured_models import (
     AdapterArtifact, AdapterBatch, AdapterFailure, DiscoveryResult,
     DiscoveryStatus, FetchRequest, IngestionStatus, NativeRecord,
-    ReferenceEntityInput, ReleaseCandidate,
+    ReferenceEntityInput, ReleaseCandidate, RevisionRule,
 )
 
 SOURCE_ID = "frontier_ai_capability"
@@ -50,13 +52,15 @@ HARBOR_SUPABASE_PUBLISHABLE_KEY = os.environ.get(
     "sb_publishable_Z-vuQbpvpG-PStjbh4yE0Q_e-d3MTIH",
 )
 PUBLIC_ROUTES = {
-    # LiveBench publishes dated CSV snapshots in a public Git repository.  The
-    # date in this default route is replaced by the Git directory probe when
-    # the repository exposes a newer table; operators may pin a URL in env.
+    # LiveBench v1, frozen at its 2026-06-25 release: the maintainer removed the
+    # Git repository this route used to read (October 2026) and livebench.ai now
+    # leads with LiveBench 2.0, a different method that must not extend this
+    # series.  A successful fetch means the table is still served, not that it is
+    # still updated.
     "livebench": {
-        "transport": "git_html_directory",
-        "url": "https://github.com/LiveBench/new-livebench/tree/main/public",
-        "repo": "https://github.com/LiveBench/new-livebench",
+        "transport": "official_csv",
+        "url": "https://livebench.ai/v1/table_2026_06_25.csv",
+        "repo": "https://github.com/LiveBench/LiveBench",
     },
     "terminal_bench_4": {
         # Harbor Hub is the benchmark maintainer's canonical leaderboard.  Its
@@ -101,6 +105,9 @@ PUBLIC_ROUTES = {
         "transport": "official_html",
         "url": "https://toolathlon.xyz/docs/leaderboard",
         "repo": "https://toolathlon.xyz/docs/leaderboard",
+        # The host negotiates content: any preference for plain text returns a
+        # Markdown copy that has none of the table markup the parser reads.
+        "accept": "text/html,application/xhtml+xml",
     },
     "spreadsheetbench_2": {
         # The project page loads this first-party V2 leaderboard JSON directly.
@@ -119,6 +126,13 @@ PARSER_VERSION = "frontier_ai_capability/v1"
 COHORT_VERSION = "frontier_ai_flagship_cohort/v1"
 PUBLIC_REQUEST_BUDGET = 64
 COST_BASES = ("per_task", "full_evaluation")
+# First score date that belongs to a benchmark's current series. Older rows were
+# measured on an earlier definition the maintainer declares not comparable (the
+# Toolathlon page keeps them as an archived leaderboard below the current one).
+SERIES_START = {"toolathlon_verified": "2026-06-30"}
+# Marks a benchmark route that failed inside a run; ``ats.data.refresh`` reads it
+# from the ingestion run note.
+ROUTE_FAILED_PREFIX = "route_failed:"
 
 LABS = (
     ("OPENAI", "OpenAI"), ("ANTHROPIC", "Anthropic"),
@@ -384,6 +398,31 @@ def _date_from_text(value: Any, fallback: str) -> str:
     return fallback
 
 
+def _score_date(value: Any, fetched_date: str) -> dict[str, Any]:
+    """The score date the source states, else the fetch day marked as our own observation."""
+    stated = _date_from_text(value, "")
+    return {"score_as_of": stated or fetched_date, "score_date_observed": not stated}
+
+
+# What the fetch itself contributes to a score's dimensions and raw payload: our fetch day, whichever route named the
+# model first, the transport and links, and a flagship flag that depends on which routes this run read. A change in
+# these alone is not a new reading of the score; any other difference is (see `RevisionRule`).
+REVISION_IGNORED_DIMENSIONS = ("score_as_of", "release_date", "model_name", "flagship", "flagship_source",
+                               "source_transport", "source_url", "details_url")
+REVISION_IGNORED_RAW = ("provider_row", "model", "method", "meta", "source_url")
+# A flagship stated by an official release is part of that record, so setting or clearing it is a new reading.
+# Readers take the current flagship from the model release registry, never from this stored flag.
+PINNED_FLAGSHIP_SOURCES = ("official_release", "official_lab_release")
+
+
+def _revision_rule(*, date_observed: bool) -> RevisionRule:
+    """A score is one measurement per model and benchmark, and per score date when the source states one."""
+    return RevisionRule(match=["benchmark_id"], match_period=not date_observed,
+                        ignore_dimensions=list(REVISION_IGNORED_DIMENSIONS), ignore_raw=list(REVISION_IGNORED_RAW),
+                        pin_dimension="flagship_source", pin_values=list(PINNED_FLAGSHIP_SOURCES),
+                        pinned=["flagship", "flagship_source"])
+
+
 def _public_model(models: dict[tuple[str, str], dict[str, Any]], *, lab: str,
                   model_id: str, display_name: str,
                   source_url: str, model_release_id: str = "") -> None:
@@ -420,9 +459,9 @@ def _parse_livebench_csv(payload: bytes, *, source_url: str, fetched_date: str) 
         model_id = _clean_model_id(model_text)
         rows.append({"lab_id": lab, "model_id": model_id, "model_name": _display_model(model_text),
                      "benchmark_id": "livebench", "score": round(sum(scores) / len(scores), 4),
-                     "score_as_of": _date_from_text(source_url, fetched_date),
+                     **_score_date(source_url, fetched_date),
                      "source_type": "third_party_evaluation", "measurement_scope": "model_capability_proxy",
-                     "source_transport": "git_csv", "source_url": source_url,
+                     "source_transport": "official_csv", "source_url": source_url,
                      "sample_size": None, "confidence_low": None, "confidence_high": None,
                      "method_version": "v1", "task_set": "dated_public_csv"})
     return rows, {"record_count": len(rows), "score_semantics": "mean category accuracy percent"}
@@ -451,7 +490,7 @@ def _parse_terminal_submission(obj: dict[str, Any], *, source_url: str, fetched_
     model_id = _clean_model_id((obj.get("source_filter") or {}).get("model_name") or model_name)
     return {"lab_id": lab, "model_id": model_id, "model_name": _display_model(model_name),
             "benchmark_id": benchmark_id, "score": accuracy,
-            "score_as_of": _date_from_text(metadata.get("date") or metadata.get("display_date"), fetched_date),
+            **_score_date(metadata.get("date") or metadata.get("display_date"), fetched_date),
             "source_type": "third_party_evaluation", "measurement_scope": "model_agent_stack_capability",
             "source_transport": source_transport, "source_url": source_url,
             "sample_size": metrics.get("n_trials"),
@@ -512,7 +551,7 @@ def _parse_generic_public_json(payload: bytes, *, source_url: str, fetched_date:
         model_id = _clean_model_id(model_name)
         rows.append({"lab_id": lab, "model_id": model_id, "model_name": _display_model(model_name),
                      "benchmark_id": benchmark_id, "score": score,
-                     "score_as_of": _date_from_text(item.get("date") or item.get("as_of"), fetched_date),
+                     **_score_date(item.get("date") or item.get("as_of"), fetched_date),
                      "source_type": source_type, "measurement_scope": measurement_scope,
                      "source_transport": source_transport, "source_url": source_url,
                      "sample_size": item.get("n_trials") or item.get("trials"),
@@ -569,7 +608,7 @@ def _parse_terminal_bench_science_json(payload: bytes, *, source_url: str,
             "model_name": _display_model(model_name),
             "benchmark_id": "terminal_bench_science_01",
             "score": score,
-            "score_as_of": _date_from_text(metadata.get("model_release_date") or metadata.get("date"), fetched_date),
+            **_score_date(metadata.get("model_release_date") or metadata.get("date"), fetched_date),
             "source_type": "third_party_evaluation",
             "measurement_scope": "model_agent_stack_capability",
             "source_transport": "public_json_nested",
@@ -607,7 +646,7 @@ def _parse_osworld_json(payload: bytes, *, source_url: str, fetched_date: str) -
     if not isinstance(decoded, dict) or not isinstance(decoded.get("results"), list):
         return [], {"record_count": 0, "parser_drift": True, "structured_only": True}
     rows: list[dict[str, Any]] = []
-    updated = _date_from_text(decoded.get("updatedAt"), fetched_date)
+    updated = _score_date(decoded.get("updatedAt"), fetched_date)
     for item in decoded["results"]:
         if not isinstance(item, dict):
             continue
@@ -628,7 +667,7 @@ def _parse_osworld_json(payload: bytes, *, source_url: str, fetched_date: str) -
             "model_name": _display_model(model_name),
             "benchmark_id": "osworld_2",
             "score": score,
-            "score_as_of": updated,
+            **updated,
             "source_type": "third_party_evaluation",
             "measurement_scope": "model_agent_stack_capability",
             "source_transport": "public_json_nested",
@@ -711,7 +750,7 @@ def _parse_aa_dataset_documents(documents: list[Any], *, source_url: str, fetche
                 "model_name": _display_model(model_name),
                 "benchmark_id": benchmark_id,
                 "score": round(score, 6),
-                "score_as_of": fetched_date,
+                **_score_date("", fetched_date),
                 "source_type": "third_party_evaluation",
                 "measurement_scope": measurement_scope,
                 "source_transport": "public_html_jsonld",
@@ -784,6 +823,25 @@ def _approved_public_html_benchmarks() -> frozenset[str]:
         os.environ.get("ATS_FRONTIER_AI_PUBLIC_HTML_BENCHMARKS", "").split(",")
         if item.strip()
     )
+
+
+def _disabled_benchmarks() -> frozenset[str]:
+    """Benchmark routes the operator has switched off on purpose (comma-separated).
+
+    A disabled route sends no request and is not a failure. A name merely missing
+    from the HTML allowlist still is one, so editing that list cannot stop a route
+    silently. An unknown name raises: after a typo the route would keep running
+    while the operator believes it is off.
+    """
+    names = frozenset(
+        item.strip() for item in
+        os.environ.get("ATS_FRONTIER_AI_DISABLED_BENCHMARKS", "").split(",")
+        if item.strip()
+    )
+    unknown = names - set(BENCHMARKS)
+    if unknown:
+        raise FrontierCapabilityError("unknown_disabled_benchmarks:" + ",".join(sorted(unknown)))
+    return names
 
 
 def _next_flight_chunks(payload: bytes) -> str:
@@ -867,7 +925,7 @@ def _parse_aa_flight_models(payload: bytes, *, source_url: str, fetched_date: st
             "model_name": _display_model(model_name),
             "benchmark_id": benchmark_id,
             "score": round(score * 100.0, 6),
-            "score_as_of": fetched_date,
+            **_score_date("", fetched_date),
             "source_type": "third_party_evaluation",
             "measurement_scope": str(BENCHMARK_METHODS[benchmark_id].get(
                 "measurement_scope") or "model_capability_proxy"),
@@ -980,7 +1038,18 @@ class _ToolathlonTableParser(HTMLParser):
 
 
 def _parse_toolathlon_verified(payload: bytes, *, source_url: str, fetched_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Parse the official Toolathlon Verified table when its HTML is explicit.
+    """Return only the Verified series; the page also carries an archived leaderboard."""
+    rows, metadata = _parse_toolathlon_page(payload, source_url=source_url, fetched_date=fetched_date)
+    start = SERIES_START["toolathlon_verified"]
+    current = [row for row in rows if str(row.get("score_as_of") or fetched_date) >= start]
+    if len(current) != len(rows):
+        metadata = {**metadata, "record_count": len(current), "parser_drift": not current,
+                    "excluded_before_series_start": len(rows) - len(current)}
+    return current, metadata
+
+
+def _parse_toolathlon_page(payload: bytes, *, source_url: str, fetched_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Parse every score on the official Toolathlon page when its HTML is explicit.
 
     The page may expose a JSON script or a Markdown-like table.  Unknown page
     revisions fail closed to zero rows and are represented as coverage rather
@@ -1013,7 +1082,7 @@ def _parse_toolathlon_verified(payload: bytes, *, source_url: str, fetched_date:
             "model_name": _display_model(model_name),
             "benchmark_id": "toolathlon_verified",
             "score": score,
-            "score_as_of": _date_from_text(item.get("Date"), fetched_date),
+            **_score_date(item.get("Date"), fetched_date),
             "source_type": "third_party_evaluation",
             "measurement_scope": "model_agent_stack_capability",
             "source_transport": "official_html_table",
@@ -1042,7 +1111,7 @@ def _parse_toolathlon_verified(payload: bytes, *, source_url: str, fetched_date:
         if lab and 0 <= score <= 100:
             parsed.append({"lab_id": lab, "model_id": _clean_model_id(model_name),
                            "model_name": model_name, "benchmark_id": "toolathlon_verified",
-                           "score": score, "score_as_of": fetched_date,
+                           "score": score, **_score_date("", fetched_date),
                            "source_type": "third_party_evaluation",
                            "measurement_scope": "model_agent_stack_capability",
                            "source_transport": "official_html", "source_url": source_url,
@@ -1101,7 +1170,7 @@ def _parse_readme_scores(payload: bytes, *, source_url: str, fetched_date: str,
         } else "model_capability_proxy"
         parsed[model_id] = {"lab_id": lab, "model_id": model_id, "model_name": model_name,
                             "benchmark_id": benchmark_id, "score": score,
-                            "score_as_of": _date_from_text(text, fetched_date),
+                            **_score_date(text, fetched_date),
                             "source_type": "third_party_evaluation", "measurement_scope": scope,
                             "source_transport": "git_readme", "source_url": source_url,
                             "method_version": BENCHMARK_METHODS[benchmark_id]["method_version"],
@@ -1191,7 +1260,9 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
         model = model_by_key.get((lab, model_id))
         if model is None:
             raise FrontierCapabilityError(f"model_identity_unresolved:{lab}:{model_id}")
-        period = _date(row.get("score_as_of") or row.get("date"), fallback=fetched_at.date().isoformat())
+        stated_date = row.get("score_as_of") or row.get("date")
+        date_observed = bool(row.get("score_date_observed")) or not stated_date
+        period = _date(stated_date, fallback=fetched_at.date().isoformat())
         method = method_by_id[benchmark]
         method_version = str(row.get("method_version") or method.get("method_version") or "v1")
         group = str(row.get("comparability_group") or method.get("comparability_group") or f"{benchmark}/{method_version}")
@@ -1272,15 +1343,18 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
         raw = {"provider_row": row, "model": model, "method": method, "meta": payload.get("meta") or {},
                "source_url": source_url}
         # Cost travels with the score it was published with: same row, same identity.
+        # Its link is the row's ``source_url``; a copy here would vary by route and
+        # make an unchanged cost read as a new vintage.
         cost = row.get("cost") if isinstance(row.get("cost"), dict) else {}
         cost = _published_cost(cost.get("value"), str(cost.get("basis") or ""))
         if cost is not None:
-            raw["cost"] = {**cost, "source_url": dims["source_url"]}
+            raw["cost"] = cost
         records.append(NativeRecord(
             entity_id=f"FRONTIER_MODEL:{lab}:{model_id}".upper(), provider_field="benchmark_score",
             period=period, period_start=period, period_end=period, value=value,
             unit="percent", period_basis="benchmark_score_as_of",
-            published_at=_timestamp(row.get("published_at")), dimensions=dims, raw=raw))
+            published_at=_timestamp(row.get("published_at")), dimensions=dims, raw=raw,
+            revision_rule=_revision_rule(date_observed=date_observed)))
     observed_keys = {(r.dimensions.get("lab_id"), r.dimensions.get("model_id"),
                       r.dimensions.get("benchmark_id")) for r in records}
     coverage_hints = []
@@ -1323,9 +1397,30 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
     return records, entities, diagnostics
 
 
+def route_failures(route_errors: Sequence[Any]) -> list[AdapterFailure]:
+    """One failure per benchmark route, from the loader's ``benchmark:detail`` errors."""
+    first: dict[str, str] = {}
+    for error in route_errors:
+        benchmark, _, detail = str(error).partition(":")
+        first.setdefault(benchmark, detail)
+    failures = []
+    for benchmark, detail in first.items():
+        if detail.startswith(("source_policy_blocked", "terms_or_robots", "public_html_route",
+                              "public_source_access_denied")):
+            status = IngestionStatus.ACCESS_REQUIRED
+        elif detail == "no_rows" or "drift" in detail:
+            status = IngestionStatus.PARSE_FAILED
+        else:
+            status = IngestionStatus.UNREACHABLE
+        failures.append(AdapterFailure(status=status, message=f"{ROUTE_FAILED_PREFIX}{benchmark}:{detail}"))
+    return failures
+
+
 class FrontierAICapabilityAdapter:
     source_id = SOURCE_ID
     dataset_id = DATASET_ID
+    # Pause before the single retry of a transport fault (dropped TLS handshake, timeout).
+    retry_delay_seconds = 2.0
 
     def __init__(self, *, api_key: str | None = None, fixture_path: str | Path | None = None,
                  opener: Callable[..., Any] | None = None, clock: Callable[[], datetime] | None = None,
@@ -1343,26 +1438,31 @@ class FrontierAICapabilityAdapter:
 
     def _read_url(self, url: str, *, headers: dict[str, str] | None = None,
                   method: str = "GET", body: bytes | None = None) -> tuple[bytes, dict[str, str]]:
-        if self.public:
-            if self._public_request_count >= PUBLIC_REQUEST_BUDGET:
-                raise RuntimeError(f"public_source_request_budget_exhausted:{PUBLIC_REQUEST_BUDGET}")
-            self._public_request_count += 1
         request_headers = {"Accept": "application/json,text/plain,text/csv,*/*",
                            "User-Agent": "ATS-EvidenceObserver/1.0 (+public-benchmark-ingestion)"}
         request_headers.update(headers or {})
         request = Request(url, headers=request_headers, data=body, method=method)
-        try:
-            with self.opener(request, timeout=30) as response:
-                raw_headers = {str(k).lower(): str(v) for k, v in response.headers.items()}
-                return response.read(), raw_headers
-        except HTTPError as exc:
-            if exc.code in {401, 403}:
-                raise PermissionError(f"public_source_access_denied:{url}") from exc
-            if exc.code == 429:
-                raise RuntimeError(f"public_source_rate_limited:{url}") from exc
-            raise ConnectionError(f"public_source_http_{exc.code}:{url}") from exc
-        except URLError as exc:
-            raise ConnectionError(f"public_source_unreachable:{url}:{exc.reason}") from exc
+        for final_attempt in (False, True):
+            if self.public:
+                if self._public_request_count >= PUBLIC_REQUEST_BUDGET:
+                    raise RuntimeError(f"public_source_request_budget_exhausted:{PUBLIC_REQUEST_BUDGET}")
+                self._public_request_count += 1
+            try:
+                with self.opener(request, timeout=30) as response:
+                    raw_headers = {str(k).lower(): str(v) for k, v in response.headers.items()}
+                    return response.read(), raw_headers
+            except HTTPError as exc:
+                if exc.code in {401, 403}:
+                    raise PermissionError(f"public_source_access_denied:{url}") from exc
+                if exc.code == 429:
+                    raise RuntimeError(f"public_source_rate_limited:{url}") from exc
+                raise ConnectionError(f"public_source_http_{exc.code}:{url}") from exc
+            except (OSError, HTTPException) as exc:  # URLError, TLS drops, timeouts, cut-off bodies
+                if final_attempt:
+                    reason = getattr(exc, "reason", exc)
+                    raise ConnectionError(f"public_source_unreachable:{url}:{reason}") from exc
+                time.sleep(self.retry_delay_seconds)
+        raise AssertionError("unreachable")
 
     def _public_route(self, benchmark: str) -> dict[str, Any]:
         route = dict(PUBLIC_ROUTES[benchmark])
@@ -1397,7 +1497,11 @@ class FrontierAICapabilityAdapter:
         score_keys: set[tuple[str, str, str, str]] = set()
         sources: list[dict[str, Any]] = []
         route_errors: list[str] = []
+        disabled = _disabled_benchmarks()
         for benchmark in selected_benchmarks:
+            if benchmark in disabled:
+                sources.append({"benchmark_id": benchmark, "status": "disabled"})
+                continue
             route = self._public_route(benchmark)
             url = str(route["url"])
             transport = str(route.get("transport") or "public_json")
@@ -1421,13 +1525,16 @@ class FrontierAICapabilityAdapter:
                             "apikey": HARBOR_SUPABASE_PUBLISHABLE_KEY,
                         },
                     )
+                elif route.get("accept"):
+                    payload, headers = self._read_url(url, headers={"Accept": str(route["accept"])})
                 else:
                     payload, headers = self._read_url(url)
+                route_rows = 0
                 source_url = url
                 candidate_payloads: list[tuple[bytes, str]] = [(payload, url)]
                 # GitHub directory APIs return a list of files. Fetch only
-                # dated LiveBench CSVs and JSON submissions; all data remains
-                # from the public repository and is hash-bound below.
+                # JSON submissions; all data remains from the public repository
+                # and is hash-bound below.
                 try:
                     listing = json.loads(payload.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
@@ -1458,32 +1565,8 @@ class FrontierAICapabilityAdapter:
                         (json.dumps(item, sort_keys=True).encode("utf-8"), url)
                         for item in published_rows if isinstance(item, dict)
                     ]
-                elif benchmark == "livebench" and transport == "git_html_directory":
-                    try:
-                        directory_html = payload.decode("utf-8")
-                    except UnicodeDecodeError as exc:
-                        raise FrontierCapabilityError("livebench_directory_not_utf8") from exc
-                    paths = sorted(set(re.findall(r"public/table_20[0-9_]+\.csv", directory_html)))
-                    if not paths:
-                        raise FrontierCapabilityError("livebench_directory_parser_drift")
-                    child_url = f"https://raw.githubusercontent.com/LiveBench/new-livebench/main/{paths[-1]}"
-                    body, headers = self._read_url(child_url)
-                    candidate_payloads = [(body, child_url)]
-                    source_url = child_url
                 if isinstance(listing, list):
-                    if benchmark == "livebench":
-                        files = [item for item in listing if isinstance(item, dict)
-                                 and re.match(r"table_20\d{2}_\d{2}_\d{2}\.csv$", str(item.get("name", "")))]
-                        files = sorted(files, key=lambda item: str(item.get("name")))
-                        if files:
-                            latest = files[-1]
-                            child_url = str(latest.get("download_url") or "")
-                            if child_url:
-                                body, child_headers = self._read_url(child_url)
-                                candidate_payloads = [(body, child_url)]
-                                headers = child_headers
-                                source_url = child_url
-                    elif benchmark == "terminal_bench_4":
+                    if benchmark == "terminal_bench_4":
                         files = [item for item in listing if isinstance(item, dict)
                                  and str(item.get("name", "")).endswith(".json")]
                         # The directory is the authoritative batch; select all
@@ -1551,6 +1634,7 @@ class FrontierAICapabilityAdapter:
                     else:
                         parsed, parser_meta = _parse_readme_scores(body, source_url=body_url, fetched_date=fetched_date,
                                                                    benchmark_id=benchmark)
+                    route_rows += len(parsed)
                     for row in parsed:
                         lab = row["lab_id"]
                         model_id = row["model_id"]
@@ -1578,11 +1662,19 @@ class FrontierAICapabilityAdapter:
                         source_record["status"] = "parser_drift"
                         route_errors.append(f"{benchmark}:parser_drift")
                     sources.append(source_record)
+                # Not every parser can tell a changed format from an empty one:
+                # a selected route that produced no score at all has failed.
+                if not route_rows and not any(error.startswith(f"{benchmark}:") for error in route_errors):
+                    route_errors.append(f"{benchmark}:no_rows")
+                    sources.append({"benchmark_id": benchmark, "transport": transport,
+                                    "url": source_url, "status": "no_rows"})
             except PermissionError as exc:
                 route_errors.append(f"{benchmark}:{exc}")
                 sources.append({"benchmark_id": benchmark, "transport": transport, "url": url,
                                 "status": "source_policy_blocked", "error": str(exc)})
-            except (ConnectionError, RuntimeError, FrontierCapabilityError) as exc:
+            # ValueError covers FrontierCapabilityError and undecodable bodies, so
+            # one broken route never takes the others down with it.
+            except (ConnectionError, RuntimeError, ValueError, csv.Error) as exc:
                 route_errors.append(f"{benchmark}:{exc}")
                 sources.append({"benchmark_id": benchmark, "transport": transport, "url": url,
                                 "status": "source_unavailable", "error": str(exc)})
@@ -1640,11 +1732,13 @@ class FrontierAICapabilityAdapter:
                 raise FrontierCapabilityError("benchmarks_scope_must_be_string_list")
             payload, source_url, access_path = self._load(benchmarks=requested_benchmarks)
             records, entities, diagnostics = normalize_payload(payload, fetched_at=fetched, source_url=source_url)
+            failures = route_failures(diagnostics.get("route_errors") or [])
             if not records and not entities:
                 return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id,
                                     status=IngestionStatus.NO_COVERAGE, fetched_at=fetched,
                                     failures=[AdapterFailure(status=IngestionStatus.NO_COVERAGE,
-                                                             message="no_entitled_or_allowed_capability_slice")],
+                                                             message="no_entitled_or_allowed_capability_slice"),
+                                              *failures],
                                     provider_metadata={**diagnostics, "access_path": access_path,
                                                        "source_url": source_url})
             digest = diagnostics["payload_sha256"]
@@ -1656,8 +1750,10 @@ class FrontierAICapabilityAdapter:
                                                                       "test_only": access_path == "fixture",
                                                                       "credential_redacted": True,
                                                                       "methodology_url": AA_METHODOLOGY_URL})
-            return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id, status=IngestionStatus.SUCCEEDED,
+            return AdapterBatch(source_id=request.source_id, dataset_id=request.dataset_id,
+                                status=IngestionStatus.PARTIAL if failures else IngestionStatus.SUCCEEDED,
                                 fetched_at=fetched, records=records, artifacts=[artifact], entities=entities,
+                                failures=failures,
                                 provider_metadata={**diagnostics, "access_path": access_path,
                                                    "source_url": source_url, "api_key_configured": bool(self.api_key),
                                                    "methodology_url": AA_METHODOLOGY_URL,
@@ -1684,17 +1780,26 @@ class FrontierAICapabilityAdapter:
                                    status=status, diagnostics={"failures": [f.message for f in batch.failures]})
         latest = max(row.period for row in batch.records)
         identity = str(batch.provider_metadata.get("payload_sha256") or _digest([row.model_dump(mode="json") for row in batch.records]))
-        candidate = ReleaseCandidate(identity=f"FRONTIER_CAPABILITY:{latest}:{identity}", period=latest,
+        identity = f"FRONTIER_CAPABILITY:{latest}:{identity}"
+        if batch.failures:
+            # A release check ingests an identity only once; a partial one must stay
+            # ingestible, or the next check would drop the failure with the skip.
+            identity += f":partial:{checked:%Y%m%dT%H%M%S%f}"
+        candidate = ReleaseCandidate(identity=identity, period=latest,
                                      urls=[str(batch.provider_metadata.get("source_url") or AA_MODELS_URL)],
                                      methodology_fingerprint=COHORT_VERSION,
                                      metadata={"record_count": len(batch.records), "model_count": len(batch.entities)})
-        if str((request.query_scope or {}).get("known_upstream_identity") or "") == candidate.identity:
+        # A failed route is never "no change": PARTIAL keeps the release check from
+        # skipping ingestion, whose run note is where the failure is reported.
+        if not batch.failures and \
+                str((request.query_scope or {}).get("known_upstream_identity") or "") == candidate.identity:
             return DiscoveryResult(source_id=request.source_id, dataset_id=request.dataset_id, checked_at=checked,
                                    status=DiscoveryStatus.NO_CHANGE, latest_upstream_identity=candidate.identity,
                                    latest_available_period=latest, diagnostics={**batch.provider_metadata,
                                                                                 "change_events": []})
         return DiscoveryResult(source_id=request.source_id, dataset_id=request.dataset_id, checked_at=checked,
-                               status=DiscoveryStatus.NEW_RELEASE, latest_upstream_identity=candidate.identity,
+                               status=DiscoveryStatus.PARTIAL if batch.failures else DiscoveryStatus.NEW_RELEASE,
+                               latest_upstream_identity=candidate.identity,
                                latest_available_period=latest, candidates=[candidate], diagnostics={**batch.provider_metadata,
                                                                                                      "change_events": ["score_added_or_revised", "model_directory_checked"]})
 

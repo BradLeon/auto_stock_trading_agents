@@ -76,11 +76,30 @@ def _source_as_of(rows: list[dict[str, Any]]) -> str:
     return max(values, default="")
 
 
+def _latest_per_model_day(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the newest reading of each model's day within one methodology regime.
+
+    A corrected dimension (an author alias, a model name) opens a new series, so the repository's latest-per-series
+    view returns the old and the new reading side by side and every sum would count the day twice.  Regimes stay
+    apart so that mixed regimes are still reported as drift.
+    """
+    latest: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        key = (str(row.get("entity_id")), str(row.get("period")), str(_dims(row).get("methodology_regime", "")))
+        current = latest.get(key)
+        if current is None or (row["known_at"], row["fetched_at"]) > (current["known_at"], current["fetched_at"]):
+            latest[key] = row
+    kept = {row["observation_id"] for row in latest.values()}
+    return [row for row in rows if row["observation_id"] in kept]
+
+
 def _query(products, *, as_of=None, include_vintages: bool = False,
            start_date: str = "", end_date: str = "") -> list[dict[str, Any]]:
     rows = products.structured.observations(
         dataset_id=DATASET_ID, source_id=SOURCE_ID, as_of=as_of,
         latest_only=not include_vintages, accepted_only=True, limit=2_000_000)
+    if not include_vintages:
+        rows = _latest_per_model_day(rows)
     if start_date:
         rows = [row for row in rows if str(row.get("period", ""))[:10] >= start_date[:10]]
     if end_date:

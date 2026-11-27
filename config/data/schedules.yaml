@@ -135,6 +135,21 @@ structured:
         backoff_seconds: [60, 300, 1800]
       freshness_slo_days: 10
       semantics: one dated snapshot of the free model list; a new index major version fails closed
+    getdeploying_gpu_prices_weekly_ingest:
+      enabled: true
+      source: getdeploying_gpu_prices
+      datasets: [gpu_rental_price_weekly]
+      schedule: weekly
+      weekday: tuesday
+      at: "08:10"
+      timezone: UTC
+      command: ats data ingest --source getdeploying_gpu_prices --dataset gpu_rental_price_weekly
+      concurrency: 1
+      retry:
+        attempts: 3
+        backoff_seconds: [60, 300, 1800]
+      freshness_slo_days: 10
+      semantics: one read of the published weekly file; changed weeks become new vintages, the open week may still change
     openrouter_pricing_p1d_ingest:
       enabled: true
       source: openrouter_pricing

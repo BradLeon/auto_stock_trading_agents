@@ -83,6 +83,7 @@
 | `openrouter_rankings` | OpenRouter Rankings Data API<br>`openrouter.ai/api/v1/datasets/rankings-daily` | 文档化的每日 token 数据集；14 天重叠窗口回补；不抓页面、不推 request share | 需免费 bearer key `OPENROUTER_API_KEY`；数据许可 CC BY 4.0 | 上游日更，**我方每 7 天**（2026-09-19 起） | `openrouter_rankings_p7d_ingest`（每 7 天） |
 | `epoch_capabilities_index` | Epoch AI<br>`epoch.ai/data/eci_scores.csv` | 每 7 天下载一次公开 CSV，整份存为当日快照；固定点变动即拒收 | 免费、免鉴权；CC BY 4.0 须署名 | 上游随评测更新，**我方每 7 天** | `epoch_capabilities_index_p7d_ingest` |
 | `artificial_analysis_indices` | Artificial Analysis 官方免费数据接口<br>`artificialanalysis.ai/api/v2/language/models/free` | 每 7 天分页取完整模型列表（现为 4 页），整份存为当日快照；指数换主版本即拒收 | 免费密钥 `ARTIFICIAL_ANALYSIS_API_KEY`（每天 100 次）；仅内部使用、须署名、不得转发原始数据 | 上游随评测更新，**我方每 7 天** | `artificial_analysis_indices_p7d_ingest` |
+| `getdeploying_gpu_prices` | GetDeploying 公开周度数据集<br>`getdeploying.com/dataset/gpu-prices/weekly.csv` | 每周下载一次公开 CSV，整份存档，只入库登记型号的按需行（判读）、现货与 12 个月预订行（旁证）；列变化或型号缺按需行即拒收 | 免费、免鉴权；数据文件 CC BY 4.0 须署名 | 上游日更当周数据，**我方每周二** | `getdeploying_gpu_prices_weekly_ingest` |
 | `frontier_ai_capability` | LiveBench、Terminal-Bench 4.0、Terminal-Bench-Science 0.1、OSWorld 2.0、AutomationBench、SciCode、CritPt、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam 的公开 Git/CSV/JSON/HTML | 一轮批量探测 11 条公开路线，再本地解析；Git 记 commit/blob SHA，JSON/HTML 记 ETag/Last-Modified、结构指纹与 payload hash；无条件请求（etag/last_modified/git_sha/payload_sha256） | 免费；AA 付费 API **非必需**；公开结构化页面需双门禁 fail-closed | 事件驱动，**我方每 7 天**（2026-09-19 起，取消热度分级） | `..._model_discovery_p7d`、`..._benchmark_probe_p7d`、`..._official_release_probe_p7d`、`..._full_audit_p7d` |
 | `frontier_ai_capability_official_lab` | OpenAI/Anthropic/Google/xAI/DeepSeek/Moonshot/Tencent/Z.ai/Alibaba 官方发布与 model card | 只发现官方自报身份与分数，**永不覆盖**第三方观察 | 免费 | 事件驱动，**我方每 7 天**（2026-09-19 起） | `..._official_release_probe_p7d` |
 
@@ -259,6 +260,41 @@ L1 观察器和任何模型任务都不读这个来源；读取入口 `artificia
 - 同一模型的不同推理档位（名称括号内）是不同行。
 - 数据条款（[Data Platform Terms](https://artificialanalysiscdn.com/legal/ProDataPlatformTerms.pdf) v1.1，2026-08-19）：内部使用包括本人研究与决策；公开引用须署名；未经书面同意不得用数据开发、训练或改进 AI 系统；订阅或访问终止后 30 天内删除原始数据（`purge-source`）。
 - 快照历史从首次采集开始。
+
+### 3.7.3 `getdeploying_gpu_prices` — GPU 租赁挂牌价
+
+L1 观察器不读这个来源；它供 ANT 观测使用（`gpu_rental_price`）。2026-11-27 用户选定。
+
+**怎么采**
+
+- 来源是公开数据文件 `getdeploying.com/dataset/gpu-prices/weekly.csv`，免鉴权，每周二 08:10 UTC 一次，只请求这一个文件，不访问网页和付费接口。
+- 数据文件按 CC BY 4.0 发布，引用时署名"GetDeploying GPU price dataset"并附数据页链接。许可只覆盖数据文件；[站点条款](https://getdeploying.com/terms)禁止未经同意抓取站内内容，是否包括定期读取该文件，条款没有写清。
+- 型号名单、旁证形态与趋势门槛写在 `config/data/structured.yaml` 的 `gpu_rental_price_weekly.quality`。入库按需（`on_demand`）、现货（`spot`）、12 个月预订（`reserved_12m`）三种行，各成一条序列，不合并；其他期限和 `CUSTOM` 行不入库。
+
+**三种价的角色**（用户 2026-11-27）
+
+- 按需价是判读用价，覆盖状态只由它决定。
+- 现货价与 12 个月预订价只作旁证：不用于触发趋势规则；某型号没有旁证行不影响入库。
+- 现货在行业里通常指供应商可随时收回的算力，各家条款不同；预订价是当周新签合同的挂牌报价。
+- 三种形态各自取中位数，供应商组成不同，形态之间的价差不是同一批供应商的比价。
+- 来源说明：计入所有未标售罄的挂牌价，含可用性未知或排队的（占多数），未核实能否租到。
+
+**读数是什么**
+
+- 值取 `provider_median_price`：每家供应商先取自家中位数，再取跨供应商中位数，单位美元每 GPU 小时。它是挂牌价，不是成交价。
+- 供应商进出会改变读数，所以每个值旁边保留供应商数。
+- 周以周一标记，当周未结束时会变；变化追加版本，没变化记 `unchanged`。
+- 文件只保留近 53 周，更早的历史靠我方累积。
+
+**趋势与状态**
+
+- 月值取该月各周读数的中位数，只用整月各周都已结束、且至少 3 周有数的月份。
+- 方向需要至少 3 个连续整月；不足时为 `insufficient_history`。
+- 用到的月份里任一周供应商少于 10 家，标 `thin_sample`。
+- 从未采到为 `uncovered`；最新一周早于读取日 21 天以上为 `stale`。这些状态都不代表价格持平。
+- 列缺失、行不完整、日期异常、同型号同形态同周重复、名单内型号缺按需行、文件行数过少，整次拒收。
+- 按需行数值异常也整次拒收。旁证行数值异常只隔离该行并记原因，本次运行记 `partial`；文件保留 53 周，同一坏行会让之后每次运行都记 `partial`，直到它改正或移出文件。
+- 读取结果里按需序列在 `series[]`，旁证在每个型号的 `corroboration.spot`、`corroboration.reserved_12m`，各自带状态。
 
 ---
 

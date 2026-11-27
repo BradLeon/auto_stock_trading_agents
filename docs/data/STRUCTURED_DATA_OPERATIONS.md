@@ -677,6 +677,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `openrouter_pricing` | `current_partial` | `persistent` | `openrouter_model_pricing_daily` |
 | `epoch_capabilities_index` | `current_partial` | `persistent` | `epoch_capabilities_index_models` |
 | `artificial_analysis_indices` | `current_partial` | `persistent` | `artificial_analysis_model_indices` |
+| `getdeploying_gpu_prices` | `current_partial` | `persistent` | `gpu_rental_price_weekly` |
 | `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
 | `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks, frontier_ai_public_model_cards` |
 | `tw_mof_exports` | `current_partial` | `persistent` | `regional_tw_exports` |
@@ -711,6 +712,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `openrouter_model_pricing_daily` | `current_partial` |
 | `epoch_capabilities_index_models` | `current_partial` |
 | `artificial_analysis_model_indices` | `current_partial` |
+| `gpu_rental_price_weekly` | `current_partial` |
 | `frontier_ai_capability_benchmarks` | `current_partial` |
 | `frontier_ai_public_model_cards` | `current_partial` |
 | `sp500_earnings_insight` | `current_partial` |
@@ -737,6 +739,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `openrouter_pricing` | `openrouter_model_pricing_daily` | `current_partial` | `platform` | **每天** 07:45 UTC | concurrency 1；每天 1 次公开模型列表请求，不带任何凭据；只存模型标识与价格字段（每天约 140 KB 原件、约 1 MB 库增长）；漏掉的日子无法补采，`freshness_slo_days: 2`；口径见 [L1 数据源 3.6.1](L1_OBSERVER_DATA_SOURCES.md#361-openrouter_pricing--模型标价与估算花费份额) |
 | `epoch_capabilities_index` | `epoch_capabilities_index_models` | `current_partial` | `platform` | **每 7 天** 07:40 UTC | concurrency 1；每次 1 个公开 CSV（约 32 KB），不带任何凭据；`freshness_slo_days: 10`；CC BY 4.0 须署名；口径见 [L1 数据源 3.7.1](L1_OBSERVER_DATA_SOURCES.md#371-epoch_capabilities_index--epoch-能力指数) |
 | `artificial_analysis_indices` | `artificial_analysis_model_indices` | `current_partial` | `platform` | **每 7 天** 07:50 UTC | concurrency 1；每次分页请求（现为 4 次，上限 8 次；上游每天 100 次）；需 `ARTIFICIAL_ANALYSIS_API_KEY`；`freshness_slo_days: 10`；仅内部使用须署名；口径见 [L1 数据源 3.7.2](L1_OBSERVER_DATA_SOURCES.md#372-artificial_analysis_indices--artificial-analysis-指数) |
+| `getdeploying_gpu_prices` | `gpu_rental_price_weekly` | `current_partial` | `platform` | **每周二** 08:10 UTC | concurrency 1；每次 1 个公开 CSV（约 1.1 MB），不带任何凭据；`freshness_slo_days: 10`；CC BY 4.0 须署名；口径见 [L1 数据源 3.7.3](L1_OBSERVER_DATA_SOURCES.md#373-getdeploying_gpu_prices--gpu-租赁挂牌价) |
 | `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起，取消热度分级） | 每周期优先一次 bulk fetch；4 个 job 07:20/07:25/07:27/07:35 UTC |
 | `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起） | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |
@@ -815,6 +818,34 @@ TrendForce DRAM 的采集、期间标准化与发布应以本手册的 source he
 | SQLite lock | 自动任务是否重叠、分页是否并发、事务大小 | 未有基准就迁移数据库 |
 
 只重跑失败的 source/entity/slice，不要因一个局部失败重新抓取全部来源。
+
+### 模型发布候选（每日采集日报提示时处理）
+
+模型发布登记在 `config/data/model_releases.yaml`。每天保存的 OpenRouter 清单里出现基线日期之后的新型号（范围见该文件的 `discovery`），采集日报会列出，需要人决定：
+
+```bash
+ats data model-release-candidates --format markdown
+```
+
+确认（层级、发布日期、公告链接由你给出；日期以官方公告为准，不照抄上架日；同一型号的其他候选用 `--alias` 并入）：
+
+```bash
+ats data model-release-confirm --candidate openai/<型号> --tier general_flagship --release-date YYYY-MM-DD --url <官方公告链接>
+```
+
+不登记（要重新提出就删掉 `config/data/model_release_dismissed.yaml` 里的条目）：
+
+```bash
+ats data model-release-dismiss --candidate <作者/型号> --note <理由>
+```
+
+清单没有收录的发布手工添加；日期或链接还不确定时加 `--status candidate`，不参与计时：
+
+```bash
+ats data model-release-add --lab ZAI --model <型号> --tier general_flagship --release-date YYYY-MM-DD --url <官方公告链接>
+```
+
+这些命令改的是配置文件，写入后即对读取生效，记得提交 git。确认和手工添加只在 `releases` 末尾追加；更正已登记的日期按文件头部说明手工改并写 `corrections`。
 
 ## 13. 备份、发布和回滚原则
 

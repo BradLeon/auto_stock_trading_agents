@@ -180,6 +180,7 @@ feature_flags:
     sacra_public_company_profiles: platform
     tickertrends_public_research: platform
     artificial_analysis_indices: platform  # AA 官方免费接口周快照；仅内部使用，不供模型任务
+    getdeploying_gpu_prices: platform    # GPU 按需挂牌价周度中位数，每周一次读取公开数据文件
     frontier_ai_capability: platform
     frontier_ai_capability_official_lab: platform
   consumers:
@@ -510,6 +511,30 @@ sources:
       requests_per_day_upstream: 100
       timeout_seconds: 30
       max_file_bytes: 5242880
+      retry_attempts: 2
+  getdeploying_gpu_prices:
+    catalog_status: current_partial
+    persistence: persistent
+    provider: GetDeploying
+    upstream: GetDeploying published weekly GPU price dataset, listed prices across providers
+    adapter: getdeploying_gpu_prices
+    datasets: [gpu_rental_price_weekly]
+    cadence: weekly
+    retention: query_slice
+    constraints:
+      endpoint: https://getdeploying.com/dataset/gpu-prices/weekly.csv
+      authentication: none
+      timezone: UTC
+      history: trailing_53_weeks_then_accumulated
+      license: CC_BY_4.0_attribution_required
+      license_scope: published_dataset_files_only
+      website_and_api_access: forbidden
+      user_approved: 2026-11-27
+    internal_request_budget:
+      concurrency: 1
+      requests_per_run: 3
+      timeout_seconds: 30
+      max_file_bytes: 10485760
       retry_attempts: 2
   frontier_ai_capability:
     catalog_status: current_partial
@@ -1021,6 +1046,32 @@ datasets:
       methodology_regime: aa_free_data_api/v2
       license: internal_use_only_attribution_required
     acceptance_samples: [AA_MODEL:F0AA413F-E8AE-4FCD-9C48-0E049F4F3128]
+  gpu_rental_price_weekly:
+    catalog_status: current_partial
+    entities: [GPU_MODEL]
+    expected_cadence: weekly
+    primary_sources: [getdeploying_gpu_prices]
+    fallback_sources: []
+    core_metrics: [ai.gpu.rental.listed_price]
+    quality:
+      price_positive: true
+      series_identity: gpu_model_and_rental_form
+      # 采集范围与趋势门槛。改型号名单即改采集范围；名单内型号在文件里缺失则整次拒收。
+      gpu_models: [nvidia-h100, nvidia-h200, nvidia-b200, nvidia-b300, nvidia-gb200, nvidia-a100]
+      rental_form: on_demand         # 判读用价：趋势规则与覆盖状态只看它
+      # 只作旁证（用户 2026-11-27）：分开成序列；缺失不拒收，坏行只隔离该行。
+      corroboration_forms: [spot, reserved_12m]
+      min_file_rows: 5000
+      trend:
+        months: 3                    # 至少三个连续整月才给方向
+        min_weeks_per_month: 3
+        thin_sample_providers: 10    # 任一用到的月份供应商少于此数，标记样本偏少
+        stale_after_days: 21         # 最新一周早于读取日超过此天数，标记数据过期
+      listed_price_not_transaction: true
+      cross_source_or_form_merge_forbidden: true
+      methodology_regime: getdeploying_listed_weekly_median/v1
+      license: CC_BY_4.0_attribution_required
+    acceptance_samples: [GPU_MODEL:NVIDIA-H100]
   frontier_ai_capability_benchmarks:
     catalog_status: current_partial
     entities: [FRONTIER_MODEL]
@@ -1579,6 +1630,10 @@ metric_definitions:
     {value_type: number, unit_family: currency, cadence: weekly, period_basis: snapshot,
      entity_scope: [aa_model], required_dimensions: [model_id, creator_id, methodology_regime, index_version],
      description: "USD total cost of one Intelligence Index run, as published by Artificial Analysis; never derived from token prices."}
+  ai.gpu.rental.listed_price:
+    {value_type: number, unit_family: currency_per_item, cadence: weekly, period_basis: calendar_week,
+     entity_scope: [gpu_model], required_dimensions: [gpu_slug, rental_form, methodology_regime],
+     description: Median across providers of each provider's median advertised price in USD per GPU hour for the week, kept apart by rental form (on-demand, spot, 12-month reservation); not an executed rental price.}
   ai.openrouter.price.input:
     {value_type: number, unit_family: currency_per_item, cadence: daily, period_basis: utc_day,
      entity_scope: [openrouter_model], required_dimensions: [model_permaslug, model_id, author, methodology_regime],
@@ -1839,6 +1894,8 @@ provider_mappings:
     economics_index: ai.aa.economics_index
     intelligence_index_cost_per_task: ai.aa.intelligence_index_cost_per_task
     intelligence_index_run_cost: ai.aa.intelligence_index_run_cost
+  getdeploying_gpu_prices:
+    provider_median_price: ai.gpu.rental.listed_price
   openrouter_pricing:
     input_price: ai.openrouter.price.input
     output_price: ai.openrouter.price.output

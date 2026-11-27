@@ -6,6 +6,11 @@
 #   只有媒体报道的写 status: candidate，不参与任何计时，也不作为旗舰。
 # - 某实验室的"当前旗舰" = 已确认、tier 为 general_flagship、发布日期不晚于查询日的最新一条。
 #   没有登记的实验室，评测矩阵里整列显示"旗舰未登记"。
+# - 登记口径（用户 2026-11-27 确认）：
+#   1. 发布日期取任何人都能用的第一天：公开预览算，受邀或限量预览不算。
+#   2. 通用旗舰指当天该实验室公开可用的最高档通用模型；低于仍在售更高档位的新版本不登记。
+#   3. 同一型号从预览转正式版，只登记第一次。
+#   4. 日期按发布时刻的 UTC 日期；拿不到时刻就用官方页面日期。
 # - source_aliases 是各评测来源对同一个模型的精确叫法（不做前缀或相似匹配；
 #   末尾的推理档位 max/high/… 会自动识别）。
 # - 更正日期时不要删旧值：改上面的字段，并在 corrections 里追加一条
@@ -34,6 +39,24 @@ official_domains:
   ZAI: [z.ai, bigmodel.cn, github.com/zai-org, huggingface.co/zai-org]
   ALIBABA: [qwen.ai, qwenlm.github.io, alibabacloud.com, github.com/QwenLM, huggingface.co/Qwen]
 
+# 发布候选（读取入口 ats.data.model_release_discovery）：从每天保存的 OpenRouter 模型清单里找新型号。
+# 这里只声明范围。查看、确认、忽略、手工添加用 `ats data model-release-candidates | -confirm | -dismiss | -add`。
+discovery:
+  # 这一天及以前清单里已有的型号不提候选；更早的发布在下面人工登记。
+  baseline_date: 2026-11-27
+  # 实验室 → 清单里的作者前缀。
+  openrouter_authors:
+    OPENAI: openai
+    ANTHROPIC: anthropic
+    GOOGLE: google
+    XAI: x-ai
+    DEEPSEEK: deepseek
+    MOONSHOT: moonshotai
+    TENCENT: tencent
+    ZAI: z-ai
+    ALIBABA: qwen
+
+# `releases` 必须是文件最后一段：确认命令在文件末尾追加记录。
 releases:
   # 2026-11-27 登记的现任旗舰，用户同日在对话里确认；公告链接与日期逐条在实验室官网核对。
   - lab_id: OPENAI
@@ -120,3 +143,139 @@ releases:
     announcement_url: https://www.alibabacloud.com/en/press-room/alibaba-unveils-qwen4-max
     status: confirmed
     registered_at: 2026-11-27T07:31:33Z
+
+  # ---- 以下为 2026-11-27 补登的历史通用旗舰（任务 11.3），用户同日在对话里按建议确认（"11.3 按建议"）。
+  # 不登记（按规则 2）：Claude Opus 5、Claude Opus 5.5（低于在售的 Fable）、Gemini 3.5 Flash。
+  - {lab_id: OPENAI, model_id: gpt-5.2, display_name: GPT-5.2, tier: general_flagship, release_date: 2025-12-11,
+     announcement_url: "https://openai.com/index/introducing-gpt-5-2/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [gpt-5-2, gpt-5.2-2025-12-11, openai-icon-gpt-5.2]}
+  - {lab_id: OPENAI, model_id: gpt-5.4, display_name: GPT-5.4, tier: general_flagship, release_date: 2026-03-05,
+     announcement_url: "https://openai.com/index/introducing-gpt-5-4/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [gpt-5-4]}
+  - {lab_id: OPENAI, model_id: gpt-5.5, display_name: GPT-5.5, tier: general_flagship, release_date: 2026-04-23,
+     announcement_url: "https://openai.com/index/introducing-gpt-5-5/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [gpt-5-5, openai-icon-gpt-5.5]}
+  # 06-26 的限量预览不算。
+  - {lab_id: OPENAI, model_id: gpt-5.6-sol, display_name: GPT-5.6 Sol, tier: general_flagship, release_date: 2026-07-09,
+     announcement_url: "https://openai.com/index/gpt-5-6/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [gpt-5-6-sol]}
+  # 09-03 公布当天只向限量组织开放；日期取 OpenRouter 上架（可公开调用）的 09-04。
+  - {lab_id: OPENAI, model_id: gpt-6-astra, display_name: GPT-6 Astra, tier: general_flagship, release_date: 2026-09-04,
+     announcement_url: "https://openai.com/index/gpt-6-astra/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z}
+
+  # 比 12 个月窗口早几天，是窗口起点时的现任旗舰。
+  - {lab_id: ANTHROPIC, model_id: claude-opus-4.5, display_name: Claude Opus 4.5, tier: general_flagship,
+     release_date: 2025-11-24, announcement_url: "https://www.anthropic.com/news/claude-opus-4-5", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z,
+     source_aliases: [claude-opus-4-5, claude-claude-opus-4.5, claude-opus-4-5-20251101, claude-opus-4-5-20251101-thinking-64k]}
+  - {lab_id: ANTHROPIC, model_id: claude-opus-4.6, display_name: Claude Opus 4.6, tier: general_flagship,
+     release_date: 2026-02-05, announcement_url: "https://www.anthropic.com/news/claude-opus-4-6", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z,
+     source_aliases: [claude-opus-4-6, claude-claude-opus-4.6, claude-opus-4-6-thinking-auto]}
+  - {lab_id: ANTHROPIC, model_id: claude-opus-4.7, display_name: Claude Opus 4.7, tier: general_flagship,
+     release_date: 2026-04-16, announcement_url: "https://www.anthropic.com/news/claude-opus-4-7", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [claude-opus-4-7, claude-claude-opus-4.7]}
+  - {lab_id: ANTHROPIC, model_id: claude-opus-4.8, display_name: Claude Opus 4.8, tier: general_flagship,
+     release_date: 2026-05-28, announcement_url: "https://www.anthropic.com/news/claude-opus-4-8", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [claude-opus-4-8, claude-claude-opus-4.8, opus-4.8]}
+  # 06-12 暂停访问，07-01 恢复。
+  - {lab_id: ANTHROPIC, model_id: claude-fable-5, display_name: Claude Fable 5, tier: general_flagship,
+     release_date: 2026-06-09, announcement_url: "https://www.anthropic.com/news/claude-fable-5-mythos-5",
+     status: confirmed, registered_at: 2026-11-27T11:27:02Z, source_aliases: [fable-5, claude-fable-5-with-fallback]}
+  # 公告页只写 9 月，日期取 https://support.claude.com/en/articles/12138966-release-notes。
+  - {lab_id: ANTHROPIC, model_id: claude-fable-5.1, display_name: Claude Fable 5.1, tier: general_flagship,
+     release_date: 2026-09-01, announcement_url: "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+     status: confirmed, registered_at: 2026-11-27T11:27:02Z, source_aliases: [claude-fable-5-1, fable-5.1]}
+
+  # 公开预览；比 12 个月窗口早几天。
+  - {lab_id: GOOGLE, model_id: gemini-3-pro, display_name: Gemini 3 Pro, tier: general_flagship,
+     release_date: 2025-11-18, announcement_url: "https://blog.google/products/gemini/gemini-3/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [gemini-3-pro-preview, gemini-gemini-3-pro]}
+  # 公开预览。
+  - {lab_id: GOOGLE, model_id: gemini-3.1-pro, display_name: Gemini 3.1 Pro, tier: general_flagship,
+     release_date: 2026-02-19,
+     announcement_url: "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/",
+     status: confirmed, registered_at: 2026-11-27T11:27:02Z,
+     source_aliases: [gemini-3-1-pro, gemini-3.1-pro-preview, gemini-3-1-pro-preview, gemini-gemini-3.1-pro]}
+  - {lab_id: GOOGLE, model_id: gemini-4-argon, display_name: Gemini 4 Argon, tier: general_flagship,
+     release_date: 2026-10-13,
+     announcement_url: "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-argon/",
+     status: confirmed, registered_at: 2026-11-27T11:27:02Z}
+
+  # Grok 4.5、4.6：x.ai 拒绝自动读取，公告页未读；日期取 OpenRouter、Epoch、AA 三处一致的值。
+  - {lab_id: XAI, model_id: grok-4.5, display_name: Grok 4.5, tier: general_flagship, release_date: 2026-07-08,
+     announcement_url: "https://x.ai/news/grok-4-5", status: confirmed, registered_at: 2026-11-27T11:27:02Z,
+     source_aliases: [grok-4-5]}
+  - {lab_id: XAI, model_id: grok-4.6, display_name: Grok 4.6, tier: general_flagship, release_date: 2026-08-12,
+     announcement_url: "https://x.ai/news/grok-4-6", status: confirmed, registered_at: 2026-11-27T11:27:02Z,
+     source_aliases: [grok-4-6]}
+  # 以下两条留作待定，不计时：没找到官方公告页，来源日期也不一（4.20：Epoch 02-17、OpenRouter 03-31；
+  # 4.3：测试版 04-17，OpenRouter、AA 04-30）。
+  - {lab_id: XAI, model_id: grok-4.20, display_name: Grok 4.20, tier: general_flagship, status: candidate,
+     registered_at: 2026-11-27T11:27:02Z}
+  - {lab_id: XAI, model_id: grok-4.3, display_name: Grok 4.3, tier: general_flagship, status: candidate,
+     registered_at: 2026-11-27T11:27:02Z}
+
+  - {lab_id: DEEPSEEK, model_id: deepseek-v3.2, display_name: DeepSeek V3.2, tier: general_flagship,
+     release_date: 2025-12-01, announcement_url: "https://api-docs.deepseek.com/news/news251201/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [deepseek-deepseek-v3.2-thinking]}
+  # 08-13 正式版（0813）按规则 3 不另登。有来源用本条的型号名列 0813 版成绩，会按本条日期标注。
+  - {lab_id: DEEPSEEK, model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro（预览）, tier: general_flagship,
+     release_date: 2026-04-24, announcement_url: "https://api-docs.deepseek.com/news/news260424/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [deepseek-deepseek-v4-pro]}
+  # V4 Pro 当时仍在售；用户 2026-11-27 判定按旗舰登记（与现任 1017 版口径一致）。
+  - {lab_id: DEEPSEEK, model_id: deepseek-v4.1-flash, display_name: DeepSeek V4.1 Flash, tier: general_flagship,
+     release_date: 2026-09-10, announcement_url: "https://api-docs.deepseek.com/news/news260910/", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [deepseek-v4-1-flash]}
+
+  - {lab_id: MOONSHOT, model_id: kimi-k2.5, display_name: Kimi K2.5, tier: general_flagship, release_date: 2026-01-27,
+     announcement_url: "https://www.kimi.com/en/blog/kimi-k2-5", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [kimi-k2-5, kimi-kimi-k2.5]}
+  - {lab_id: MOONSHOT, model_id: kimi-k2.6, display_name: Kimi K2.6, tier: general_flagship, release_date: 2026-04-20,
+     announcement_url: "https://www.kimi.com/en/blog/kimi-k2-6", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [kimi-k2-6, kimi-k2.6-thinking, kimi-kimi-k2.6]}
+  - {lab_id: MOONSHOT, model_id: kimi-k3, display_name: Kimi K3, tier: general_flagship, release_date: 2026-07-16,
+     announcement_url: "https://www.kimi.com/en/blog/kimi-k3", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [kimi-kimi-k3]}
+
+  # 07-06 正式版按规则 3 不另登。
+  - {lab_id: TENCENT, model_id: hy3, display_name: Tencent Hy3, tier: general_flagship, release_date: 2026-04-24,
+     announcement_url: "https://www.tencent.com/tencent-unveils-hy3-preview-model-enhances-agent-capabilities-and-real-world-usability/",
+     status: confirmed, registered_at: 2026-11-27T11:27:02Z, source_aliases: [hy3-preview]}
+
+  - {lab_id: ZAI, model_id: glm-4.7, display_name: GLM-4.7, tier: general_flagship, release_date: 2025-12-22,
+     announcement_url: "https://docs.z.ai/guides/llm/glm-4.7", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [glm-4-7, chatglm-glm-4.7]}
+  # 官方发布说明（docs.z.ai/release-notes/new-released）记 02-12；OpenRouter（02-11 16:59 UTC 上架）、Epoch、AA
+  # 记 02-11。用户 2026-11-27 判定按规则 4 取 02-11。
+  - {lab_id: ZAI, model_id: glm-5, display_name: GLM-5, tier: general_flagship, release_date: 2026-02-11,
+     announcement_url: "https://docs.z.ai/guides/llm/glm-5", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [chatglm-glm-5]}
+  - {lab_id: ZAI, model_id: glm-5.1, display_name: GLM-5.1, tier: general_flagship, release_date: 2026-04-07,
+     announcement_url: "https://docs.z.ai/guides/llm/glm-5.1", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [glm-5-1, chatglm-glm-5.1]}
+  - {lab_id: ZAI, model_id: glm-5.2, display_name: GLM-5.2, tier: general_flagship, release_date: 2026-06-16,
+     announcement_url: "https://docs.z.ai/guides/llm/glm-5.2.md", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [glm-5-2, z.ai-glm-5.2]}
+  - {lab_id: ZAI, model_id: glm-5.3, display_name: GLM-5.3, tier: general_flagship, release_date: 2026-08-18,
+     announcement_url: "https://docs.z.ai/guides/llm/glm-5.3.md", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [glm-5-3]}
+
+  - {lab_id: ALIBABA, model_id: qwen3.5, display_name: Qwen3.5, tier: general_flagship, release_date: 2026-02-16,
+     announcement_url: "https://qwen.ai/blog?id=qwen3.5", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [qwen3.5-397b-a17b, qwen-qwen3.5-397b-a17b]}
+  - {lab_id: ALIBABA, model_id: qwen3.6-plus, display_name: Qwen3.6-Plus, tier: general_flagship,
+     release_date: 2026-04-02, announcement_url: "https://qwen.ai/blog?id=qwen3.6", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [qwen3-6-plus, qwen-qwen3.6-plus]}
+  - {lab_id: ALIBABA, model_id: qwen3.7-max, display_name: Qwen3.7-Max, tier: general_flagship,
+     release_date: 2026-05-20, announcement_url: "https://qwen.ai/blog?id=qwen3.7", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [qwen3-7-max]}
+  # 09-02 的 0902 版未另登。有来源用本条的型号名列 0902 版成绩，会按本条日期标注。
+  - {lab_id: ALIBABA, model_id: qwen3.8-max, display_name: Qwen3.8-Max, tier: general_flagship,
+     release_date: 2026-08-03, announcement_url: "https://qwen.ai/blog?id=qwen3.8", status: confirmed,
+     registered_at: 2026-11-27T11:27:02Z, source_aliases: [qwen3-8-max, qwen3-8-max-0803]}
+  # 待定，不计时：日期三处不一（AA 04-20、百炼清单 04-14、此前所见约 04-18），公告页未在浏览器核实。
+  - {lab_id: ALIBABA, model_id: qwen3.6-max-preview, display_name: Qwen3.6-Max-Preview, tier: general_flagship,
+     announcement_url: "https://qwen.ai/blog?id=qwen3.6-max-preview", status: candidate,
+     registered_at: 2026-11-27T11:27:02Z}

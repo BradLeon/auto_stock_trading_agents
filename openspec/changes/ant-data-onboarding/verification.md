@@ -550,3 +550,250 @@ CIK 2130357。结果 succeeded：入库 4 份，首版 S-1 因本地已有而跳
 `tests/test_model_releases.py` 覆盖"发布日期不等于成绩日期"、"候选不能用于计时"、"更正后按旧时点回放"。相关 17 个测试文件（含文档一致性）238 项通过；新文件 ruff 无报错。
 
 接入 Epoch 后复跑：与两部分改动直接相关的 20 个测试文件 292 项通过。其余读取这些配置的 29 个文件 465 项通过、3 项跳过、5 项失败（`test_factset_earnings_insight.py` 4 项、`test_anthropic_consumer_boundaries.py` 1 项）；导出改动前的提交单独运行，这 5 项同样失败。
+
+## 第 11 组：模型发布登记（11.2、11.3，2026-11-27 调研，未改代码、未写登记、未勾选）
+
+### 11.2 只靠信息简报能否发现模型发布（生产库只读）
+
+- 事件成分从 11-24 起才有，11-24 至 11-26 共 398 条，其中 24 条点名某家实验室，没有一条是模型发布。
+- 11-07 以来的简报没有提到任何一家的现任旗舰。11-01 以来入库文档（761 份）和候选标题（4417 条）里也没有出现这些型号名。
+- 同时含实验室名和发布类词的 21 条标题里，只有 1 条是模型发布（11-09，Anthropic 升级 Fable、Mythos，来源 `ibkr_news`）。
+- 推测原因：简报按持仓标的生成，实验室发布只有影响到某只股票才进简报；成分技能要求例行产品消息不出成分。
+- 结论：按现规格只从简报提候选，几乎不会产生候选。
+
+另一个现成来源：每天已采集的 OpenRouter 模型清单（带上架时间）。读 11-27 保存的清单，近 60 天九家实验室新上架 41 条，合并批量与 pro 变体后约 20 个型号。登记的现任旗舰里有 8 个发布日落在该窗口，其中 7 个已上架且上架日期与登记日期一致，缺 GLM-5.4（只向编程套餐开放）。xAI 现任旗舰发布早于窗口，本次没有核对。
+
+| 方案 | 做法 | 模型费用与提示词 | 漏报 | 规格 |
+| --- | --- | --- | --- | --- |
+| 甲（建议） | 用 OpenRouter 新上架型号生成候选，你确认时补官方链接与日期 | 无费用，不动提示词 | 不上 OpenRouter 或晚上架的（本次 GLM-5.4） | 需改"简报提出候选"一条 |
+| 乙 | 甲 + 简报评级请求里加"是否模型发布"字段 | 不增加请求数，改动已验收的提示词 | 同甲，简报补充很少 | 保留原条并加来源 |
+| 丙 | 只按原规格从简报提候选 | 同乙 | 按实测几乎全部漏掉 | 不改 |
+
+三种方案都要建候选队列和确认命令。OpenRouter 上架日只作线索，发布日期仍以官方公告为准。
+
+### 11.3 近 12 个月通用旗舰发布（待你确认）
+
+拟用的登记规则：
+
+1. 日期取任何人都能用的第一天：公开预览算，受邀或限量预览不算（沿用 Gemini 4 Carbon 记 11-10 的做法）。
+2. 通用旗舰指当天该实验室公开可用的最高档通用模型；低于仍在售更高档位的新版本不登记。
+3. 同一型号从公开预览转正式版，只登记第一次。
+
+下表为拟登记项（不含已登记的九个现任旗舰）。xAI 官网拒绝自动读取，相关日期来自搜索结果。
+
+| 实验室 | 型号 | 发布日期 | 官方链接 | 需要你看的点 |
+| --- | --- | --- | --- | --- |
+| OpenAI | GPT-5.2 | 2025-12-11 | https://openai.com/index/introducing-gpt-5-2/ | |
+| OpenAI | GPT-5.4 | 03-05 | https://openai.com/index/introducing-gpt-5-4/ | |
+| OpenAI | GPT-5.5 | 04-23 | https://openai.com/index/introducing-gpt-5-5/ | API 04-24 |
+| OpenAI | GPT-5.6 Sol | 07-09 | https://openai.com/index/gpt-5-6/ | 06-26 限量预览不算 |
+| OpenAI | GPT-6 Astra | 09-03 | https://openai.com/index/gpt-6-astra/ | 页面不印日期（取 RSS）；当天只向限量组织开放，随后几天放开，确切放开日未从官方页确认 |
+| Anthropic | Claude Opus 4.6 | 02-05 | https://www.anthropic.com/news/claude-opus-4-6 | |
+| Anthropic | Claude Opus 4.7 | 04-16 | https://www.anthropic.com/news/claude-opus-4-7 | 公告称低于限量开放的 Mythos Preview |
+| Anthropic | Claude Opus 4.8 | 05-28 | https://www.anthropic.com/news/claude-opus-4-8 | |
+| Anthropic | Claude Fable 5 | 06-09 | https://www.anthropic.com/news/claude-fable-5-mythos-5 | 06-12 暂停访问，07-01 恢复 |
+| Anthropic | Claude Fable 5.1 | 09-01 | https://www.anthropic.com/claude-fable-and-mythos-5-1 | 公告页只写 9 月，日期取 https://support.claude.com/en/articles/12138966-release-notes |
+| Google | Gemini 3.1 Pro | 02-19 | https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/ | 公开预览 |
+| Google | Gemini 4 Argon | 10-13 | https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-argon/ | |
+| DeepSeek | V3.2 | 2025-12-01 | https://api-docs.deepseek.com/news/news251201/ | |
+| DeepSeek | V4 Pro（预览） | 04-24 | https://api-docs.deepseek.com/news/news260424/ | 08-13 正式版按规则 3 不另登 |
+| DeepSeek | V4.1 Flash | 09-10 | https://api-docs.deepseek.com/news/news260910/ | Flash 线；与现任 1017 版按旗舰登记的做法一致 |
+| Moonshot | Kimi K2.5 | 01-27 | https://www.kimi.com/en/blog/kimi-k2-5 | |
+| Moonshot | Kimi K2.6 | 04-20 | https://www.kimi.com/en/blog/kimi-k2-6 | |
+| Moonshot | Kimi K3 | 07-16 | https://www.kimi.com/en/blog/kimi-k3 | |
+| 腾讯 | Hy3（预览） | 04-24 | https://www.tencent.com/tencent-unveils-hy3-preview-model-enhances-agent-capabilities-and-real-world-usability/ | 07-06 正式版按规则 3 不另登 |
+| 智谱 | GLM-4.7 | 2025-12-22 | https://docs.z.ai/guides/llm/glm-4.7 | |
+| 智谱 | GLM-5 | 02-12 | https://docs.z.ai/guides/llm/glm-5 | |
+| 智谱 | GLM-5.1 | 04-07 | https://docs.z.ai/guides/llm/glm-5.1 | |
+| 智谱 | GLM-5.2 | 06-16 | https://docs.z.ai/guides/llm/glm-5.2.md | |
+| 智谱 | GLM-5.3 | 08-18 | https://docs.z.ai/guides/llm/glm-5.3.md | Epoch 记 08-14 |
+| 阿里 | Qwen3.5 | 02-16 | https://qwen.ai/blog?id=qwen3.5 | |
+| 阿里 | Qwen3.6-Plus | 04-02 | https://qwen.ai/blog?id=qwen3.6 | |
+| 阿里 | Qwen3.7-Max | 05-20 | https://qwen.ai/blog?id=qwen3.7 | |
+| 阿里 | Qwen3.8-Max | 08-03 | https://qwen.ai/blog?id=qwen3.8 | 百炼清单记 08-02 |
+
+另需你决定的项：
+
+| 型号 | 问题 | 建议 |
+| --- | --- | --- |
+| Claude Opus 5（07-24，https://www.anthropic.com/news/claude-opus-5） | 低于在售的 Fable 5 | 不登记 |
+| Claude Opus 5.5（09-22，https://www.anthropic.com/claude-opus-5-5） | 水平接近 Fable 5.1，档位名低于 Fable | 不登记 |
+| Gemini 3.5 Flash（05-19，https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-5/） | 公告称其代理与编码能力最强，但属 Flash 线；未查到 3.5 Pro 发布 | 按规则 2 不登记 |
+| Qwen3.6-Max-Preview（约 04-18，https://qwen.ai/blog?id=qwen3.6-max-preview） | 日期未在浏览器核实；百炼清单记 04-14 | 核实日期后再登记 |
+| Grok 4.5（https://x.ai/news/grok-4-5） | 日期冲突：07-08、07-14、07-16 | 你打开页面确认 |
+| Grok 4.6（08-12，https://x.ai/news/grok-4-6） | 我读不到页面 | 你打开页面确认 |
+| Grok 4.20（约 02 至 03 月）、Grok 4.3 Beta（04-17） | 没找到官方公告页 | 保持候选，不用于计时 |
+| Claude Opus 4.5（2025-11-24）、Gemini 3 Pro（2025-11-18） | 早于 12 个月窗口几天，是窗口起点时的现任旗舰 | 建议一起登记，回放更完整 |
+
+### 11.2 补充调研：OpenRouter 与第三方跟踪站（2026-11-27，只读，0 次模型请求）
+
+用户要求优先用 OpenRouter 新上架模型，或跟踪大模型进展的第三方资讯站。
+
+三个已接入来源读 11-27 保存的生产原文件，与现任 9 个和上表 28 个型号比对（OpenRouter 取上架时间的 UTC 日期，同型号取最早）：
+
+| 来源 | 现任 9 个：找到 / 日期一致 | 待登记 28 个：找到 / 一致 / 相差不超过 1 天 |
+| --- | --- | --- |
+| OpenRouter 模型清单（每日） | 8 / 8 | 28 / 19 / 26 |
+| AA 模型接口（每周） | 8 / 6 | 26 / 22 / 25 |
+| Epoch 能力指数（每周） | 6 / 6 | 26 / 20 / 24 |
+
+- 三者都没有 GLM-5.4。OpenRouter 超过 1 天的两项（Hy3、Qwen3.8-Max）是预览版或早期版本已下架，清单只剩后续版本；每日保存快照后，向前发现不受影响。
+- 机械去重（跳过别名与 `-latest`，合并 `:batch`、`:free`）按这份清单回放：09-28 起九家 24 个候选，11-01 起 14 个，其中 5 个是已登记的现任旗舰。
+
+第三方跟踪站（用网页读取工具读页面，所得是页面摘述；未下载数据文件，条款页未读）：
+
+| 站点 | 读到的情况 |
+| --- | --- |
+| [models.dev](https://github.com/anomalyco/models.dev) | 社区提交维护；有 JSON 接口和 `release_date` 字段，无公告链接字段；仓库 MIT 许可，数据许可未见单独说明；覆盖与新鲜度未测 |
+| [llm-stats](https://llm-stats.com/llm-updates) | 自称每小时更新并人工核对；页面无导出（另有接口页未读）；读到的最新条目 11-20 |
+| [DemandSphere](https://www.demandsphere.com/research/ai-frontier-model-tracker/changelog) | 公司手工维护的变更日志；称有 JSON 与 RSS，地址和许可未核实；读到的最新条目 11-22 |
+| [LLM Gateway](https://llmgateway.io/timeline) | 页面标注 11-24 更新；无导出；没有 GLM-5.4 |
+| [LLM Reference](https://www.llmreference.com/changelog) | 只有月度计数 |
+| aireleasetracker.com | 连接两次中断，未读到 |
+
+对 11.3 清单有影响的发现（均待用户判定，上表未改）：
+
+- GLM-5：三个来源都记 02-11（OpenRouter 02-11 16:59 UTC），上表官方页日期 02-12。
+- Qwen3.7-Max：Epoch、AA 记 05-19，OpenRouter 05-21，官方页 05-20。
+- GPT-6 Astra：OpenRouter 上架 09-04，Epoch、AA 记 09-03。
+- Grok 4.5、4.6：三个来源一致，为 07-08、08-12。Grok 4.20（Epoch 02-17、OpenRouter 03-31）、Grok 4.3（OpenRouter、AA 04-30）仍无官方公告页。
+- Qwen3.6-Max-Preview：AA 记 04-20，与百炼清单 04-14、此前的约 04-18 都不同。
+- DeepSeek V4.1 Flash（09-10）：当时 V4 Pro 仍在售，按规则 2 字面不应登记，与已确认的现任 1017 版处理冲突。
+
+### 11.2 实现与演练（2026-11-27，工作树，未合并；未写生产库，0 次模型请求）
+
+用户决定："按此实现"（OpenRouter 出候选、用户确认）。
+
+实现：
+- `ats.data.model_release_discovery` 从每天保存的清单读时计算候选；基线 2026-11-27 与九家实验室前缀写在 `model_releases.yaml` 的 `discovery`。
+- 命令 `ats data model-release-candidates | -confirm | -dismiss | -add`。确认与手工添加在 `model_releases.yaml` 末尾追加并先过登记表校验；忽略写 `model_release_dismissed.yaml`。
+- 每日数据采集日报在有待确认候选时列出（最多 10 个型号名）；读取失败或没有基线清单时写明原因。
+
+演练（真实清单，隔离库与配置副本）：11-27 保存的清单中，上架早于 11-01 的 435 条作为基线日快照，全部 477 条作为次日快照，经定价采集管道入库。
+- 查看：9 个候选，即 11-01 起的 14 个减去 5 个已登记旗舰。
+- 确认 `openai/gpt-6.2-sol` 并以 `-pro` 作别名、忽略两个：剩 5 个；日报段落列出这 5 个。
+- 手工添加非官方链接被拒，文件未变。
+- 确认时用的公告链接是演练占位值，只写进配置副本。
+
+生产库只读（本工作树的配置）：清单快照只有 11-27，待确认 0 个，日报不加段落。合并后首个出现新型号的日子需只读核对日报内容。
+
+测试：`tests/test_model_release_discovery.py` 20 项、`tests/test_collection_alerts.py` 新增 1 项。读到本次改动的 23 个测试文件 327 通过、1 失败（`test_anthropic_consumer_boundaries`，改动前就失败）。新文件 ruff 无报告。
+
+已知局限：清单不收录的发布（如 GLM-5.4）要手工添加；基线日以后实验室补挂的旧型号也会出现一次，忽略即可。
+
+### 11.3 历史发布登记（2026-11-27，用户确认："11.3 按建议"）
+
+登记 35 条：已确认 32 条（上表 28 条、Grok 4.5 与 4.6、Claude Opus 4.5、Gemini 3 Pro），待定 3 条（Grok 4.20、Grok 4.3、Qwen3.6-Max-Preview，不计时）。与上表不同的两处按用户判定：GPT-6 Astra 记 09-04，GLM-5 记 02-11。不登记：Claude Opus 5、Opus 5.5、Gemini 3.5 Flash。连同现任 9 条，登记表共 44 条；九家现任旗舰与登记前相同。登记口径四条写在 `model_releases.yaml` 文件头。
+
+公告链接核对：
+- 32 条已确认记录的链接都在各实验室自己的域名上（登记表校验通过）。
+- Grok 4.5、4.6：x.ai 拒绝自动读取，页面没有打开过；日期取 OpenRouter、Epoch、AA 一致值。
+- Claude Opus 4.5（页面印 Nov 24, 2025）、Gemini 3 Pro（页面印 Nov 18, 2025，公开预览）本次读页面补核。
+- DeepSeek V3.2（12-01）、智谱 GLM-4.7、5.1、5.2、5.3（发布说明页日期一致）、腾讯 Hy3 预览（内置浏览器读到 April 24, 2026）本次复读一致。
+- Kimi K2.5、K2.6：页面可打开，正文没有印日期；01-27、04-20 与 OpenRouter、Epoch、AA 一致。
+- 其余链接沿用本日调研记录。
+
+生产库只读核对（成绩型号名匹配到登记记录）：32 条新增已确认记录各匹配到至少一个来源叫法；逐条看过匹配结果，除下面两项外没有指向别的型号或版本：
+- DeepSeek V4 Pro：来源把 0813 版成绩列在 `deepseek-v4-pro` 名下，会按预览日 04-24 标注。
+- Qwen3.8-Max：来源把 0902 版成绩列在 `qwen3.8-max` 名下，会按 08-03 标注。
+
+这两项会让对应版本的发布日期偏早，影响领先窗口计算；本次未改匹配逻辑，留到 `ant-thesis-monitor` 定领先窗口口径时处理。
+
+相关测试 14 个文件 237 通过、1 失败（`test_anthropic_consumer_boundaries`，改动前就失败）。
+
+## 第 12 组：GPU 租赁价格来源调研（12.1，2026-11-27，待你决定；未实现 12.2）
+
+### 免费来源
+
+| 来源 | 型号与价格形态 | 免费历史 | 取数与条款 | 可追溯性 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| [GetDeploying 周度数据集](https://getdeploying.com/dataset/gpu-prices) | H100、H200、B200、GB200、A100 等 115 型号；各供应商挂牌价的中位数，带租赁形态列（文件内是否含现货与预订行未核实） | 近 53 周；首周未标；07-30 前每周只采一次，趋势页称早期手工维护、为近似值 | CSV、JSON，无需密钥；文件按 CC BY 4.0 发布，数据页带脚本读取示例，robots 未禁该目录。[站点条款](https://getdeploying.com/terms)禁止未经同意抓取站内内容，且称许可不扩大自动访问权限，每周自动取文件是否允许条款未说清 | 只有汇总值与供应商数；逐供应商明细要付费接口 | 建议主用 |
+| [Computable GPU Index](https://github.com/getcomputable/gpu-index) | H100、H200、B200、B300；29 家供应商面板的按需挂牌价 | 实时接口 90 天；更早数据称在归档文件，未核实 | 无密钥接口，15 分钟一次；数据 [CC BY-NC 4.0](https://github.com/getcomputable/gpu-index/blob/main/LICENSE-DATA.md)（限非商业），用于金融产品或商业定价风控系统另需书面许可 | 最好：代码公开、逐供应商回执、可复算、已发布值不改。但方法版本 3 个月内多次变更（09-03 v8 到 v10，09-15 与 10-15 之间到 v16），接口把各版本拼在一条序列；项目新，运营方同时做算力撮合 | 备选 |
+| [Ornn](https://data.ornn.com/markets) | H100、H200、B200、B300、A100 等；成交价日结 | 3 个月日频（H100 自 08-28 起 91 点） | 无密钥 JSON，说明页公开邀请取数、robots 放行；[条款](https://data.ornn.com/terms)限内部使用，禁止未经书面授权的抓取和缓存 | 方法公开；供应商与成交明细不公开；运营方关联公司出售算力 | 拿到书面确认前不接 |
+| [Vast.ai](https://vast.ai/pricing.md) | 市场挂牌价 | 90 天日中位数 | [条款](https://vast.ai/terms)禁止自动采集、存储和用于指数 | 单一市场 | 不接 |
+| [SemiAnalysis 免费页](https://semianalysis.com/gpu-pricing-index/) | H100、A100、B200 综合指数 | 页面历史表自 2023 年 | [指数专门条款](https://semianalysis.com/gpu-pricing-index-terms/)（11-27 读取）：自动或重复采集、存入数据库或数据管道、纳入定期出版物，均需书面许可；一次性研究笔记可截图或引用个别数值并署名 | 方法为综合指数 | 不接 |
+| [Silicon Data 免费档](https://www.silicondata.com/pricing) | H100 等指数 | 30 天，只能网页看 | 接口属付费档；[条款](https://www.silicondata.com/terms-of-use)禁止未经同意存库 | 指数 | 不接 |
+| [Azure Retail Prices](https://learn.microsoft.com/en-us/rest/api/cost-management/retail-prices/azure-retail-prices) | 单一云厂商的挂牌价与现货价 | 无历史查询，需从现在积累 | 无需认证；使用条款未读 | 官方价目 | 不接：只代表一家超大云挂牌价 |
+| [AWS 价目与现货历史](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/using-the-aws-price-list-bulk-api.md) | 单一云厂商 | 现货 90 天 | 文档要求账户授权 | 官方价目 | 不接：需要账号 |
+| [Lambda](https://lambda.com/pricing)、[SF Compute](https://sfcompute.com/legal/terms-of-service) | 单家挂牌价或撮合市场 | 无 | 无公开接口；SF Compute 条款禁止复制市场数据 | 单家 | 不接 |
+| AI Compute Tracker、fabryka | — | — | 前者两次连接中断，后者返回 402 | — | 未能核查 |
+| data.getcomputable.com 根地址 | Computable 归档 | — | 根地址返回 404 | — | 归档文件未核实 |
+
+同期 H100 读数相差很大，说明不同来源不能拼接：GetDeploying 周中位挂牌价 4.03（11-23 当周）、Computable 按需面板 3.80（11-27）、Ornn 成交价 3.19（11-26）、Silicon Data 指数 3.07（11-26，同页另一处写 2.53），单位均为美元每 GPU 小时。
+
+### 付费选项
+
+| 来源 | 价格 | 覆盖 |
+| --- | --- | --- |
+| Ornn Premium | 500 美元/月 | 成交价日频全历史；小时数据在更高档，价格未读 |
+| Silicon Data Pro | 998 美元/月 | 指数全历史与接口；对外再分发另授权 |
+| SemiAnalysis GPU Pricing API | 未公布 | 164 个以上型号、9 年以上、每小时 |
+| GetDeploying API | 499 美元/月或 4990 美元/年 | 逐供应商明细、日频 |
+| Computable、Vast.ai 数据许可 | 未公布，邮件洽询 | 商业使用授权 |
+
+### 建议
+
+主用 GetDeploying 周度数据集，只取按需价：许可对用途限制最少，接入当天就有约 12 个月历史可算趋势。代价是它是挂牌价中位数，供应商进出会改变读数，运营者是个人。Computable 的可追溯性更好，但许可限非商业（本系统读数最终影响真实交易决策，是否算非商业条款没有说清），且方法版本变更频繁，按同一版本算趋势目前凑不满 3 个月。接入时先取一次周度文件，核对列、租赁形态和首周日期，再请你抽查验收。
+
+**决定**：2026-11-27 用户选定"用 GetDeploying"。
+
+## 第 12 组：GPU 租赁价格接入（12.2，2026-11-27，工作树，未合并、未写生产库）
+
+### 数据文件实测
+
+- 11-27 08:50 UTC 取一次 `weekly.csv`：1,139,934 字节，SHA-256 以 `60ee2815a0ba3264` 开头，17,390 行、115 个型号。
+- 列为 `gpu_slug, date, billing_type, reservation_months, min_price, max_price, median_price, provider_median_price, provider_count, offering_count`。
+- 租赁形态含 `ON_DEMAND`（4,723 行）、`SPOT`、`RESERVATION`（按期限分行）等；只取按需。
+- 日期都是周一。六个 NVIDIA 型号各有连续 53 周按需数据（2025-11-24 至 2026-11-23），无缺周。已下架型号保留更早日期。
+
+### 隔离库演练（同一份文件，0 次模型请求）
+
+- 首次入库 318 条，隔离 0；原样重读 `no_change`（318 条 `unchanged`）。
+- 读出的 318 个（型号、周）价格与供应商数，与文件按需行完全一致。
+- 与来源网站趋势页 11-23 当周公布值核对（当天早些时候读取）：H100 4.03（45 家）、H200 4.86（39 家）、B200 8.50（24 家）、B300 9.50（18 家）、GB200 10.50（5 家）、A100 2.00（43 家），六项一致。
+
+| 型号 | 05 月值 | 08 月值 | 09 月值 | 10 月值 | 最新周 11-23 | 8 至 10 月方向 | 样本偏少 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| H100 | 2.990 | 3.370 | 3.359 | 3.607 | 4.034 | 有涨有跌（-0.3%、+7.4%） | 否 |
+| H200 | 3.645 | 4.400 | 4.443 | 4.875 | 4.858 | 上涨 | 否 |
+| B200 | 5.500 | 6.370 | 6.505 | 7.990 | 8.500 | 上涨 | 否 |
+| B300 | 7.500 | 7.890 | 7.890 | 8.990 | 9.500 | 有涨有跌（0.0%、+13.9%） | 是 |
+| GB200 | 16.000 | 18.770 | 16.000 | 16.000 | 10.500 | 有涨有跌（-14.8%、0.0%） | 是 |
+| A100 | 1.788 | 1.760 | 1.754 | 1.830 | 1.995 | 有涨有跌（-0.3%、+4.3%） | 否 |
+
+单位美元每 GPU 小时。11 月要到 12-08 的采集后才算整月。
+
+### 实现
+
+- 来源 `getdeploying_gpu_prices`、数据集 `gpu_rental_price_weekly`、指标 `ai.gpu.rental.listed_price`，每周二 08:10 UTC 任务 `getdeploying_gpu_prices_weekly_ingest`。
+- 读取入口 `DataProducts.gpu_rental_price(gpu_model, as_of)`：返回周值、月值、趋势和状态（`covered`、`uncovered`、`stale`、`methodology_drift`；趋势另有 `insufficient_history`）。
+- 每次取回整份文件存档（约 1.1 MB，一年约 60 MB）。
+
+### 给后续判读的提醒
+
+- `连续下跌月数` 把任何幅度的下降都算作下跌（如 H100 9 月 -0.3%）。ANT 论点监测的"连续 3 个月下跌"要不要设最小跌幅，留到 `ant-thesis-monitor` 定。
+- GB200、B300 供应商少，供应商进出就能造成大幅跳变（GB200 由 16.0 到 10.5 时供应商由 3 增到 5）。判读建议以 H100 为主。
+- 11-27 与 SemiAnalysis 公开图做过一次人工对照（同坐标叠图，不提取、不存其数值，图未入库）：本来源不能完全替代。2025-11-24 之前无历史；没有成交合约价；H100 按需价方向大体一致，但上涨起步偏晚、10 月下旬起涨幅明显更大；B200 漏掉 2025-12 至 2026-02 的回落，10 月下旬之后方向相反；A100 方向对不上。H200、B300、GB200 无对照。
+- 用户决定（2026-11-27）："我没有钱买数据， 也没法在 workflow中加入人工复核。 差异不大的话，可以使用GetDeploying。" 因此不买数据，流程里不设人工对照 SemiAnalysis 的步骤。按上一条对照，只有 H100 方向大体一致。
+- 来源对价格的说明（[数据页](https://getdeploying.com/dataset/gpu-prices) 11-27 读取）：计入所有未标售罄的挂牌价，包括可用性未知或排队的（占多数），未核实能否租到；供应商进出也会让中位数变动。三种租赁形态各自取中位数，供应商组成不同，形态之间的价差不是同一批供应商的比价（A100 的 12 个月预订价在 53 周里有 41 周高于按需价）。
+
+### 12.2 抽查验收（2026-11-27）
+
+用户对 11-23 当周六个型号三种价的抽查答复："通过，勾选"。12.2 勾选。验收时代码在工作树，未合并、未写生产库；合并后首个周二的生产采集需只读核对（按需与旁证各型号有数、隔离 0）。
+
+### 加采现货价与 12 个月预订价（2026-11-27，用户决定："加上，只作旁证"）
+
+- 入库按需（判读）、`spot`、`reserved_12m`（旁证）三种序列；读取结果的旁证在 `series[].corroboration`。覆盖状态只看按需价。
+- 旁证行数值异常只隔离该行（运行记 `partial`）；文件结构异常和按需行异常仍整次拒收。
+- 同一份已下载文件、空的隔离库演练（未重新下载、未写生产库、0 次模型请求）：首次入库 873 条、隔离 0；原样重读 `no_change`（873 条 `unchanged`）。读出的 873 个（型号、形态、周）价格与供应商数与文件一致；按需 318 条与此前相同。
+- 覆盖：除 GB200 的 12 个月预订价只有 13 周（趋势"历史不足"）外，各型号三种形态都有至少 32 周。旁证多数标样本偏少；GB200 现货和预订价最新周只有 1 家供应商。
+- `tests/test_gpu_rental_price.py` 29 项通过，三个相关文件 ruff 无报告；读取所改配置与文档的 23 个测试文件 400 通过、1 跳过、5 失败（`test_factset_earnings_insight` 4 项、`test_anthropic_consumer_boundaries` 1 项，改动前就失败）。
+
+### 测试
+
+以下是只采按需价时的结果。
+
+- 新增 `tests/test_gpu_rental_price.py` 23 项通过；三个新文件 ruff 无报告。`base.py`、`registry.py` 的 5 条 ruff 报告都在本次没改的行上。
+- 相关测试 66 个文件：935 通过、3 跳过、19 失败。失败所在的 3 个文件在未改动的 HEAD（`35616fd` 导出副本）上同样是 19 失败、55 通过。
+- 19 项中 5 项是此前已知的（`test_factset_earnings_insight` 4 项、`test_anthropic_consumer_boundaries` 1 项）。
+- 另 14 项在 `test_phase_f_research_gate`，基线文档只登记了 2 项。ANT 改动之前的 `6d8f24c`（11-25）上同样是 14 失败、13 通过。原因：层复核改用 `LayerVerdictEventView`（11-16 随事件影响路由引入），测试里的假模型只认 `LayerVerdictView`，报 `unexpected model schema`。本组不修，基线文档未更新。

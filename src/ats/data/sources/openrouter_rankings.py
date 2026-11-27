@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 
 from ..core.structured_models import (
     AdapterArtifact, AdapterBatch, AdapterFailure, DiscoveryResult,
-    DiscoveryStatus, FetchRequest, IngestionStatus, NativeRecord, ReleaseCandidate,
+    DiscoveryStatus, FetchRequest, IngestionStatus, NativeRecord, ReleaseCandidate, RevisionRule,
 )
 
 API_URL = "https://openrouter.ai/api/v1/datasets/rankings-daily"
@@ -43,6 +43,9 @@ AUTHOR_ALIASES = {
     "tencent": "tencent", "z-ai": "z-ai", "zai": "z-ai",
     "microsoft": "microsoft", "x-ai": "xai", "xai": "xai",
 }
+# ``raw.meta`` describes the request (fetch time, requested window), so it alone never makes a new vintage of a
+# model's day.  The API version it also carries is gated by the parser and recorded as the methodology regime.
+REVISION_RULE = RevisionRule(match=[], ignore_raw=["meta"])
 
 
 class OpenRouterDataError(ValueError):
@@ -148,7 +151,8 @@ def parse_rankings_payload(payload: bytes | str, *, fetched_at: datetime | None 
             "is_other": is_other,
             "is_free_route": ":free" in model or "(free)" in str(row.get("model_name") or "").casefold(),
             "reference_date": period,
-            "coverage": "top_50_plus_other" if is_other or len(body["data"]) <= 51 else "provider_response",
+            # A series dimension: it must not depend on how many days one request happened to ask for.
+            "coverage": "top_50_plus_other" if is_other else "provider_response",
             "methodology_regime": METHODOLOGY_REGIME,
             "source_url": source_url,
         }
@@ -156,7 +160,7 @@ def parse_rankings_payload(payload: bytes | str, *, fetched_at: datetime | None 
             entity_id=f"OPENROUTER_MODEL:{model.upper().replace('/', ':')}",
             provider_field="total_tokens", period=period, period_start=period,
             period_end=period, value=value, unit="tokens", period_basis="utc_day",
-            dimensions=dims, raw={"provider_row": row, "meta": meta},
+            dimensions=dims, raw={"provider_row": row, "meta": meta}, revision_rule=REVISION_RULE,
         ))
     if not records:
         raise OpenRouterDataError("no_data_rows")

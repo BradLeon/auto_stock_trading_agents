@@ -187,6 +187,7 @@
 - **准确性保障**：只消费文档化的每日数据集，**不抓排行榜页面**；`token_nonnegative_integer`；`daily_model_identity_unique`；`top_n_plus_other`（top 50 + Other）；作者别名表显式版本化，未知作者保持 unknown；派生指标（`model_tokens`、`author_tokens`、`token_share`、`concentration_top_n`、`concentration_hhi`）**仅在完整 UTC 周上进入趋势产品**。
 - **必须注意**：只代表 OpenRouter 自身，**不是全市场**；token 不是请求数、客户数或收入——catalog 明确 `revenue_conversion: forbidden`、`request_share: unavailable`；`public_routed_scope_only`。唯一允许的"用量 × 价格"产品是 3.6.1 的估算花费份额。
 - **时效性**：日频，含 14 天重叠窗口回补；`freshness_slo_days: 3`；最近入库 2026-09-15，最新数据期 2026-09-14。
+- **版本与 `no_change`**：写入前，每行与同一模型、同一日期的最新版本比较；只有抓取时间或请求窗口（`raw.meta`）不同记 `unchanged`，整批如此记 `no_change`。token、来源行字段、模型名、厂商归属（含别名表变化）、排名、免费路由标记、方法口径或质量状态变化才追加版本，改回旧值也追加。当前视图的 OpenRouter 产品对同一模型、日期、方法口径只取最新一行；通用序列查询仍会按序列分别返回修订前后的行。没变化的日子保留首次写入时间和当时的 `as_of`；每次抓取仍归档原始载荷并写准入记录。
 
 ### 3.6.1 `openrouter_pricing` — 模型标价与估算花费份额
 

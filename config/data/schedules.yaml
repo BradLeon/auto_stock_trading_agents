@@ -103,6 +103,22 @@ structured:
         attempts: 2
         backoff_seconds: [300, 1800]
       semantics: irregular commit-pinned releases; discovery reads repository metadata only, CSVs are downloaded once per new complete release
+    openrouter_pricing_p1d_ingest:
+      enabled: true
+      source: openrouter_pricing
+      datasets: [openrouter_model_pricing_daily]
+      schedule: daily
+      at: "07:45"
+      timezone: UTC
+      command: ats data ingest --source openrouter_pricing --dataset openrouter_model_pricing_daily
+      concurrency: 1
+      retry:
+        attempts: 3
+        backoff_seconds: [60, 300, 1800]
+      # The list only answers with today's prices, so a missed day cannot be
+      # collected later; two silent days already breaks the weekly estimate.
+      freshness_slo_days: 2
+      semantics: one snapshot per UTC day of listed unit prices; revisions kept as vintages; history starts at the first collection
     openrouter_rankings_p7d_ingest:
       enabled: true
       source: openrouter_rankings

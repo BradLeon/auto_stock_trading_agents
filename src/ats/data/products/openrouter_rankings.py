@@ -494,7 +494,235 @@ def openrouter_token_evidence_bundle(products, *, as_of=None, snapshot_consumer:
             "directional_status": total_trend.get("status", "unavailable")}
 
 
+PRICING_SOURCE_ID = "openrouter_pricing"
+PRICING_DATASET_ID = "openrouter_model_pricing_daily"
+SPEND_DERIVATION_VERSION = "openrouter_estimated_spend/v1"
+SPEND_LABEL = "估算花费份额"
+NO_PRICE_LABEL = "无价格数据"
+_PRICE_SIDES = {"ai.openrouter.price.input": "input", "ai.openrouter.price.output": "output"}
+
+
+def _price_snapshots(products, *, as_of=None) -> dict[str, dict[str, dict[str, Any]]]:
+    """{snapshot date: {model_permaslug: price}} from accepted price observations."""
+    rows = products.structured.observations(
+        dataset_id=PRICING_DATASET_ID, source_id=PRICING_SOURCE_ID, as_of=as_of,
+        latest_only=True, accepted_only=True, limit=5_000_000)
+    snapshots: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+    # Oldest first, so a later revision of the same model and day replaces it.
+    for row in sorted(rows, key=lambda item: (str(item.get("known_at", "")),
+                                              str(item.get("observation_id", "")))):
+        side = _PRICE_SIDES.get(str(row.get("metric_id")))
+        dims = _dims(row)
+        model = str(dims.get("model_permaslug") or "").casefold()
+        if not side or not model:
+            continue
+        raw = row.get("raw_payload")
+        try:
+            raw = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except ValueError:
+            raw = {}
+        cell = snapshots[str(row.get("period"))[:10]].setdefault(
+            model, {"model_permaslug": model, "model_id": dims.get("model_id", ""),
+                    "author": dims.get("author", "unknown_author")})
+        cell[side] = float(row.get("value") or 0)
+        cell[f"{side}_observation_id"] = str(row.get("observation_id") or "")
+        cell["price_basis"] = raw.get("price_basis", "")
+        cell["prompt_length_tiers"] = bool(raw.get("prompt_length_tiers"))
+        cell["cache_read"] = raw.get("input_cache_read")
+    return {day: {model: cell for model, cell in models.items()
+                  if "input" in cell and "output" in cell}
+            for day, models in snapshots.items()}
+
+
+def openrouter_model_price_series(products, *, model_permaslug: str = "", author: str = "",
+                                  start_date: str = "", end_date: str = "",
+                                  as_of=None) -> dict[str, Any]:
+    """Stored daily listed prices, so a price change can be recomputed from them."""
+    snapshots = _price_snapshots(products, as_of=as_of)
+    wanted = model_permaslug.casefold()
+    output = []
+    for day, models in sorted(snapshots.items()):
+        if (start_date and day < start_date[:10]) or (end_date and day > end_date[:10]):
+            continue
+        for model, cell in sorted(models.items()):
+            if (wanted and model != wanted) or (author and cell["author"] != author):
+                continue
+            output.append({"period": day, "model_permaslug": model, "model_id": cell["model_id"],
+                           "author": cell["author"], "input_price": cell["input"],
+                           "output_price": cell["output"], "cache_read_price": cell["cache_read"],
+                           "price_basis": cell["price_basis"],
+                           "prompt_length_tiers": cell["prompt_length_tiers"],
+                           "observation_ids": [cell["input_observation_id"],
+                                               cell["output_observation_id"]]})
+    return {"status": "ok" if output else "no_coverage", "source_id": PRICING_SOURCE_ID,
+            "dataset_id": PRICING_DATASET_ID, "unit": "USD_per_1M_tokens", "rows": output,
+            "price_history_start": min(snapshots, default=""),
+            "latest_period": max((row["period"] for row in output), default=""),
+            "limitations": ["Listed unit prices on the collection date, not negotiated or paid prices.",
+                            "No history before the first collection."]}
+
+
+def spend_assumption(input_token_share: float | None = None) -> dict[str, Any]:
+    """The declared assumption behind the estimate, with where it came from."""
+    from ..catalog.structured import StructuredCatalog
+
+    dataset = StructuredCatalog.load().raw["datasets"][PRICING_DATASET_ID]
+    declared = dict(dataset["quality"]["estimated_spend"])
+    share = float(declared["input_token_share"] if input_token_share is None
+                  else input_token_share)
+    if not 0.0 <= share <= 1.0:
+        raise ValueError("input_token_share must be between 0 and 1")
+    return {"input_token_share": share, "output_token_share": 1.0 - share,
+            "source": "declared" if input_token_share is None else "caller_override",
+            "max_snapshot_gap_days": int(declared["max_snapshot_gap_days"]),
+            "no_price_warning_token_share": float(declared["no_price_warning_token_share"]),
+            "price": "listed unit price in force on each usage day; time-of-day prices averaged "
+                     "over a week; prompt-length tiers use the shortest-prompt price; "
+                     "free routes are priced at zero"}
+
+
+def _snapshot_for(day: date, snapshot_days: list[date], max_gap: int) -> date | None:
+    """Latest snapshot on or before the usage day, never a later one."""
+    earlier = [item for item in snapshot_days if item <= day]
+    if not earlier or (day - earlier[-1]).days > max_gap:
+        return None
+    return earlier[-1]
+
+
+def openrouter_estimated_spend_share_series(products, *, author: str = "", start_date: str = "",
+                                            end_date: str = "", as_of=None,
+                                            input_token_share: float | None = None
+                                            ) -> dict[str, Any]:
+    """Weekly author shares of tokens priced at listed unit prices: an estimate.
+
+    A week is estimated only when each of its days has a price snapshot taken on
+    that day or shortly before it.  Weeks before collection started, or inside a
+    collection gap, report no price data; later prices are never applied back.
+    """
+    assumption = spend_assumption(input_token_share)
+    usage = _query(products, as_of=as_of, start_date=start_date, end_date=end_date)
+    snapshots = _price_snapshots(products, as_of=as_of)
+    snapshot_days = sorted(date.fromisoformat(day) for day, models in snapshots.items() if models)
+    first_snapshot = snapshot_days[0].isoformat() if snapshot_days else ""
+    result: dict[str, Any] = {
+        "status": "no_coverage", "label": SPEND_LABEL,
+        "metric_id": "ai.openrouter.estimated_spend_share", "assumption": assumption,
+        "price_history_start": first_snapshot, "latest_period": "", "rows": [], "weeks": [],
+        "metric_definition": "author estimated spend / estimated spend of all priced tokens, "
+                             "complete UTC weeks",
+        "limitations": [
+            "估算值：按标价和声明的输入输出比例推算，不是收入、实际支出或市场份额。",
+            "仅限 OpenRouter 公共路由；不含直连各厂商接口、订阅和企业合同的用量。",
+            "缓存读写折扣、批量价、企业折扣和长提示加价未计入。",
+        ],
+    }
+    regimes = sorted({_dims(row).get("methodology_regime", "") for row in usage
+                      if _dims(row).get("methodology_regime")})
+    if len(regimes) > 1:
+        result["quality"] = {"status": "methodology_drift", "regimes": regimes}
+        return result
+    wanted = author.casefold()
+    usage_ids: set[str] = set()
+    price_ids: set[str] = set()
+    for week, values in sorted(_complete_week_rows(usage).items()):
+        week_end = (date.fromisoformat(week) + timedelta(days=6)).isoformat()
+        days = [date.fromisoformat(week) + timedelta(days=offset) for offset in range(7)]
+        chosen = {day: _snapshot_for(day, snapshot_days, assumption["max_snapshot_gap_days"])
+                  for day in days}
+        missing = [day.isoformat() for day, snapshot in chosen.items() if snapshot is None]
+        if missing:
+            if not first_snapshot or days[0].isoformat() < first_snapshot:
+                reason = f"价格采集开始于 {first_snapshot or '尚未开始'}，早于该日的用量没有价格"
+            else:
+                reason = "价格快照缺口：" + "、".join(missing)
+            result["weeks"].append({"period": week, "week_end": week_end,
+                                    "status": "no_price_data", "label": NO_PRICE_LABEL,
+                                    "reason": reason, "days_without_price": missing})
+            continue
+        total = 0
+        buckets = {"no_price": 0, "zero_price": 0, "time_weighted": 0, "prompt_length_tier": 0}
+        spend: dict[str, float] = defaultdict(float)
+        priced: dict[str, int] = defaultdict(int)
+        all_tokens: dict[str, int] = defaultdict(int)
+        unpriced_models: dict[str, int] = defaultdict(int)
+        week_usage_ids: list[str] = []
+        week_price_ids: set[str] = set()
+        for row in values:
+            tokens = int(float(row.get("value") or 0))
+            dims = _dims(row)
+            model = str(dims.get("model_permaslug") or row.get("entity_id")).casefold()
+            owner = str(dims.get("author") or "unknown_author")
+            total += tokens
+            all_tokens[owner] += tokens
+            if row.get("observation_id"):
+                week_usage_ids.append(str(row["observation_id"]))
+            snapshot = chosen[_period(row.get("period"))]
+            price = None if dims.get("is_other") else snapshots[snapshot.isoformat()].get(model)
+            if price is None:
+                buckets["no_price"] += tokens
+                unpriced_models[model] += tokens
+                continue
+            unit = (assumption["input_token_share"] * price["input"]
+                    + assumption["output_token_share"] * price["output"])
+            spend[owner] += tokens * unit / 1_000_000
+            priced[owner] += tokens
+            week_price_ids.update((price["input_observation_id"], price["output_observation_id"]))
+            if price["input"] == 0 and price["output"] == 0:
+                buckets["zero_price"] += tokens
+            if price["price_basis"] == "time_weighted_week":
+                buckets["time_weighted"] += tokens
+            if price["prompt_length_tiers"]:
+                buckets["prompt_length_tier"] += tokens
+        total_spend = sum(spend.values())
+        shares = {key: value / total if total else 0.0 for key, value in buckets.items()}
+        if not total_spend:
+            result["weeks"].append({"period": week, "week_end": week_end,
+                                    "status": "no_price_data", "label": NO_PRICE_LABEL,
+                                    "reason": "该周没有任何带正价格的用量",
+                                    "no_price_token_share": shares["no_price"]})
+            continue
+        warnings = []
+        if shares["no_price"] > assumption["no_price_warning_token_share"]:
+            warnings.append(f"无价格模型占当周 token 的 {shares['no_price']:.1%}，超过 "
+                            f"{assumption['no_price_warning_token_share']:.0%}，估算份额可靠性不足")
+        usage_ids.update(week_usage_ids)
+        price_ids.update(week_price_ids)
+        result["weeks"].append({
+            "period": week, "week_end": week_end, "status": "estimated", "label": SPEND_LABEL,
+            "total_tokens": total, "warnings": warnings,
+            "no_price_token_share": shares["no_price"],
+            "zero_price_token_share": shares["zero_price"],
+            "time_weighted_price_token_share": shares["time_weighted"],
+            "prompt_length_tier_token_share": shares["prompt_length_tier"],
+            "largest_unpriced_models": [
+                {"model_permaslug": model, "token_share": tokens / total}
+                for model, tokens in sorted(unpriced_models.items(),
+                                            key=lambda item: (-item[1], item[0]))[:5]],
+            "price_snapshot_dates": sorted({item.isoformat() for item in chosen.values()})})
+        for owner in sorted(all_tokens, key=lambda item: (-spend.get(item, 0.0), item)):
+            if owner == "unattributed_other" or (wanted and owner != wanted):
+                continue
+            result["rows"].append({
+                "period": week, "week_end": week_end, "author": owner, "label": SPEND_LABEL,
+                "estimated_spend_share": spend.get(owner, 0.0) / total_spend,
+                "token_share": all_tokens[owner] / total if total else 0.0,
+                "priced_tokens": priced.get(owner, 0), "tokens": all_tokens[owner],
+                "no_price_token_share": shares["no_price"]})
+    estimated = [item["period"] for item in result["weeks"] if item["status"] == "estimated"]
+    if result["weeks"]:
+        result["status"] = "ok" if estimated else "no_price_data"
+    result["latest_period"] = max(estimated, default="")
+    result["quality"] = {"status": "estimated" if estimated else result["status"],
+                         "estimated_week_count": len(estimated)}
+    result["lineage"] = {"derivation_version": SPEND_DERIVATION_VERSION,
+                         "usage_observation_ids": sorted(usage_ids),
+                         "price_observation_ids": sorted(price_ids),
+                         "input_observation_ids_hash": _hash(sorted(usage_ids | price_ids))}
+    return result
+
+
 __all__ = ["openrouter_token_volume_series", "openrouter_author_share_series",
            "openrouter_model_leaderboard", "openrouter_model_ranking_series",
            "openrouter_concentration_series",
-           "openrouter_token_evidence_bundle"]
+           "openrouter_token_evidence_bundle", "openrouter_model_price_series",
+           "openrouter_estimated_spend_share_series", "spend_assumption"]

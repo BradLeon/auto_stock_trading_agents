@@ -674,6 +674,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `ramp_ai_index` | `current_partial` | `persistent` | `ramp_ai_adoption, ramp_ai_spend` |
 | `ramp_ai_index_fred` | `current_partial` | `persistent` | `ramp_ai_adoption` |
 | `openrouter_rankings` | `current_partial` | `persistent` | `openrouter_rankings_daily` |
+| `openrouter_pricing` | `current_partial` | `persistent` | `openrouter_model_pricing_daily` |
 | `frontier_ai_capability` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks` |
 | `frontier_ai_capability_official_lab` | `current_partial` | `persistent` | `frontier_ai_capability_benchmarks, frontier_ai_public_model_cards` |
 | `tw_mof_exports` | `current_partial` | `persistent` | `regional_tw_exports` |
@@ -705,6 +706,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `ramp_ai_adoption` | `current_partial` |
 | `ramp_ai_spend` | `current_partial` |
 | `openrouter_rankings_daily` | `current_partial` |
+| `openrouter_model_pricing_daily` | `current_partial` |
 | `frontier_ai_capability_benchmarks` | `current_partial` |
 | `frontier_ai_public_model_cards` | `current_partial` |
 | `sp500_earnings_insight` | `current_partial` |
@@ -728,6 +730,7 @@ legacy 缺字段（`governed_availability_upgrade`）；platform 完整且报告
 | `ramp_ai_index` | `ramp_ai_adoption, ramp_ai_spend` | `current_partial` | `platform` | weekly | concurrency 1；每次批量切片；页面/API 预算按 source config |
 | `ramp_ai_index_fred` | `ramp_ai_adoption` | `current_partial` | `platform` | weekly | concurrency 1；14 条 FRED 序列，每条 1 次元数据 + 1 次 CSV |
 | `openrouter_rankings` | `openrouter_rankings_daily` | `current_partial` | `platform` | 上游日更；**我方每 7 天** | concurrency 1；每 7 天抓取 14 天重叠窗口；`freshness_slo_days: 10`；按 API 预算退避 |
+| `openrouter_pricing` | `openrouter_model_pricing_daily` | `current_partial` | `platform` | **每天** 07:45 UTC | concurrency 1；每天 1 次公开模型列表请求，不带任何凭据；只存模型标识与价格字段（每天约 140 KB 原件、约 1 MB 库增长）；漏掉的日子无法补采，`freshness_slo_days: 2`；口径见 [L1 数据源 3.6.1](L1_OBSERVER_DATA_SOURCES.md#361-openrouter_pricing--模型标价与估算花费份额) |
 | `frontier_ai_capability` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起，取消热度分级） | 每周期优先一次 bulk fetch；4 个 job 07:20/07:25/07:27/07:35 UTC |
 | `frontier_ai_capability_official_lab` | `frontier_ai_capability_benchmarks` | `current_partial` | `platform` | **每 7 天**（2026-09-19 起） | 公开 Lab release/model card 自报回退；concurrency 1；不覆盖第三方结果 |
 | `tw_mof_exports` | `regional_tw_exports` | `current_partial` | `platform` | monthly | concurrency 1；每次约 2 请求；60s |

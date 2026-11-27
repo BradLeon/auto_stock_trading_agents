@@ -173,6 +173,12 @@ def _openrouter_rankings():
     return OpenRouterRankingsAdapter()
 
 
+def _openrouter_pricing():
+    from ...sources.openrouter_pricing import OpenRouterPricingAdapter
+
+    return OpenRouterPricingAdapter()
+
+
 def _frontier_ai_capability():
     from ...sources.frontier_ai_capability import PublicBenchmarkAdapter
 
@@ -214,6 +220,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
     "openrouter_rankings": RuntimeSourceSpec(
         "openrouter_rankings", _openrouter_rankings,
         discovery_group="ai_commercialization"),
+    # Daily snapshot only, collected by its own schedule job: no release discovery.
+    "openrouter_pricing": RuntimeSourceSpec("openrouter_pricing", _openrouter_pricing),
     "frontier_ai_capability": RuntimeSourceSpec(
         "frontier_ai_capability", _frontier_ai_capability,
         discovery_group="frontier_ai_capability"),

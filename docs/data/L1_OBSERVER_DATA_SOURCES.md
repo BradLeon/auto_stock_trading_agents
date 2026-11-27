@@ -177,7 +177,7 @@
 
 **数值保障**：正数、币种、参考期、metric/observation identity、引用链（publisher/origin）缺一即隔离；跨来源同期间差异超过 **10%** 写入 `source_conflict` 警报，headline 按 identity→source→known_at 优先级选取，**候选一律不删除、估算不升级为公司披露**；`reconciliation_relative_tolerance: 1e-9`；`freshness_hours_max: 336`。
 
-**已知限制**（2026-09-13 审阅后判定可接受，记录在案）：趋势 cell 键为 `(entity_id, metric_id, observation_identity, currency, methodology_regime)`，**不含 `raw_metric_label` 与估算机构**，因此 TickerTrends 的「ARR」与 Sacra 的「annualized revenue」会并入同一条序列；Anthropic 2026-06→07 的回落属换估算机构的口径切换而非收入下滑，且 −6.6% 未触及 10% 反向阈值，`expanding` 结论不会提示。另有一项参考期推断：OpenAI 的 `2025-12 = $20B` 由原句 "up from $20B at the end of 2025" 推断得出，来源并未显式给出 12 月数值。
+**来源分列**（2026-11-26 起）：趋势单元的键含来源，TickerTrends、Sacra 与公司文件各成一条序列，不再跨来源连线（此前 Anthropic 2026-06→07 出现过换估算机构造成的假回落）。另有一项参考期推断：OpenAI 的 `2025-12 = $20B` 由原句 "up from $20B at the end of 2025" 推断得出，来源并未显式给出 12 月数值。
 
 **时效性**：Sacra 每 7 天探测（`freshness_hours_max: 336`）；TickerTrends 无周期。库内收入观察共 13 条（Sacra 8 + TickerTrends 5），其中 Sacra 的 `2028`、`2030` 属于前瞻期，**不得混入历史实际**。
 
@@ -185,8 +185,44 @@
 
 - **观察对象**：OpenRouter 公共路由的每日 token 用量，按模型与作者拆分，`Other` 为一等来源桶。
 - **准确性保障**：只消费文档化的每日数据集，**不抓排行榜页面**；`token_nonnegative_integer`；`daily_model_identity_unique`；`top_n_plus_other`（top 50 + Other）；作者别名表显式版本化，未知作者保持 unknown；派生指标（`model_tokens`、`author_tokens`、`token_share`、`concentration_top_n`、`concentration_hhi`）**仅在完整 UTC 周上进入趋势产品**。
-- **必须注意**：只代表 OpenRouter 自身，**不是全市场**；token 不是请求数、客户数或收入——catalog 明确 `revenue_conversion: forbidden`、`request_share: unavailable`；`public_routed_scope_only`。
+- **必须注意**：只代表 OpenRouter 自身，**不是全市场**；token 不是请求数、客户数或收入——catalog 明确 `revenue_conversion: forbidden`、`request_share: unavailable`；`public_routed_scope_only`。唯一允许的"用量 × 价格"产品是 3.6.1 的估算花费份额。
 - **时效性**：日频，含 14 天重叠窗口回补；`freshness_slo_days: 3`；最近入库 2026-09-15，最新数据期 2026-09-14。
+
+### 3.6.1 `openrouter_pricing` — 模型标价与估算花费份额
+
+L1 观察器不读这个来源；它供 ANT 观测使用（`openrouter_model_price_series`、`openrouter_estimated_spend_share_series`）。
+
+**价格怎么采**
+
+- 来源是公开模型列表 `openrouter.ai/api/v1/models`，免鉴权，每天 07:45 UTC 一次。
+- 每个模型存输入、输出两条单价，单位 USD / 百万 token，按日期保存；同一天价格变化追加修订版本。
+- 只有当天的价格可取，**历史从首次采集开始**，漏掉的日子补不回来。
+- 不记价格的条目：指向别名的条目；价格为 -1 的路由类条目（价格取决于它选中的模型）；价格条件无法折成单一单价的条目。
+- 分时定价（按星期和钟点）：按各时段时长折成一周平均价。列表顶层价格是请求那一刻的时段价，不直接用。
+- 按提示长度分档：用最短提示那一档。
+- 免费路由（`:free`）记价格 0。
+- 缓存读取价随输入价一起留存（`cache_read_price`），估算目前不使用它。
+
+**列表价代表什么**
+
+- 是模型默认端点（通常为原厂）当时的标价，含正在进行的折扣；折扣结束会表现为涨价。
+- 开源权重模型有几十家服务商，价格相差可达十倍以上。2026-11-27 抽查 DeepSeek V4.1 Flash 1017：原厂输入价 0.30，网页首屏显示的最低价是 0.036。
+
+**估算花费份额怎么算**
+
+- 逐日：某模型当日 token × (输入占比 × 输入价 + 输出占比 × 输出价)。输入占比是声明的假设，写在 `config/data/structured.yaml` 的 `openrouter_model_pricing_daily.quality.estimated_spend.input_token_share`，每个结果原样披露。
+- 当日价格 = 该日或之前最近一次快照，最多沿用 `max_snapshot_gap_days`（2）天；**从不使用之后的价格**。
+- 只发布完整 UTC 周；周内任何一天没有可用快照，整周返回"无价格数据"并列出缺价日期。价格采集开始前的周同样如此。
+- 份额 = 作者估算花费 ÷ 当周全部有价格用量的估算花费。`Other` 桶和列表里查不到的模型进"无价格"桶，不进分母，结果披露它占的 token 比例；超过 20% 带可靠性警告。
+- 每周另披露免费路由、分时定价、分档定价模型各占多少 token。结果不给金额。
+
+**为什么它不是收入**
+
+- 排行数据不区分输入与输出 token，比例是假设。
+- 标价不是实付价：缓存读写折扣、批量价、长提示加价、自带密钥和企业折扣都没有计入。差距很大：2026-11-27 模型网页上的实付输入均价，Claude Opus 5.5 为 0.63（标价 4），GPT-6.2 Astra 为 0.90（标价 8），主要因为缓存读取占大头。
+- 同一模型经不同服务商路由价格可以不同，列表只给一个价。
+- 只覆盖 OpenRouter 公共路由，不含直连各厂商接口、订阅和企业合同。
+- 因此只看同一口径下的**趋势和拐点**；不当作绝对份额，不称为收入、实际支出或市场份额。
 
 ### 3.7 `frontier_ai_capability` + `..._official_lab` — 原始能力前沿
 
@@ -233,7 +269,7 @@
 
 **数据可比性**
 
-1. 收入趋势 cell 不区分估算机构与原始标签，跨机构口径切换会被画成同一序列（见 3.5）。
+1. 收入趋势按来源分列（见 3.5），但同一来源内部改换原始标签仍在同一序列里。
 2. BTOS 波次必须按整数排序，且 2025-11 前后不可合并。
 3. Anthropic Economic Index 职业/任务两种切法不可相加或平均。
 4. Ramp vendor 份额可重叠、model share 非采用率；OpenRouter `Other` 桶不可忽略。
@@ -251,7 +287,7 @@
 10. Anthropic Economic Index 的 O\*NET 关系覆盖率约 78.5%，低于代码内 99% 期望线，仅记警告；影响补充覆盖指标，不影响四条核心序列。
 11. ~~`us_census_btos` 与 `rps_genai_adoption` 仍未提升到 `platform`~~ —— **已于 2026-09-19 解决**：两者签入基线改为 `platform`，生效模式随之切换；签入基线、本文件与 `STRUCTURED_DATA_OPERATIONS.md` §10.2 的不一致同时消除。
 12. **7 天节奏带来的新鲜度代价（2026-09-19 起）**：OpenRouter 与 frontier 能力路线上游都是日更或事件驱动，统一降到 7 天后，新 token 周与新 benchmark 成绩最多延迟 7 天入库。若某个模型在窗口内发布了关键成绩，Observe 报告在那一周内不会反映它。这是刻意用新鲜度换成本与节奏一致性，不是缺陷。
-13. **双来源同节奏后的残余风险**：TickerTrends 现在与 Sacra 同在 7 天节拍上，而趋势 cell 键不含估算机构，因此两家的「ARR / annualized revenue」仍会并入同一条序列。语义指纹能挡住**同一来源**的标记漂移，挡不住**不同估算机构之间**的口径差异——这与 3.5 记录的已知限制是同一个根因。
+13. **双来源同节奏**：TickerTrends 与 Sacra 同在 7 天节拍上，两家各成一条序列；语义指纹只能挡住同一来源的标记漂移，两家数值之间仍不可直接比较。
 
 **容量**
 

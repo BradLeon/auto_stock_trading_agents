@@ -352,6 +352,24 @@ class DataProducts:
                                                as_of=as_of, include_vintages=include_vintages,
                                                as_frame=as_frame)
 
+    def openrouter_model_price_series(self, *, model_permaslug: str = "", author: str = "",
+                                      start_date: str = "", end_date: str = "",
+                                      as_of: datetime | None = None) -> dict:
+        from .openrouter_rankings import openrouter_model_price_series
+
+        return openrouter_model_price_series(
+            self, model_permaslug=model_permaslug, author=author, start_date=start_date,
+            end_date=end_date, as_of=as_of)
+
+    def openrouter_estimated_spend_share_series(
+            self, *, author: str = "", start_date: str = "", end_date: str = "",
+            as_of: datetime | None = None, input_token_share: float | None = None) -> dict:
+        from .openrouter_rankings import openrouter_estimated_spend_share_series
+
+        return openrouter_estimated_spend_share_series(
+            self, author=author, start_date=start_date, end_date=end_date, as_of=as_of,
+            input_token_share=input_token_share)
+
     def openrouter_token_evidence_bundle(self, *, as_of: datetime | None = None,
                                          snapshot_consumer: str = "",
                                          snapshot_purpose: str = "") -> dict:

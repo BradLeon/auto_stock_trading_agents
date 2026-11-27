@@ -91,7 +91,7 @@ retired_consumers:
       - datasets: [ai_work_adoption, ai_enterprise_adoption_us, ai_worker_adoption_us, ramp_ai_adoption, ramp_ai_spend]
         target_product: HIER_DATA
         reason: AI 使用与投入证据支持 L1 产业层级命题。
-      - datasets: [frontier_ai_labs_revenue, openrouter_rankings_daily, frontier_ai_capability_benchmarks, frontier_ai_public_model_cards]
+      - datasets: [frontier_ai_labs_revenue, openrouter_rankings_daily, openrouter_model_pricing_daily, frontier_ai_capability_benchmarks, frontier_ai_public_model_cards]
         target_product: HIER_DATA
         reason: Frontier 公司商业化、用量与能力证据支持 L1 命题。
       - datasets: [company_financials, market_consensus, regional_tw_exports, regional_kr_exports, industry_dram_contract_price]

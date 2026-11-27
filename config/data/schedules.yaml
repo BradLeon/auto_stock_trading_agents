@@ -161,7 +161,7 @@ structured:
         attempts: 2
         backoff_seconds: [120, 600]
       scope:
-        public_routes: [livebench_git, terminal_bench_git, terminal_bench_science_json, osworld_json, automationbench_aa_public_page, scicode_aa_public_page, critpt_aa_public_page, mmmu_pro_aa_public_page, toolathlon_verified_html, spreadsheetbench_project, hle_aa_public_page]
+        public_routes: [livebench_v1_csv, terminal_bench_git, terminal_bench_science_json, osworld_json, automationbench_aa_public_page, scicode_aa_public_page, critpt_aa_public_page, mmmu_pro_aa_public_page, toolathlon_verified_html, spreadsheetbench_project, hle_aa_public_page]
         bulk_requests_per_run: 11
         conditional_requests: [etag, last_modified, git_sha, payload_sha256]
         hot_observation_days: 30

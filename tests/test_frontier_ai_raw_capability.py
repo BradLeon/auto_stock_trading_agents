@@ -221,10 +221,10 @@ def test_no_key_fallback_is_truthful_no_coverage():
 
 def test_public_source_parsers_emit_real_source_lineage_and_scope():
     livebench = b"model,math,code\nDeepSeek V4 Flash,80,70\n"
-    rows, meta = _parse_livebench_csv(livebench, source_url="https://raw.githubusercontent.com/LiveBench/new-livebench/main/public/table_2026_06_25.csv", fetched_date="2026-09-17")
+    rows, meta = _parse_livebench_csv(livebench, source_url="https://livebench.ai/v1/table_2026_06_25.csv", fetched_date="2026-09-17")
     assert rows[0]["lab_id"] == "DEEPSEEK"
     assert rows[0]["measurement_scope"] == "model_capability_proxy"
-    assert rows[0]["source_transport"] == "git_csv"
+    assert rows[0]["source_transport"] == "official_csv"
     assert meta["record_count"] == 1
     submission = {"metadata": {"model_display": {"label": "Fable 5.1"},
                                 "model_org": {"label": "Anthropic"}, "date": "2026-09-16",

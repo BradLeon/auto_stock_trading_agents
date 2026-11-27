@@ -18,7 +18,7 @@ from typing import Any, Iterable
 
 from ..sources.frontier_ai_capability import (
     BENCHMARKS, BENCHMARK_METHODS, COHORT_VERSION, DEFAULT_FLAGSHIP_MODEL_IDS,
-    DEFAULT_FLAGSHIP_MODEL_NAMES, LABS,
+    DEFAULT_FLAGSHIP_MODEL_NAMES, LABS, SERIES_START,
 )
 
 DATASET_ID = "frontier_ai_capability_benchmarks"
@@ -87,12 +87,24 @@ def _chart_data(matrix: dict[str, Any], a: dict[str, Any], b: dict[str, Any]) ->
     }
 
 
+def _in_series(row: dict[str, Any]) -> bool:
+    """Whether a stored score belongs to its benchmark's current series.
+
+    Scores ingested before the parser applied the same boundary stay in the
+    store; they are excluded here instead of being rewritten.
+    """
+    dims = _dims(row)
+    start = SERIES_START.get(str(dims.get("benchmark_id") or ""))
+    return not start or str(dims.get("score_as_of") or row.get("period") or "") >= start
+
+
 def _rows(products, *, as_of=None, include_vintages: bool = False) -> list[dict[str, Any]]:
     # Third-party AA scores and official Lab self-reports share one governed
     # dataset but retain distinct source identities for source-priority logic.
-    return products.structured.observations(dataset_id=DATASET_ID, source_id=None,
+    rows = products.structured.observations(dataset_id=DATASET_ID, source_id=None,
                                             as_of=as_of, latest_only=not include_vintages,
                                             accepted_only=True, limit=2_000_000)
+    return [row for row in rows if _in_series(row)]
 
 
 def _score_record(row: dict[str, Any]) -> dict[str, Any]:

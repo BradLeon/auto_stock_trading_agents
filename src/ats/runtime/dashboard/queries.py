@@ -140,6 +140,8 @@ class SourceRow:
     last_healthy_at: datetime | None = None
     last_new_at: datetime | None = None
     consecutive_failures: int = 0
+    consecutive_partial: int = 0     # successful runs in a row that lost at least one route of the source
+    failed_routes: str = ""          # the routes the latest of those runs lost
     data_time: DataTime = field(default_factory=DataTime)
     light: str = "grey"        # green / yellow / red / grey
     light_reason: str = ""
@@ -147,7 +149,8 @@ class SourceRow:
 
 
 def assess(enabled: bool, slo_days: int, last_healthy_at: datetime | None, now: datetime,
-           consecutive_failures: int = 0, interval_days: float = 0) -> tuple[str, str]:
+           consecutive_failures: int = 0, interval_days: float = 0,
+           consecutive_partial: int = 0, failed_routes: str = "") -> tuple[str, str]:
     """(light, reason). Freshness against the SLO (Q3) AND what the latest attempts did.
 
     2026-11-21 (user): three calendar jobs showed 正常 next to a red 失败 because the light only looked at
@@ -157,6 +160,10 @@ def assess(enabled: bool, slo_days: int, last_healthy_at: datetime | None, now: 
       plus one day, and never earlier than half of the SLO (a weekly job on day 6 of a 10-day SLO is on
       schedule, not a warning: 17 weekly jobs sat yellow every week under the bare half-SLO line);
     - green otherwise; a disabled job is grey.
+
+    2026-11-27 (user): a run that succeeded but lost some routes of its source is not normal either (two
+    routes failed for five weeks behind a green light): yellow once, red from the second run in a row,
+    naming the routes.
     """
     if not enabled:
         return "grey", "已停用"
@@ -167,8 +174,12 @@ def assess(enabled: bool, slo_days: int, last_healthy_at: datetime | None, now: 
         return "red", f"已超 SLO：距最近正常运行 {age:.1f} 天 > {slo_days} 天"
     if consecutive_failures >= 2:
         return "red", f"连续失败 {consecutive_failures} 次"
+    if consecutive_partial >= 2:
+        return "red", f"部分路由连续 {consecutive_partial} 次失败：{failed_routes}"
     if consecutive_failures == 1:
         return "yellow", "最近一次运行失败"
+    if consecutive_partial == 1:
+        return "yellow", f"部分路由失败：{failed_routes}"
     due = max(slo_days / 2, interval_days + 1) if interval_days else slo_days / 2
     if age > due:
         return "yellow", f"已错过计划运行：距最近正常运行 {age:.1f} 天（SLO {slo_days} 天）"
@@ -234,7 +245,7 @@ def _data_times(data_conn, jobs) -> dict[str, DataTime]:
 
 
 def source_rows(paths: DashboardPaths, now: datetime | None = None, days: int = 30) -> list[SourceRow]:
-    from ...data.refresh import load_plan
+    from ...data.refresh import PARTIAL_ROUTE_REASON, load_plan
 
     now = now or datetime.now(timezone.utc)
     plan = load_plan(paths.schedules)
@@ -275,11 +286,20 @@ def source_rows(paths: DashboardPaths, now: datetime | None = None, days: int = 
                     row.consecutive_failures += 1
                 elif r["status"] in HEALTHY:
                     break
+            for r in reversed(history):
+                if r["status"] not in HEALTHY:
+                    continue                 # a failed attempt in between says nothing about the routes
+                code = r["reason_code"] or ""
+                if not code.startswith(PARTIAL_ROUTE_REASON):
+                    break
+                row.consecutive_partial += 1
+                row.failed_routes = row.failed_routes or code[len(PARTIAL_ROUTE_REASON):].replace(",", "、")
         row.last_healthy_at = parse_time((healthy.get(job.id) or {}).get("completed_at"))
         row.last_new_at = parse_time((new.get(job.id) or {}).get("completed_at"))
         row.data_time = _job_data_time(job, times, row)
         row.light, row.light_reason = assess(job.enabled, job.freshness_slo_days, row.last_healthy_at, now,
-                                             row.consecutive_failures, _interval_days(job))
+                                             row.consecutive_failures, _interval_days(job),
+                                             row.consecutive_partial, row.failed_routes)
         out.append(row)
     return out
 

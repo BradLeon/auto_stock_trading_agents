@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import sqlite3
 import subprocess
@@ -45,6 +46,11 @@ _SAFE_DERIVED_ACTIONS = {"evidence-observe", "chain-source-collect", "macro-news
 # Article evidence extraction reports `partial` when its per-run request cap left relevant articles for the next
 # run: expected, and the packet's reason names how many remain (article-witness-observations 2.3).
 _PARTIAL_OK_DERIVED = {"calendar-refresh", "calendar-finalize", "article-evidence-observe"}
+# A source that reads several independent routes marks each one that failed in its run note (``route_failed:<name>:``).
+# The other routes' data is published, so the run succeeds, and the ledger reason names the failed ones for the
+# dashboard and its alerts.
+PARTIAL_ROUTE_REASON = "partial_route_failed:"
+_ROUTE_FAILED = re.compile(r"route_failed:([a-z0-9_]+):")
 
 
 def _resolve_command(command: tuple[str, ...], window: str) -> tuple[str, ...]:
@@ -651,6 +657,11 @@ def _partial_runs_hold_data(rows: list[tuple]) -> bool:
     return bool(bad) and all(row[0] == "partial" and int(row[1] or 0) + int(row[2] or 0) > 0 for row in bad)
 
 
+def _failed_routes(rows: list[tuple]) -> list[str]:
+    """Route names a source marked as failed in its ingestion run notes (fourth column)."""
+    return sorted({name for row in rows for name in _ROUTE_FAILED.findall(str(row[3] or ""))})
+
+
 def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = False,
              only_job: str = "", data_db: Path | None = None,
              manual: bool = False) -> list[dict[str, Any]]:
@@ -743,7 +754,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             if refs["runs"] and job.domain == "structured":
                 with sqlite3.connect(f"file:{data_db}?mode=ro", uri=True) as conn:
                     run_rows = conn.execute(
-                        "SELECT status, accepted, unchanged FROM structured_ingestion_runs WHERE run_id IN (" +
+                        "SELECT status, accepted, unchanged, note FROM structured_ingestion_runs WHERE run_id IN (" +
                         ",".join("?" for _ in refs["runs"]) + ")", refs["runs"]).fetchall()
                 statuses = [row[0] for row in run_rows]
             action = job.command[2]
@@ -751,7 +762,7 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
                 (action == "release-check" and "--ingest-new" in job.command) or \
                 action == "frontier-capability-audit" or action in {"article-ingest", "document-ingest", "fixed-ingest"}
             accepted_packet_statuses = {"succeeded", "no_change"}
-            if job.domain == "structured" and action in {"ingest", "release-check"}:
+            if job.domain == "structured" and action in _SAFE_ACTIONS:
                 accepted_packet_statuses.add("partial")       # judged below from the run rows
             if action in {"calendar-refresh", "calendar-finalize"}:
                 accepted_packet_statuses.add("partial")
@@ -774,7 +785,9 @@ def run_tick(plan: RefreshPlan, *, now: datetime | None = None, dry_run: bool = 
             elif action in {"calendar-refresh", "calendar-finalize"}:
                 status, reason = packet_status, ""
             elif _partial_runs_hold_data(run_rows):
-                status, reason = "succeeded", "partial_rows_held_back"
+                failed_routes = _failed_routes(run_rows)
+                status, reason = "succeeded", (PARTIAL_ROUTE_REASON + ",".join(failed_routes)
+                                               if failed_routes else "partial_rows_held_back")
             elif any(s not in {"succeeded", "no_change"} for s in statuses):
                 status, reason = "failed", "ingestion_failed"
             elif action == "ingest" and not refs["runs"]:

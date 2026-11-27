@@ -48,6 +48,12 @@ jobs:
     source: Artificial Analysis 官方免费数据接口（仅内部使用，须署名）
     used_by: 模型领先性与单任务成本的人工查看；不供模型任务读取
     if_broken: 指数停在上一快照。401 或 403 检查密钥；指数换主版本会拒收，需核对方法说明。
+  getdeploying_gpu_prices_weekly_ingest:
+    label: GPU 租赁价格
+    what: 每周读取各型号 GPU 挂牌价的周度中位数：按需价用于判读，现货价和 12 个月预订价作旁证。
+    source: GetDeploying 公开周度数据文件（CC BY 4.0，须署名）
+    used_by: 算力投入是否过剩的判断 → ANT 观测
+    if_broken: 价格停在上一周，超过 21 天标为数据过期。列或型号名改变会拒收，需核对数据页说明。
   openrouter_pricing_p1d_ingest:
     label: OpenRouter 模型标价
     what: 每天记录 OpenRouter 公开模型列表里各模型的输入与输出单价。

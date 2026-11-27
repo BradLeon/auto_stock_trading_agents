@@ -88,7 +88,7 @@ retired_consumers:
     preserve_historical_lineage: true
     standalone_role: forbidden
     dispositions:
-      - datasets: [ai_work_adoption, ai_enterprise_adoption_us, ai_worker_adoption_us, ramp_ai_adoption, ramp_ai_spend]
+      - datasets: [ai_work_adoption, ai_enterprise_adoption_us, ai_worker_adoption_us, ramp_ai_adoption, ramp_ai_spend, gpu_rental_price_weekly]
         target_product: HIER_DATA
         reason: AI 使用与投入证据支持 L1 产业层级命题。
       - datasets: [frontier_ai_labs_revenue, openrouter_rankings_daily, openrouter_model_pricing_daily, epoch_capabilities_index_models, frontier_ai_capability_benchmarks, frontier_ai_public_model_cards]

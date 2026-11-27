@@ -382,6 +382,12 @@ class DataProducts:
 
         return model_indices(self, lab_id=lab_id, as_of=as_of)
 
+    def gpu_rental_price(self, *, gpu_model: str = "",
+                         as_of: datetime | None = None) -> dict:
+        from .gpu_rental_price import rental_price
+
+        return rental_price(self, gpu_model=gpu_model, as_of=as_of)
+
     def openrouter_token_evidence_bundle(self, *, as_of: datetime | None = None,
                                          snapshot_consumer: str = "",
                                          snapshot_purpose: str = "") -> dict:

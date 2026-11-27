@@ -191,6 +191,12 @@ def _artificial_analysis_indices():
     return ArtificialAnalysisIndicesAdapter()
 
 
+def _getdeploying_gpu_prices():
+    from ...sources.getdeploying_gpu_prices import GetDeployingGpuPriceAdapter
+
+    return GetDeployingGpuPriceAdapter()
+
+
 def _frontier_ai_capability():
     from ...sources.frontier_ai_capability import PublicBenchmarkAdapter
 
@@ -238,6 +244,8 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         "epoch_capabilities_index", _epoch_capabilities_index),
     "artificial_analysis_indices": RuntimeSourceSpec(
         "artificial_analysis_indices", _artificial_analysis_indices),
+    "getdeploying_gpu_prices": RuntimeSourceSpec(
+        "getdeploying_gpu_prices", _getdeploying_gpu_prices),
     "frontier_ai_capability": RuntimeSourceSpec(
         "frontier_ai_capability", _frontier_ai_capability,
         discovery_group="frontier_ai_capability"),

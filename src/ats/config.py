@@ -60,6 +60,7 @@ class Secrets(BaseSettings):
     finnhub_api_key: str = ""
     fmp_api_key: str = ""          # FinancialModelingPrep — earnings-call transcripts
     tavily_api_key: str = ""
+    artificial_analysis_api_key: str = ""  # official Data API; free tier gives headline indices
     gmail_address: str = ""            # newsletter inbox (IMAP enabled, 2FA + app password)
     gmail_app_password: str = ""       # https://myaccount.google.com/apppasswords
     gmail_imap_host: str = "imap.gmail.com"

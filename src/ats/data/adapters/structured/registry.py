@@ -179,6 +179,18 @@ def _openrouter_pricing():
     return OpenRouterPricingAdapter()
 
 
+def _epoch_capabilities_index():
+    from ...sources.epoch_capabilities_index import EpochCapabilitiesIndexAdapter
+
+    return EpochCapabilitiesIndexAdapter()
+
+
+def _artificial_analysis_indices():
+    from ...sources.artificial_analysis_indices import ArtificialAnalysisIndicesAdapter
+
+    return ArtificialAnalysisIndicesAdapter()
+
+
 def _frontier_ai_capability():
     from ...sources.frontier_ai_capability import PublicBenchmarkAdapter
 
@@ -222,6 +234,10 @@ _RUNTIMES: dict[str, RuntimeSourceSpec] = {
         discovery_group="ai_commercialization"),
     # Daily snapshot only, collected by its own schedule job: no release discovery.
     "openrouter_pricing": RuntimeSourceSpec("openrouter_pricing", _openrouter_pricing),
+    "epoch_capabilities_index": RuntimeSourceSpec(
+        "epoch_capabilities_index", _epoch_capabilities_index),
+    "artificial_analysis_indices": RuntimeSourceSpec(
+        "artificial_analysis_indices", _artificial_analysis_indices),
     "frontier_ai_capability": RuntimeSourceSpec(
         "frontier_ai_capability", _frontier_ai_capability,
         discovery_group="frontier_ai_capability"),

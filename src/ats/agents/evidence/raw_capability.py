@@ -114,10 +114,10 @@ def render_ai_raw_capability_markdown(packet: dict[str, Any]) -> str:
               "## 关键证据", "", f"- 数据状态：`{packet.get('status')}`；最新 score-as-of：`{(packet.get('freshness') or {}).get('latest_score_as_of') or 'NA'}`；统一矩阵覆盖 {matrix.get('coverage', {}).get('numeric', 0)}/{matrix.get('coverage', {}).get('total', 99)}。",
               f"- 统一规则：A 比较同一 comparability group 的累计 global frontier；缺置信区间只能暂定。B 分三级：多数任务解锁（95% 置信下界 > 50%）、人类基准门槛、经济可用门槛；后两级仅在 benchmark 预先定义且可观测时报告。", ""]
     lines += ["## 更新机制与覆盖滞后", "",
-              "- **不是关键词查询。** 每日轮询已登记的公开 Git/CSV/JSON/README 载体，动态发现其中出现的 model id、版本和分数。当前旗舰由官方 release 发现或显式 override 决定；配置注册表只在官方 release 暂无覆盖时作为回退。benchmark 发布先后不会把旧模型误选成新旗舰，精确版本无结果时保留 `NA`。",
+              "- **不是关键词查询。** 每日轮询已登记的公开 Git/CSV/JSON/README 载体，动态发现其中出现的 model id、版本和分数。当前旗舰取模型发布登记中该实验室最新的已确认通用旗舰；未登记的实验室整列 `NA`。benchmark 发布先后不会把旧模型误选成新旗舰，精确版本无结果时保留 `NA`。",
               "- **上游变更检测。** Git 使用 commit/blob 身份，HTTP 使用 ETag/Last-Modified，最终以 payload SHA-256 兜底；相同身份返回 `no_change`，新增或修订才追加新的 observation vintage。",
               "- **调度频率。** 模型/benchmark 发现和分数探测每日运行；最近 30 天的热观测每日检查，31–90 天每三天检查，成熟序列每周检查；官方实验室自报另有每日探测，每周做全量方法/来源审计。",
-              "- **必须区分两种滞后。** 系统探测滞后由轮询频率决定（正常为不超过一个日周期，成熟源最长约一周）；benchmark 覆盖滞后则是“模型公开 release → benchmark 首次发布该精确版本结果”的时间差，只有当两端都提供可验证日期时才计算。当前多数公开结果表没有模型 release date，因此报告不填推测天数。", ""]
+              "- **必须区分两种滞后。** 系统探测滞后由轮询频率决定（正常为不超过一个日周期，成熟源最长约一周）；benchmark 覆盖滞后则是“模型公开 release → benchmark 首次发布该精确版本结果”的时间差，只有当两端都提供可验证日期时才计算。模型发布日期只取自发布登记，未登记的不填推测天数。", ""]
     # Review-facing matrix orientation is benchmark rows × model columns.  The
     # underlying product remains lab-indexed so selection and lineage are not
     # changed; this is only a presentation transpose.  Full benchmark labels

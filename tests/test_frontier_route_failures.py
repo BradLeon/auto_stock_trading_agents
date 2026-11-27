@@ -88,8 +88,7 @@ SCOPE = {"benchmarks": ["livebench", "toolathlon_verified"]}
 
 @pytest.fixture(autouse=True)
 def public_routes_open(monkeypatch):
-    for name in ("ATS_FRONTIER_AI_PUBLIC_ROUTES", "ATS_FRONTIER_AI_USE_AA", "ATS_FRONTIER_AI_FLAGSHIP_OVERRIDES",
-                 "ATS_FRONTIER_AI_DISABLED_BENCHMARKS"):
+    for name in ("ATS_FRONTIER_AI_PUBLIC_ROUTES", "ATS_FRONTIER_AI_USE_AA", "ATS_FRONTIER_AI_DISABLED_BENCHMARKS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "1")
     monkeypatch.setenv("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "1")

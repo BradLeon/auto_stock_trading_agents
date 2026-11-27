@@ -370,6 +370,18 @@ class DataProducts:
             self, author=author, start_date=start_date, end_date=end_date, as_of=as_of,
             input_token_share=input_token_share)
 
+    def epoch_capability_index(self, *, lab_id: str = "",
+                               as_of: datetime | None = None) -> dict:
+        from .epoch_capabilities_index import capability_index
+
+        return capability_index(self, lab_id=lab_id, as_of=as_of)
+
+    def artificial_analysis_model_indices(self, *, lab_id: str = "",
+                                          as_of: datetime | None = None) -> dict:
+        from .artificial_analysis_indices import model_indices
+
+        return model_indices(self, lab_id=lab_id, as_of=as_of)
+
     def openrouter_token_evidence_bundle(self, *, as_of: datetime | None = None,
                                          snapshot_consumer: str = "",
                                          snapshot_purpose: str = "") -> dict:

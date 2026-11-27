@@ -85,7 +85,7 @@ def _commercialization_packet():
 
 def _raw_capability_packet():
     return {"status": "ok", "claim_id": "ai_frontier_raw_capability", "b": {"status": "crossed"},
-            "a": {"status": "expanding", "benchmarks": [{"current": {"release_date": "2026-10-09"}}]}}
+            "a": {"status": "expanding", "benchmarks": [{"current": {"score_as_of": "2026-10-09"}}]}}
 
 
 @pytest.mark.parametrize("convert, packet", [
@@ -108,8 +108,8 @@ def test_a_company_without_a_governed_trend_produces_nothing():
 def test_raw_capability_counts_come_from_the_packet():
     packet = {"status": "ok", "claim_id": "ai_frontier_raw_capability",
               "a": {"status": "confirmed_expansion", "benchmarks": [
-                  {"status": "confirmed_expansion", "current": {"release_date": "2026-10-09"}},
-                  {"status": "not_extended", "current": {"release_date": "2026-09-01"}}]},
+                  {"status": "confirmed_expansion", "current": {"score_as_of": "2026-10-09"}},
+                  {"status": "not_extended", "current": {"score_as_of": "2026-09-01"}}]},
               "b": {"status": "not_crossed", "benchmarks": [{"status": "confirmed_crossing", "current": {}}]}}
     points = {p.concept: p for p in g.raw_capability_points(packet)}
     assert points["capability_frontier_extension"].value == 1.0

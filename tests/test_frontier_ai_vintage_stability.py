@@ -24,8 +24,7 @@ FIRST_RUN = datetime(2026, 11, 13, 8, 0, tzinfo=timezone.utc)
 
 @pytest.fixture(autouse=True)
 def _public_route_policy(monkeypatch):
-    for name in ("ATS_FRONTIER_AI_PUBLIC_ROUTES", "ATS_FRONTIER_AI_FLAGSHIP_OVERRIDES",
-                 "ATS_FRONTIER_AI_USE_AA", "ATS_FRONTIER_AI_CAPABILITY_FIXTURE"):
+    for name in ("ATS_FRONTIER_AI_PUBLIC_ROUTES", "ATS_FRONTIER_AI_USE_AA", "ATS_FRONTIER_AI_CAPABILITY_FIXTURE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ATS_FRONTIER_AI_ALLOW_PUBLIC_STRUCTURED_PAGES", "1")
     monkeypatch.setenv("ATS_FRONTIER_AI_PUBLIC_TERMS_APPROVED", "1")
@@ -163,39 +162,99 @@ def test_new_raw_field_about_the_score_appends_once(collect):
     assert (added["accepted"], repeated["accepted"], repeated["unchanged"]) == (1, 0, 1)
 
 
-def test_setting_and_clearing_a_flagship_override_each_append(collect, monkeypatch):
-    collect(["osworld_2"], FIRST_RUN)
-    monkeypatch.setenv("ATS_FRONTIER_AI_FLAGSHIP_OVERRIDES", json.dumps({"OPENAI": "gpt-6-astra"}))
-    pinned = collect(["osworld_2"], FIRST_RUN + timedelta(days=7))
-    held = collect(["osworld_2"], FIRST_RUN + timedelta(days=14))
-    monkeypatch.delenv("ATS_FRONTIER_AI_FLAGSHIP_OVERRIDES")
-    cleared = collect(["osworld_2"], FIRST_RUN + timedelta(days=21))
-    assert [r["accepted"] for r in (pinned, held, cleared)] == [1, 0, 1]
-
-
-def test_return_to_an_earlier_value_appends_even_when_the_payload_is_identical(tmp_path):
-    """Without a fetch time anywhere in the payload, the third reading equals the first byte for byte."""
+@pytest.fixture
+def collect_fixture(tmp_path):
+    """Ingest a hand-written payload; each call is one week later than the previous one."""
     repo = SQLiteStructuredRepository(tmp_path / "fixed.sqlite", artifact_root=tmp_path / "fixed-artifacts")
     repo.bootstrap_catalog(StructuredCatalog.load())
     fixture = tmp_path / "scores.json"
-    created = []
-    for week, score in enumerate((50, 60, 50, 50)):
+    weeks = []
+
+    def run(*, model: dict | None = None, dimensions: dict | None = None, **score):
         fixture.write_text(json.dumps({
-            "models": [{"lab_id": "OPENAI", "model_id": "gpt-6-astra"}],
+            "models": [{"lab_id": "OPENAI", "model_id": "gpt-6-astra", **(model or {"flagship": False})}],
             "scores": [{"lab_id": "OPENAI", "model_id": "gpt-6-astra", "benchmark_id": "scicode",
-                        "score": score, "score_as_of": "2026-09-17"}]}), encoding="utf-8")
-        at = FIRST_RUN + timedelta(days=7 * week)
-        created.append(IngestionPipeline(repo).run(
-            FrontierAICapabilityAdapter(fixture_path=fixture, clock=lambda at=at: at),
-            FetchRequest(source_id="frontier_ai_capability", dataset_id=DATASET,
-                         query_scope={"test_only": True}))["accepted"])
+                        "score": 50, "score_as_of": "2026-09-17", **score}]}), encoding="utf-8")
+        at = FIRST_RUN + timedelta(days=7 * len(weeks))
+        weeks.append(at)
+        adapter = FrontierAICapabilityAdapter(fixture_path=fixture, clock=lambda: at)
+        if dimensions:
+            fetch = adapter.fetch
+
+            def fetch_with_dimensions(request):
+                batch = fetch(request)
+                return batch.model_copy(update={"records": [
+                    record.model_copy(update={"dimensions": {**record.dimensions, **dimensions}})
+                    for record in batch.records]})
+
+            adapter.fetch = fetch_with_dimensions
+        return IngestionPipeline(repo).run(adapter, FetchRequest(
+            source_id="frontier_ai_capability", dataset_id=DATASET, query_scope={"test_only": True}))
+
+    run.repo = repo
+    return run
+
+
+def test_setting_and_clearing_an_official_release_flag_each_append(collect_fixture):
+    official = {"flagship": True, "flagship_source": "official_lab_release"}
+    results = [collect_fixture(model=model) for model in (None, official, official, None)]
+    assert [r["accepted"] for r in results] == [1, 1, 0, 1]
+
+
+def test_scores_stored_before_the_release_registry_stay_unchanged(collect_fixture):
+    """Older rows carry a release date and a configured flagship flag that collection no longer writes."""
+    first = collect_fixture(model={"flagship": True, "flagship_source": "configured_registry"},
+                            dimensions={"release_date": "2026-09-17"})
+    second = collect_fixture()
+    assert (first["accepted"], second["accepted"], second["unchanged"]) == (1, 0, 1)
+    assert _stored(collect_fixture.repo) == 1
+
+
+@pytest.mark.parametrize("revised", [{"score": 40}, {"score": 50, "cost": {"value": 1.5, "basis": "per_task"}}],
+                         ids=["lower_score", "cost_added"])
+def test_new_reading_of_a_score_stored_before_the_registry_replaces_it_in_latest_reads(collect_fixture, revised):
+    collect_fixture(dimensions={"release_date": "2026-09-17"})
+    assert collect_fixture(**revised)["accepted"] == 1
+    products = DataProducts(structured_repository=collect_fixture.repo)
+    latest = products.frontier_ai_capability_scores(include_vintages=False)
+    assert [(row["score"], row["cost_value"]) for row in latest] == [
+        (float(revised["score"]), 1.5 if "cost" in revised else None)]
+    assert len(products.frontier_ai_capability_scores(include_vintages=True)) == 2
+
+
+def test_scores_of_other_dates_stored_before_the_registry_remain_readable(collect_fixture):
+    collect_fixture(dimensions={"release_date": "2026-09-17"})
+    collect_fixture(score=60, score_as_of="2026-09-24")
+    latest = DataProducts(structured_repository=collect_fixture.repo).frontier_ai_capability_scores(
+        include_vintages=False)
+    assert sorted(row["score"] for row in latest) == [50.0, 60.0]
+
+
+def test_unchanged_cost_found_under_another_link_appends_nothing(collect_fixture):
+    cost = {"value": 1.5, "basis": "per_task"}
+    results = [collect_fixture(cost=cost, source_url=url)
+               for url in ("https://example.test/a", "https://example.test/b")]
+    assert [(r["accepted"], r["unchanged"]) for r in results] == [(1, 0), (0, 1)]
+
+
+def test_return_to_an_earlier_value_appends_even_when_the_payload_is_identical(collect_fixture):
+    """Without a fetch time anywhere in the payload, the third reading equals the first byte for byte."""
+    created = [collect_fixture(score=score)["accepted"] for score in (50, 60, 50, 50)]
     assert created == [1, 1, 1, 0]
-    assert [row["value"] for row in repo.observations(dataset_id=DATASET)] == [50.0]
+    assert [row["value"] for row in collect_fixture.repo.observations(dataset_id=DATASET)] == [50.0]
 
 
-def test_stored_registry_flag_does_not_outlive_a_registry_change(collect, monkeypatch):
-    collect(["osworld_2"], FIRST_RUN)
-    monkeypatch.setitem(product.DEFAULT_FLAGSHIP_MODEL_IDS, "OPENAI", "gpt-7")
-    monkeypatch.setitem(product.DEFAULT_FLAGSHIP_MODEL_NAMES, "OPENAI", "GPT-7")
-    matrix = product.capability_matrix(DataProducts(structured_repository=collect.repo))
-    assert matrix["by_lab"]["OPENAI"]["model"]["model_release_id"] == "gpt-7"
+def test_registry_change_applies_to_scores_that_were_not_collected_again(collect, monkeypatch, tmp_path):
+    # SciCode has no latest-evaluated fallback: a cell is filled only by the registered flagship itself.
+    collect(["scicode"], FIRST_RUN)
+    registry = tmp_path / "releases.yaml"
+    monkeypatch.setattr("ats.data.model_releases.registry_path", lambda: registry)
+    covered = []
+    for model_id in ("gpt-7", "gpt-6-astra"):
+        registry.write_text(json.dumps({"version": 1, "official_domains": {"OPENAI": ["openai.com"]}, "releases": [
+            {"lab_id": "OPENAI", "model_id": model_id, "tier": "general_flagship", "status": "confirmed",
+             "release_date": "2026-09-01", "announcement_url": "https://openai.com/index/x",
+             "registered_at": "2026-09-02T00:00:00Z"}]}), encoding="utf-8")
+        entry = product.capability_matrix(DataProducts(structured_repository=collect.repo))["by_lab"]["OPENAI"]
+        covered.append((entry["model"]["model_release_id"], entry["covered"]))
+    assert covered == [("gpt-7", 0), ("gpt-6-astra", 1)]

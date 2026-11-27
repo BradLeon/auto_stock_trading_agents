@@ -19,6 +19,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import time
@@ -124,6 +125,7 @@ PUBLIC_ROUTES = {
 PARSER_VERSION = "frontier_ai_capability/v1"
 COHORT_VERSION = "frontier_ai_flagship_cohort/v1"
 PUBLIC_REQUEST_BUDGET = 64
+COST_BASES = ("per_task", "full_evaluation")
 # First score date that belongs to a benchmark's current series. Older rows were
 # measured on an earlier definition the maintainer declares not comparable (the
 # Toolathlon page keeps them as an archived leaderboard below the current one).
@@ -145,54 +147,6 @@ BENCHMARKS = (
     "critpt", "osworld_2", "mmmu_pro", "toolathlon_verified",
     "spreadsheetbench_2", "humanitys_last_exam",
 )
-DEFAULT_FLAGSHIP_MODEL_IDS = {
-    "OPENAI": "gpt-6-astra",
-    "ANTHROPIC": "claude-fable-5.1",
-    "GOOGLE": "gemini-3.8-flash",
-    "XAI": "grok-4.6",
-    "DEEPSEEK": "deepseek-v4.1-flash",
-    "MOONSHOT": "kimi-k3",
-    "TENCENT": "hy4",
-    "ZAI": "glm-5.3",
-    "ALIBABA": "qwen3.8-max",
-}
-DEFAULT_FLAGSHIP_MODEL_NAMES = {
-    "OPENAI": "GPT-6 Astra",
-    "ANTHROPIC": "Claude Fable 5.1",
-    "GOOGLE": "Gemini 3.8 Flash",
-    "XAI": "Grok 4.6",
-    "DEEPSEEK": "DeepSeek V4.1 Flash",
-    "MOONSHOT": "Kimi K3",
-    "TENCENT": "Tencent Hy4",
-    "ZAI": "GLM-5.3",
-    "ALIBABA": "Qwen3.8 Max",
-}
-
-# Exact source aliases for the reviewed flagship releases. These are an
-# identity registry, not fuzzy matching rules: a nearby release such as
-# ``glm-5.3-flash`` is deliberately absent and therefore cannot populate the
-# ``glm-5.3`` column. Configuration suffixes are listed only when the public
-# source explicitly evaluates that exact release under a declared effort.
-FLAGSHIP_MODEL_SOURCE_ALIASES = {
-    "OPENAI": {"gpt-6-astra", "gpt-6-astra-max", "openai/gpt-6-astra"},
-    "ANTHROPIC": {
-        "claude-fable-5.1", "claude-fable-5-1", "fable-5.1",
-        "anthropic/claude-fable-5-1", "claude-fable-5-1-max-effort",
-        "claude-fable-5.1-max-with-fallback",
-    },
-    "GOOGLE": {
-        "gemini-3.8-flash", "gemini-3-8-flash", "gemini-3.8-flash-high",
-        "gemini/gemini-3.8-flash",
-    },
-    "XAI": {"grok-4.6", "grok-4-6", "grok-4.6-high", "xai/grok-4.6"},
-    "DEEPSEEK": {
-        "deepseek-v4.1-flash", "deepseek-v4-1-flash", "deepseek-v4.1-flash-max",
-    },
-    "MOONSHOT": {"kimi-k3", "kimi-k3-max", "kimi-kimi-k3-max"},
-    "TENCENT": {"hy4", "hy4-high", "tencent/hy4"},
-    "ZAI": {"glm-5.3", "glm-5-3", "glm-5.3-max", "anthropic/glm-5.3"},
-    "ALIBABA": {"qwen3.8-max", "qwen3-8-max", "qwen3.8-max-0902"},
-}
 BENCHMARK_METHODS: dict[str, dict[str, Any]] = {
     "livebench": {"label": "LiveBench", "method_version": "v1", "direction": "general dynamic reasoning",
                    "value_range": [0, 100], "score_semantics": "percent correct",
@@ -322,6 +276,19 @@ def _date(value: Any, *, fallback: str = "") -> str:
     return text
 
 
+def _published_cost(value: Any, basis: str) -> dict[str, Any] | None:
+    """A cost the source itself publishes for this evaluation, never one priced from tokens."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(amount) or amount < 0 or basis not in COST_BASES:
+        return None
+    return {"value": amount, "currency": "USD", "basis": basis}
+
+
 def _timestamp(value: Any) -> datetime | None:
     if not value:
         return None
@@ -402,37 +369,17 @@ def _display_model(value: Any) -> str:
     return text or "Unknown model"
 
 
-def _registered_model_release_id(lab: str, *, model_id: Any = "", model_name: Any = "",
-                                 details_url: Any = "") -> str:
-    """Resolve an evaluated configuration to an exact registered release.
+def _evaluated_release_id(*, model_id: Any = "", model_name: Any = "",
+                          details_url: Any = "") -> str:
+    """The source's own release identifier for one evaluated configuration.
 
-    Artificial Analysis exposes the release slug in ``detailsUrl`` while its
-    row label includes effort/configuration suffixes. Other public leaderboards
-    expose stable but source-specific exact aliases. We preserve the evaluated
-    variant as ``model_id`` and use this separate id only for the fixed flagship
-    join. No prefix, family, or edit-distance matching is permitted.
+    Artificial Analysis exposes the release slug in ``detailsUrl`` while its row
+    label carries effort/configuration suffixes. Which official release this is
+    belongs to the model release registry, resolved when scores are read.
     """
-    candidates: list[str] = []
     if details_url:
         path = str(details_url).split("?", 1)[0].rstrip("/")
-        candidates.append(path.rsplit("/", 1)[-1])
-    candidates.extend((str(model_id or ""), str(model_name or "")))
-    def release_base(candidate: Any) -> str:
-        normalized = _clean_model_id(candidate)
-        # These are evaluation settings, not model releases. Only this closed
-        # suffix vocabulary is removed; product variants such as ``flash`` or
-        # ``lite`` remain part of identity and therefore cannot be merged.
-        return re.sub(
-            r"-(?:xhigh|max|high|medium|low)(?:-effort)?(?:-with-fallback)?$",
-            "", normalized,
-        )
-
-    normalized = {release_base(candidate) for candidate in candidates if candidate}
-    aliases = {release_base(alias) for alias in FLAGSHIP_MODEL_SOURCE_ALIASES.get(lab, set())}
-    if normalized & aliases:
-        return DEFAULT_FLAGSHIP_MODEL_IDS[lab]
-    if details_url and candidates:
-        return _clean_model_id(candidates[0])
+        return _clean_model_id(path.rsplit("/", 1)[-1])
     return _clean_model_id(model_id or model_name)
 
 
@@ -463,8 +410,9 @@ def _score_date(value: Any, fetched_date: str) -> dict[str, Any]:
 REVISION_IGNORED_DIMENSIONS = ("score_as_of", "release_date", "model_name", "flagship", "flagship_source",
                                "source_transport", "source_url", "details_url")
 REVISION_IGNORED_RAW = ("provider_row", "model", "method", "meta", "source_url")
-# A flagship set by a person or an official release is a decision, so setting or clearing it is a new reading.
-PINNED_FLAGSHIP_SOURCES = ("operator_override", "official_release", "official_lab_release")
+# A flagship stated by an official release is part of that record, so setting or clearing it is a new reading.
+# Readers take the current flagship from the model release registry, never from this stored flag.
+PINNED_FLAGSHIP_SOURCES = ("official_release", "official_lab_release")
 
 
 def _revision_rule(*, date_observed: bool) -> RevisionRule:
@@ -476,20 +424,14 @@ def _revision_rule(*, date_observed: bool) -> RevisionRule:
 
 
 def _public_model(models: dict[tuple[str, str], dict[str, Any]], *, lab: str,
-                  model_id: str, display_name: str, score_date: str,
+                  model_id: str, display_name: str,
                   source_url: str, model_release_id: str = "") -> None:
-    key = (lab, model_id)
-    current = models.get(key)
-    if current is None:
-        models[key] = {"lab_id": lab, "model_id": model_id,
-                       "display_name": display_name, "available": True,
-                       "flagship": False, "lineage": model_id,
-                       "model_release_id": model_release_id or model_id,
-                       "release_date": score_date,
-                       "source_url": source_url}
-        return
-    if score_date > str(current.get("release_date") or ""):
-        current["release_date"] = score_date
+    # A score page says nothing about when a model was released or whether it is
+    # the lab's flagship; both come from the model release registry.
+    models.setdefault((lab, model_id), {
+        "lab_id": lab, "model_id": model_id, "display_name": display_name,
+        "available": True, "flagship": False, "lineage": model_id,
+        "model_release_id": model_release_id or model_id, "source_url": source_url})
 
 
 def _parse_livebench_csv(payload: bytes, *, source_url: str, fetched_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -558,6 +500,7 @@ def _parse_terminal_submission(obj: dict[str, Any], *, source_url: str, fetched_
                                 if metrics.get("accuracy_ci95_half_width") is not None else None),
             "harness": (metadata.get("agent_display") or {}).get("label", ""),
             "reasoning_effort": metadata.get("reasoning_effort") or (obj.get("source_filter") or {}).get("reasoning_effort", "default"),
+            "cost": _published_cost(metrics.get("total_cost_usd"), "full_evaluation"),
             "method_version": "4.0", "task_set": "terminal-bench-4.0"}
 
 
@@ -679,6 +622,7 @@ def _parse_terminal_bench_science_json(payload: bytes, *, source_url: str,
             "task_set": "terminal-bench-science/v0-1-eval",
             "metric_semantic": "strict pass@1 percent",
             "inference_config": metadata.get("inference_config"),
+            "cost": _published_cost(metrics.get("total_cost_usd"), "full_evaluation"),
             "event_only": False,
             "uniform_matrix": True,
         })
@@ -737,6 +681,7 @@ def _parse_osworld_json(payload: bytes, *, source_url: str, fetched_date: str) -
             "task_set": str(item.get("datasetScope") or decoded.get("taskVersion") or "OSWorld 2.0"),
             "metric_semantic": "partial completion percent",
             "inference_config": {"step_budget": item.get("stepBudget"), "release_version": item.get("releaseVersion")},
+            "cost": _published_cost(item.get("costPerTaskUsd"), "per_task"),
             "event_only": False,
             "uniform_matrix": True,
         })
@@ -800,8 +745,8 @@ def _parse_aa_dataset_documents(documents: list[Any], *, source_url: str, fetche
             rows.append({
                 "lab_id": lab,
                 "model_id": model_id,
-                "model_release_id": _registered_model_release_id(
-                    lab, model_id=model_id, model_name=model_name, details_url=details_url),
+                "model_release_id": _evaluated_release_id(
+                    model_id=model_id, model_name=model_name, details_url=details_url),
                 "model_name": _display_model(model_name),
                 "benchmark_id": benchmark_id,
                 "score": round(score, 6),
@@ -974,8 +919,8 @@ def _parse_aa_flight_models(payload: bytes, *, source_url: str, fetched_date: st
         rows.append({
             "lab_id": lab,
             "model_id": model_id,
-            "model_release_id": _registered_model_release_id(
-                lab, model_id=model_id, model_name=model_name,
+            "model_release_id": _evaluated_release_id(
+                model_id=model_id, model_name=model_name,
                 details_url=f"/models/{model_id}"),
             "model_name": _display_model(model_name),
             "benchmark_id": benchmark_id,
@@ -1288,6 +1233,8 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
             raise FrontierCapabilityError("model_identity_missing")
         available = bool(model.get("available", True))
         model_copy = {**model, "lab_id": lab, "model_id": model_id, "available": available}
+        # Release dates come only from the model release registry.
+        model_copy.pop("release_date", None)
         model_by_key[(lab, model_id)] = model_copy
         entities.append(ReferenceEntityInput(entity_id=f"FRONTIER_MODEL:{lab}:{model_id}".upper(), kind="frontier_model",
                                              canonical_name=str(model.get("display_name") or model.get("model_name") or model.get("name") or model_id),
@@ -1326,8 +1273,8 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
         value = _score(row.get("score"), benchmark)
         model_release_id = str(
             row.get("model_release_id") or model.get("model_release_id")
-            or _registered_model_release_id(
-                lab, model_id=model_id,
+            or _evaluated_release_id(
+                model_id=model_id,
                 model_name=model.get("display_name") or model.get("model_name") or model.get("name"),
                 details_url=row.get("details_url"))
         )
@@ -1366,7 +1313,6 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
             "lab_id": lab, "lab_label": dict(LABS)[lab], "model_id": model_id,
             "model_release_id": model_release_id, "evaluation_variant_id": model_id,
             "model_name": model.get("display_name") or model.get("model_name") or model.get("name") or model_id, "model_lineage": model.get("lineage") or model_id,
-            "release_date": str(model.get("release_date") or ""),
             "available": bool(model.get("available", True)),
             "flagship": bool(model.get("flagship", True)),
             "flagship_source": str(model.get("flagship_source") or ""),
@@ -1396,6 +1342,13 @@ def normalize_payload(payload: bytes | str | dict[str, Any], *, fetched_at: date
         }
         raw = {"provider_row": row, "model": model, "method": method, "meta": payload.get("meta") or {},
                "source_url": source_url}
+        # Cost travels with the score it was published with: same row, same identity.
+        # Its link is the row's ``source_url``; a copy here would vary by route and
+        # make an unchanged cost read as a new vintage.
+        cost = row.get("cost") if isinstance(row.get("cost"), dict) else {}
+        cost = _published_cost(cost.get("value"), str(cost.get("basis") or ""))
+        if cost is not None:
+            raw["cost"] = cost
         records.append(NativeRecord(
             entity_id=f"FRONTIER_MODEL:{lab}:{model_id}".upper(), provider_field="benchmark_score",
             period=period, period_start=period, period_end=period, value=value,
@@ -1685,15 +1638,15 @@ class FrontierAICapabilityAdapter:
                     for row in parsed:
                         lab = row["lab_id"]
                         model_id = row["model_id"]
-                        row.setdefault("model_release_id", _registered_model_release_id(
-                            lab, model_id=model_id, model_name=row.get("model_name"),
+                        row.setdefault("model_release_id", _evaluated_release_id(
+                            model_id=model_id, model_name=row.get("model_name"),
                             details_url=row.get("details_url")))
                         score_key = (lab, model_id, row["benchmark_id"], str(row.get("score_as_of") or fetched_date))
                         if score_key in score_keys:
                             continue
                         score_keys.add(score_key)
                         _public_model(models, lab=lab, model_id=model_id,
-                                      display_name=row["model_name"], score_date=row.get("score_as_of", fetched_date),
+                                      display_name=row["model_name"],
                                       source_url=body_url,
                                       model_release_id=str(row.get("model_release_id") or model_id))
                         scores.append(row)
@@ -1725,33 +1678,6 @@ class FrontierAICapabilityAdapter:
                 route_errors.append(f"{benchmark}:{exc}")
                 sources.append({"benchmark_id": benchmark, "transport": transport, "url": url,
                                 "status": "source_unavailable", "error": str(exc)})
-        # Benchmark recency is not a valid flagship rule: a newly evaluated old
-        # model must not displace a newer official release.  Public benchmark
-        # rows can confirm the configured release identity or an explicit
-        # operator override; official release discovery is handled by the
-        # separate official-Lab adapter.
-        overrides = {}
-        try:
-            overrides = json.loads(os.environ.get("ATS_FRONTIER_AI_FLAGSHIP_OVERRIDES", "{}"))
-        except json.JSONDecodeError as exc:
-            raise FrontierCapabilityError("invalid_flagship_overrides_json") from exc
-        for lab, _label in LABS:
-            candidates = [m for (candidate_lab, _), m in models.items() if candidate_lab == lab]
-            if not candidates:
-                continue
-            chosen_id = str(overrides.get(lab) or "")
-            chosen = next((m for m in candidates
-                           if m["model_id"] == chosen_id or m.get("model_release_id") == chosen_id), None)
-            chosen_source = "operator_override" if chosen is not None else ""
-            if chosen is None:
-                default_id = DEFAULT_FLAGSHIP_MODEL_IDS.get(lab, "")
-                chosen = next((m for m in candidates
-                               if m["model_id"] == default_id or m.get("model_release_id") == default_id), None)
-                chosen_source = "configured_registry" if chosen is not None else ""
-            for item in candidates:
-                item["flagship"] = item is chosen
-                if item is chosen:
-                    item["flagship_source"] = chosen_source
         payload = {"meta": {"version": PUBLIC_SOURCE_VERSION, "source": "official_public_benchmark_routes",
                              "as_of": fetched_at.isoformat(), "source_type": "third_party_evaluation",
                              "benchmarks_checked": list(selected_benchmarks),
@@ -1996,7 +1922,6 @@ class OfficialLabReleaseAdapter(FrontierAICapabilityAdapter):
                            "available": available, "flagship": bool(row.get("flagship", True)),
                            "flagship_source": row.get("flagship_source") or "official_lab_release",
                            "model_release_id": row.get("model_release_id") or model_id,
-                           "release_date": row.get("release_date") or row.get("available_date") or "",
                            "identity_state": row.get("identity_state", "resolved"),
                            "withdrawal_date": row.get("withdrawal_date", ""),
                            "lineage": row.get("lineage") or model_id})

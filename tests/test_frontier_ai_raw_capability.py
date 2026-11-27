@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+import pytest
+
 from ats.agents.evidence.layer_runner import (
     OBSERVER_RUNNER_EXTENSIONS, _configured_observers, run_registered_layer_observers,
 )
@@ -22,6 +24,12 @@ from ats.data.stores.structured.repository import SQLiteStructuredRepository
 
 FIXTURE = Path(__file__).parent / "fixtures" / "frontier_ai_raw_capability" / "sample_capability_payload.json"
 NOW = datetime(2026, 9, 16, tzinfo=timezone.utc)
+RELEASES = FIXTURE.with_name("model_releases.yaml")
+
+
+@pytest.fixture(autouse=True)
+def release_registry(monkeypatch):
+    monkeypatch.setattr("ats.data.model_releases.registry_path", lambda: RELEASES)
 
 
 def products(tmp_path):

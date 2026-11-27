@@ -133,7 +133,8 @@ def commercialization_points(packet: dict[str, Any]) -> list[SeriesPoint]:
 def raw_capability_points(packet: dict[str, Any]) -> list[SeriesPoint]:
     snapshot_id = _snapshot_id(packet)
     a, b = packet.get("a") or {}, packet.get("b") or {}
-    dates = [str((item.get("current") or {}).get("release_date") or "")
+    # The reading is dated by the scores it summarizes, not by model releases.
+    dates = [str((item.get("current") or {}).get("score_as_of") or "")
              for item in list(a.get("benchmarks") or []) + list(b.get("benchmarks") or [])]
     period = max((d for d in dates if d), default="")[:7]
     if not period:

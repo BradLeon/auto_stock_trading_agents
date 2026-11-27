@@ -103,6 +103,38 @@ structured:
         attempts: 2
         backoff_seconds: [300, 1800]
       semantics: irregular commit-pinned releases; discovery reads repository metadata only, CSVs are downloaded once per new complete release
+    epoch_capabilities_index_p7d_ingest:
+      enabled: true
+      source: epoch_capabilities_index
+      datasets: [epoch_capabilities_index_models]
+      schedule: every_7_days
+      interval_days: 7
+      anchor_date: 2026-10-02
+      at: "07:40"
+      timezone: UTC
+      command: ats data ingest --source epoch_capabilities_index --dataset epoch_capabilities_index_models
+      concurrency: 1
+      retry:
+        attempts: 3
+        backoff_seconds: [60, 300, 1800]
+      freshness_slo_days: 10
+      semantics: one dated snapshot of every listed model; recalibrated anchors fail closed
+    artificial_analysis_indices_p7d_ingest:
+      enabled: true
+      source: artificial_analysis_indices
+      datasets: [artificial_analysis_model_indices]
+      schedule: every_7_days
+      interval_days: 7
+      anchor_date: 2026-10-02
+      at: "07:50"
+      timezone: UTC
+      command: ats data ingest --source artificial_analysis_indices --dataset artificial_analysis_model_indices
+      concurrency: 1
+      retry:
+        attempts: 3
+        backoff_seconds: [60, 300, 1800]
+      freshness_slo_days: 10
+      semantics: one dated snapshot of the free model list; a new index major version fails closed
     openrouter_pricing_p1d_ingest:
       enabled: true
       source: openrouter_pricing

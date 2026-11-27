@@ -260,8 +260,12 @@ def capability_matrix(products, *, as_of=None, include_vintages: bool = False) -
         source_rank = {"official_lab_release": 3, "operator_override": 3,
                        "official_release": 3, "configured_registry": 2,
                        "configured_cohort": 1}
+        # A stored `configured_registry` flag outlives a registry change (an unchanged score appends no new
+        # vintage), so it counts only while it still names the configured release.
         active_models = [item for item in lab_models if item.get("flagship", False)
-                         and source_rank.get(str(item.get("flagship_source") or ""), 0) > 0]
+                         and source_rank.get(str(item.get("flagship_source") or ""), 0) > 0
+                         and (item.get("flagship_source") != "configured_registry"
+                              or configured_id in (item.get("model_release_id"), item.get("model_id")))]
         if active_models:
             representative = max(active_models, key=lambda item: (
                 source_rank.get(str(item.get("flagship_source") or ""), 0),

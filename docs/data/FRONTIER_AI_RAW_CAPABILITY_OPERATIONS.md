@@ -31,6 +31,12 @@ A 在同一可比组比较 current/previous global frontier；正式确认要求
 
 B 按三级要求递进：（1）多数任务解锁，默认要求 95% 置信下界高于 50%；（2）人类基准跨越；（3）经济可用门槛。后两级只有 benchmark 注册表预先定义阈值、口径和来源时才判断，没有定义即省略。只有点估计超过已定义阈值时为 `provisional_crossing`。LiveBench、AutomationBench-AA、OSWorld Partial 只报告 A；Terminal-Bench、Terminal-Bench-Science、SciCode、CritPt、MMMU-Pro、Toolathlon Verified、SpreadsheetBench 2、Humanity's Last Exam 只有已注册的严格指标才报告 B。结果同时标注 `model_capability_proxy` 或 `model_agent_stack_capability`，两类不得合并。
 
+## 版本与 no_change
+
+写入前，每条成绩与同一来源、模型、benchmark（来源给出成绩日期时再加日期）的最新版本比较；相同则记 `unchanged`、不追加版本，整批相同记 `no_change`。抓取日、模型显示名、发布日期、抓取方式、网址和旗舰标记单独变化不算新版本；分数、置信区间、样本数、方法与评测配置、模型发布版本、可用/撤回状态、来源类型、跨来源冲突状态，以及人工或官方发布设置的旗舰发生变化才追加。改回旧值也追加新版本。
+
+页面不给成绩日期时（当前为五个 Artificial Analysis 页面），`score_as_of` 是首次看到该分数的日期，分数变化前保持不变。被忽略的字段保留写入该版本时的值；`configured_registry` 旗舰标记只在仍指向当前配置的版本时生效。每次抓取仍单独归档原始载荷并写准入记录。
+
 ## 报告与重放
 
 `ats data ai-raw-capability --format markdown --chart-dir <dir>` 生成中文结论、11×9 矩阵、事件账本、A/B 表格、十一张方法卡和 PNG/CSV/JSON/sidecar。图表和报告共用 `rows_hash`、observation IDs、artifact IDs、cohort/method versions。`frontier_ai_capability` evidence bundle 会写入 snapshot manifest，并把当次矩阵、事件账本、A/B 判定和图表输入作为不可变 derived payload 一并保存；可用 `DataProducts.replay_frontier_ai_capability_snapshot(snapshot_id)` 离线复核。离线复核应使用保存的原始 artifact、数据库和 sidecar；若 hash 不一致，报告为可复现性失败。

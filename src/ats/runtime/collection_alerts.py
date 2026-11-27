@@ -9,7 +9,8 @@ failing job rarely flips. This module runs after every refresh-controller tick:
   healthy). A push goes out only when a job's light CHANGES — failing for days sends "注意" then "异常",
   never one message an hour. All changes of one tick go out as one message, grouped.
 - **Successes, once a day.** About a hundred runs succeed a day; pushing each would bury the failures, so the
-  first tick after 08:00 Asia/Taipei sends a digest: the last 24 hours' outcomes and what needs attention now.
+  first tick after 08:00 Asia/Taipei sends a digest: the last 24 hours' outcomes and what needs attention now,
+  plus any model release candidates waiting for a person's decision.
 
 The last notified light per job and the last digest day live in the refresh ledger (`collection_alert_state`,
 `collection_alert_digest`). The first run seeds the state silently. Alerting never breaks the tick.
@@ -137,7 +138,14 @@ def _outcomes_24h(ledger: Path, now: datetime) -> dict[str, int]:
     return {status: n for status, n in rows}
 
 
-def digest_message(rows, outcomes: dict[str, int], now: datetime) -> tuple[str, str]:
+def _release_note() -> str:
+    """Model releases waiting for a person's decision (ant-data-onboarding 11.2)."""
+    from ..data.model_release_discovery import pending_note
+
+    return pending_note()
+
+
+def digest_message(rows, outcomes: dict[str, int], now: datetime, release_note: str = "") -> tuple[str, str]:
     problems = sorted((r for r in rows if r.enabled and r.light in ("red", "yellow")),
                       key=lambda r: (-_RANK[r.light], -r.consecutive_failures, r.job_id))
     red = sum(1 for r in problems if r.light == "red")
@@ -154,6 +162,8 @@ def digest_message(rows, outcomes: dict[str, int], now: datetime) -> tuple[str, 
         lines += [_line(r).replace("- ", f"- [{LIGHT_CN[r.light]}] ", 1) for r in problems[:_LIST_LIMIT]]
         if len(problems) > _LIST_LIMIT:
             lines.append(f"- …另 {len(problems) - _LIST_LIMIT} 个")
+    if release_note:
+        lines.append(f"\n{release_note}")
     lines.append(f"\n看板：{DASHBOARD_URL}")
     return title, "\n".join(lines)
 
@@ -172,7 +182,7 @@ def _digest_due(conn: sqlite3.Connection, now: datetime) -> str | None:
 # entry point
 # --------------------------------------------------------------------------- #
 def after_tick(*, ledger: Path | None = None, rows=None, now: datetime | None = None,
-               push: Push | None = None) -> dict:
+               push: Push | None = None, release_note: Callable[[], str] | None = None) -> dict:
     """Push the light changes since the last tick and, once a day, the digest. Never raises."""
     now = now or datetime.now(timezone.utc)
     push = push or _default_push
@@ -207,7 +217,8 @@ def after_tick(*, ledger: Path | None = None, rows=None, now: datetime | None = 
                 "ELSE collection_alert_state.notified_at END",
                 [(r.job_id, r.light, r.light_reason, stamp) for r in rows_to_store])
             day = _digest_due(conn, now)
-            if day and _safe_push(push, *digest_message(rows, _outcomes_24h(Path(ledger), now), now)):
+            if day and _safe_push(push, *digest_message(rows, _outcomes_24h(Path(ledger), now), now,
+                                                        (release_note or _release_note)())):
                 conn.execute("INSERT INTO collection_alert_digest (day, sent_at) VALUES (?,?)", (day, stamp))
                 result["digest"] = True
             conn.commit()

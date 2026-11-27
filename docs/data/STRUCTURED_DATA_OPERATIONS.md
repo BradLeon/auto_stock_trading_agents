@@ -819,6 +819,34 @@ TrendForce DRAM 的采集、期间标准化与发布应以本手册的 source he
 
 只重跑失败的 source/entity/slice，不要因一个局部失败重新抓取全部来源。
 
+### 模型发布候选（每日采集日报提示时处理）
+
+模型发布登记在 `config/data/model_releases.yaml`。每天保存的 OpenRouter 清单里出现基线日期之后的新型号（范围见该文件的 `discovery`），采集日报会列出，需要人决定：
+
+```bash
+ats data model-release-candidates --format markdown
+```
+
+确认（层级、发布日期、公告链接由你给出；日期以官方公告为准，不照抄上架日；同一型号的其他候选用 `--alias` 并入）：
+
+```bash
+ats data model-release-confirm --candidate openai/<型号> --tier general_flagship --release-date YYYY-MM-DD --url <官方公告链接>
+```
+
+不登记（要重新提出就删掉 `config/data/model_release_dismissed.yaml` 里的条目）：
+
+```bash
+ats data model-release-dismiss --candidate <作者/型号> --note <理由>
+```
+
+清单没有收录的发布手工添加；日期或链接还不确定时加 `--status candidate`，不参与计时：
+
+```bash
+ats data model-release-add --lab ZAI --model <型号> --tier general_flagship --release-date YYYY-MM-DD --url <官方公告链接>
+```
+
+这些命令改的是配置文件，写入后即对读取生效，记得提交 git。确认和手工添加只在 `releases` 末尾追加；更正已登记的日期按文件头部说明手工改并写 `corrections`。
+
 ## 13. 备份、发布和回滚原则
 
 - 生产迁移前同时备份 SQLite 和 artifact manifest；两者缺一不可。

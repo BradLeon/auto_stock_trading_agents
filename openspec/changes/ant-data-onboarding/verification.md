@@ -551,6 +551,156 @@ CIK 2130357。结果 succeeded：入库 4 份，首版 S-1 因本地已有而跳
 
 接入 Epoch 后复跑：与两部分改动直接相关的 20 个测试文件 292 项通过。其余读取这些配置的 29 个文件 465 项通过、3 项跳过、5 项失败（`test_factset_earnings_insight.py` 4 项、`test_anthropic_consumer_boundaries.py` 1 项）；导出改动前的提交单独运行，这 5 项同样失败。
 
+## 第 11 组：模型发布登记（11.2、11.3，2026-11-27 调研，未改代码、未写登记、未勾选）
+
+### 11.2 只靠信息简报能否发现模型发布（生产库只读）
+
+- 事件成分从 11-24 起才有，11-24 至 11-26 共 398 条，其中 24 条点名某家实验室，没有一条是模型发布。
+- 11-07 以来的简报没有提到任何一家的现任旗舰。11-01 以来入库文档（761 份）和候选标题（4417 条）里也没有出现这些型号名。
+- 同时含实验室名和发布类词的 21 条标题里，只有 1 条是模型发布（11-09，Anthropic 升级 Fable、Mythos，来源 `ibkr_news`）。
+- 推测原因：简报按持仓标的生成，实验室发布只有影响到某只股票才进简报；成分技能要求例行产品消息不出成分。
+- 结论：按现规格只从简报提候选，几乎不会产生候选。
+
+另一个现成来源：每天已采集的 OpenRouter 模型清单（带上架时间）。读 11-27 保存的清单，近 60 天九家实验室新上架 41 条，合并批量与 pro 变体后约 20 个型号。登记的现任旗舰里有 8 个发布日落在该窗口，其中 7 个已上架且上架日期与登记日期一致，缺 GLM-5.4（只向编程套餐开放）。xAI 现任旗舰发布早于窗口，本次没有核对。
+
+| 方案 | 做法 | 模型费用与提示词 | 漏报 | 规格 |
+| --- | --- | --- | --- | --- |
+| 甲（建议） | 用 OpenRouter 新上架型号生成候选，你确认时补官方链接与日期 | 无费用，不动提示词 | 不上 OpenRouter 或晚上架的（本次 GLM-5.4） | 需改"简报提出候选"一条 |
+| 乙 | 甲 + 简报评级请求里加"是否模型发布"字段 | 不增加请求数，改动已验收的提示词 | 同甲，简报补充很少 | 保留原条并加来源 |
+| 丙 | 只按原规格从简报提候选 | 同乙 | 按实测几乎全部漏掉 | 不改 |
+
+三种方案都要建候选队列和确认命令。OpenRouter 上架日只作线索，发布日期仍以官方公告为准。
+
+### 11.3 近 12 个月通用旗舰发布（待你确认）
+
+拟用的登记规则：
+
+1. 日期取任何人都能用的第一天：公开预览算，受邀或限量预览不算（沿用 Gemini 4 Carbon 记 11-10 的做法）。
+2. 通用旗舰指当天该实验室公开可用的最高档通用模型；低于仍在售更高档位的新版本不登记。
+3. 同一型号从公开预览转正式版，只登记第一次。
+
+下表为拟登记项（不含已登记的九个现任旗舰）。xAI 官网拒绝自动读取，相关日期来自搜索结果。
+
+| 实验室 | 型号 | 发布日期 | 官方链接 | 需要你看的点 |
+| --- | --- | --- | --- | --- |
+| OpenAI | GPT-5.2 | 2025-12-11 | https://openai.com/index/introducing-gpt-5-2/ | |
+| OpenAI | GPT-5.4 | 03-05 | https://openai.com/index/introducing-gpt-5-4/ | |
+| OpenAI | GPT-5.5 | 04-23 | https://openai.com/index/introducing-gpt-5-5/ | API 04-24 |
+| OpenAI | GPT-5.6 Sol | 07-09 | https://openai.com/index/gpt-5-6/ | 06-26 限量预览不算 |
+| OpenAI | GPT-6 Astra | 09-03 | https://openai.com/index/gpt-6-astra/ | 页面不印日期（取 RSS）；当天只向限量组织开放，随后几天放开，确切放开日未从官方页确认 |
+| Anthropic | Claude Opus 4.6 | 02-05 | https://www.anthropic.com/news/claude-opus-4-6 | |
+| Anthropic | Claude Opus 4.7 | 04-16 | https://www.anthropic.com/news/claude-opus-4-7 | 公告称低于限量开放的 Mythos Preview |
+| Anthropic | Claude Opus 4.8 | 05-28 | https://www.anthropic.com/news/claude-opus-4-8 | |
+| Anthropic | Claude Fable 5 | 06-09 | https://www.anthropic.com/news/claude-fable-5-mythos-5 | 06-12 暂停访问，07-01 恢复 |
+| Anthropic | Claude Fable 5.1 | 09-01 | https://www.anthropic.com/claude-fable-and-mythos-5-1 | 公告页只写 9 月，日期取 https://support.claude.com/en/articles/12138966-release-notes |
+| Google | Gemini 3.1 Pro | 02-19 | https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/ | 公开预览 |
+| Google | Gemini 4 Argon | 10-13 | https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-argon/ | |
+| DeepSeek | V3.2 | 2025-12-01 | https://api-docs.deepseek.com/news/news251201/ | |
+| DeepSeek | V4 Pro（预览） | 04-24 | https://api-docs.deepseek.com/news/news260424/ | 08-13 正式版按规则 3 不另登 |
+| DeepSeek | V4.1 Flash | 09-10 | https://api-docs.deepseek.com/news/news260910/ | Flash 线；与现任 1017 版按旗舰登记的做法一致 |
+| Moonshot | Kimi K2.5 | 01-27 | https://www.kimi.com/en/blog/kimi-k2-5 | |
+| Moonshot | Kimi K2.6 | 04-20 | https://www.kimi.com/en/blog/kimi-k2-6 | |
+| Moonshot | Kimi K3 | 07-16 | https://www.kimi.com/en/blog/kimi-k3 | |
+| 腾讯 | Hy3（预览） | 04-24 | https://www.tencent.com/tencent-unveils-hy3-preview-model-enhances-agent-capabilities-and-real-world-usability/ | 07-06 正式版按规则 3 不另登 |
+| 智谱 | GLM-4.7 | 2025-12-22 | https://docs.z.ai/guides/llm/glm-4.7 | |
+| 智谱 | GLM-5 | 02-12 | https://docs.z.ai/guides/llm/glm-5 | |
+| 智谱 | GLM-5.1 | 04-07 | https://docs.z.ai/guides/llm/glm-5.1 | |
+| 智谱 | GLM-5.2 | 06-16 | https://docs.z.ai/guides/llm/glm-5.2.md | |
+| 智谱 | GLM-5.3 | 08-18 | https://docs.z.ai/guides/llm/glm-5.3.md | Epoch 记 08-14 |
+| 阿里 | Qwen3.5 | 02-16 | https://qwen.ai/blog?id=qwen3.5 | |
+| 阿里 | Qwen3.6-Plus | 04-02 | https://qwen.ai/blog?id=qwen3.6 | |
+| 阿里 | Qwen3.7-Max | 05-20 | https://qwen.ai/blog?id=qwen3.7 | |
+| 阿里 | Qwen3.8-Max | 08-03 | https://qwen.ai/blog?id=qwen3.8 | 百炼清单记 08-02 |
+
+另需你决定的项：
+
+| 型号 | 问题 | 建议 |
+| --- | --- | --- |
+| Claude Opus 5（07-24，https://www.anthropic.com/news/claude-opus-5） | 低于在售的 Fable 5 | 不登记 |
+| Claude Opus 5.5（09-22，https://www.anthropic.com/claude-opus-5-5） | 水平接近 Fable 5.1，档位名低于 Fable | 不登记 |
+| Gemini 3.5 Flash（05-19，https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-5/） | 公告称其代理与编码能力最强，但属 Flash 线；未查到 3.5 Pro 发布 | 按规则 2 不登记 |
+| Qwen3.6-Max-Preview（约 04-18，https://qwen.ai/blog?id=qwen3.6-max-preview） | 日期未在浏览器核实；百炼清单记 04-14 | 核实日期后再登记 |
+| Grok 4.5（https://x.ai/news/grok-4-5） | 日期冲突：07-08、07-14、07-16 | 你打开页面确认 |
+| Grok 4.6（08-12，https://x.ai/news/grok-4-6） | 我读不到页面 | 你打开页面确认 |
+| Grok 4.20（约 02 至 03 月）、Grok 4.3 Beta（04-17） | 没找到官方公告页 | 保持候选，不用于计时 |
+| Claude Opus 4.5（2025-11-24）、Gemini 3 Pro（2025-11-18） | 早于 12 个月窗口几天，是窗口起点时的现任旗舰 | 建议一起登记，回放更完整 |
+
+### 11.2 补充调研：OpenRouter 与第三方跟踪站（2026-11-27，只读，0 次模型请求）
+
+用户要求优先用 OpenRouter 新上架模型，或跟踪大模型进展的第三方资讯站。
+
+三个已接入来源读 11-27 保存的生产原文件，与现任 9 个和上表 28 个型号比对（OpenRouter 取上架时间的 UTC 日期，同型号取最早）：
+
+| 来源 | 现任 9 个：找到 / 日期一致 | 待登记 28 个：找到 / 一致 / 相差不超过 1 天 |
+| --- | --- | --- |
+| OpenRouter 模型清单（每日） | 8 / 8 | 28 / 19 / 26 |
+| AA 模型接口（每周） | 8 / 6 | 26 / 22 / 25 |
+| Epoch 能力指数（每周） | 6 / 6 | 26 / 20 / 24 |
+
+- 三者都没有 GLM-5.4。OpenRouter 超过 1 天的两项（Hy3、Qwen3.8-Max）是预览版或早期版本已下架，清单只剩后续版本；每日保存快照后，向前发现不受影响。
+- 机械去重（跳过别名与 `-latest`，合并 `:batch`、`:free`）按这份清单回放：09-28 起九家 24 个候选，11-01 起 14 个，其中 5 个是已登记的现任旗舰。
+
+第三方跟踪站（用网页读取工具读页面，所得是页面摘述；未下载数据文件，条款页未读）：
+
+| 站点 | 读到的情况 |
+| --- | --- |
+| [models.dev](https://github.com/anomalyco/models.dev) | 社区提交维护；有 JSON 接口和 `release_date` 字段，无公告链接字段；仓库 MIT 许可，数据许可未见单独说明；覆盖与新鲜度未测 |
+| [llm-stats](https://llm-stats.com/llm-updates) | 自称每小时更新并人工核对；页面无导出（另有接口页未读）；读到的最新条目 11-20 |
+| [DemandSphere](https://www.demandsphere.com/research/ai-frontier-model-tracker/changelog) | 公司手工维护的变更日志；称有 JSON 与 RSS，地址和许可未核实；读到的最新条目 11-22 |
+| [LLM Gateway](https://llmgateway.io/timeline) | 页面标注 11-24 更新；无导出；没有 GLM-5.4 |
+| [LLM Reference](https://www.llmreference.com/changelog) | 只有月度计数 |
+| aireleasetracker.com | 连接两次中断，未读到 |
+
+对 11.3 清单有影响的发现（均待用户判定，上表未改）：
+
+- GLM-5：三个来源都记 02-11（OpenRouter 02-11 16:59 UTC），上表官方页日期 02-12。
+- Qwen3.7-Max：Epoch、AA 记 05-19，OpenRouter 05-21，官方页 05-20。
+- GPT-6 Astra：OpenRouter 上架 09-04，Epoch、AA 记 09-03。
+- Grok 4.5、4.6：三个来源一致，为 07-08、08-12。Grok 4.20（Epoch 02-17、OpenRouter 03-31）、Grok 4.3（OpenRouter、AA 04-30）仍无官方公告页。
+- Qwen3.6-Max-Preview：AA 记 04-20，与百炼清单 04-14、此前的约 04-18 都不同。
+- DeepSeek V4.1 Flash（09-10）：当时 V4 Pro 仍在售，按规则 2 字面不应登记，与已确认的现任 1017 版处理冲突。
+
+### 11.2 实现与演练（2026-11-27，工作树，未合并；未写生产库，0 次模型请求）
+
+用户决定："按此实现"（OpenRouter 出候选、用户确认）。
+
+实现：
+- `ats.data.model_release_discovery` 从每天保存的清单读时计算候选；基线 2026-11-27 与九家实验室前缀写在 `model_releases.yaml` 的 `discovery`。
+- 命令 `ats data model-release-candidates | -confirm | -dismiss | -add`。确认与手工添加在 `model_releases.yaml` 末尾追加并先过登记表校验；忽略写 `model_release_dismissed.yaml`。
+- 每日数据采集日报在有待确认候选时列出（最多 10 个型号名）；读取失败或没有基线清单时写明原因。
+
+演练（真实清单，隔离库与配置副本）：11-27 保存的清单中，上架早于 11-01 的 435 条作为基线日快照，全部 477 条作为次日快照，经定价采集管道入库。
+- 查看：9 个候选，即 11-01 起的 14 个减去 5 个已登记旗舰。
+- 确认 `openai/gpt-6.2-sol` 并以 `-pro` 作别名、忽略两个：剩 5 个；日报段落列出这 5 个。
+- 手工添加非官方链接被拒，文件未变。
+- 确认时用的公告链接是演练占位值，只写进配置副本。
+
+生产库只读（本工作树的配置）：清单快照只有 11-27，待确认 0 个，日报不加段落。合并后首个出现新型号的日子需只读核对日报内容。
+
+测试：`tests/test_model_release_discovery.py` 20 项、`tests/test_collection_alerts.py` 新增 1 项。读到本次改动的 23 个测试文件 327 通过、1 失败（`test_anthropic_consumer_boundaries`，改动前就失败）。新文件 ruff 无报告。
+
+已知局限：清单不收录的发布（如 GLM-5.4）要手工添加；基线日以后实验室补挂的旧型号也会出现一次，忽略即可。
+
+### 11.3 历史发布登记（2026-11-27，用户确认："11.3 按建议"）
+
+登记 35 条：已确认 32 条（上表 28 条、Grok 4.5 与 4.6、Claude Opus 4.5、Gemini 3 Pro），待定 3 条（Grok 4.20、Grok 4.3、Qwen3.6-Max-Preview，不计时）。与上表不同的两处按用户判定：GPT-6 Astra 记 09-04，GLM-5 记 02-11。不登记：Claude Opus 5、Opus 5.5、Gemini 3.5 Flash。连同现任 9 条，登记表共 44 条；九家现任旗舰与登记前相同。登记口径四条写在 `model_releases.yaml` 文件头。
+
+公告链接核对：
+- 32 条已确认记录的链接都在各实验室自己的域名上（登记表校验通过）。
+- Grok 4.5、4.6：x.ai 拒绝自动读取，页面没有打开过；日期取 OpenRouter、Epoch、AA 一致值。
+- Claude Opus 4.5（页面印 Nov 24, 2025）、Gemini 3 Pro（页面印 Nov 18, 2025，公开预览）本次读页面补核。
+- DeepSeek V3.2（12-01）、智谱 GLM-4.7、5.1、5.2、5.3（发布说明页日期一致）、腾讯 Hy3 预览（内置浏览器读到 April 24, 2026）本次复读一致。
+- Kimi K2.5、K2.6：页面可打开，正文没有印日期；01-27、04-20 与 OpenRouter、Epoch、AA 一致。
+- 其余链接沿用本日调研记录。
+
+生产库只读核对（成绩型号名匹配到登记记录）：32 条新增已确认记录各匹配到至少一个来源叫法；逐条看过匹配结果，除下面两项外没有指向别的型号或版本：
+- DeepSeek V4 Pro：来源把 0813 版成绩列在 `deepseek-v4-pro` 名下，会按预览日 04-24 标注。
+- Qwen3.8-Max：来源把 0902 版成绩列在 `qwen3.8-max` 名下，会按 08-03 标注。
+
+这两项会让对应版本的发布日期偏早，影响领先窗口计算；本次未改匹配逻辑，留到 `ant-thesis-monitor` 定领先窗口口径时处理。
+
+相关测试 14 个文件 237 通过、1 失败（`test_anthropic_consumer_boundaries`，改动前就失败）。
+
 ## 第 12 组：GPU 租赁价格来源调研（12.1，2026-11-27，待你决定；未实现 12.2）
 
 ### 免费来源

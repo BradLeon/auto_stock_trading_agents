@@ -37,7 +37,7 @@ def _ledger(tmp_path):
     return path
 
 
-def _run(tmp_path, rows, now=EARLY, fail=False):
+def _run(tmp_path, rows, now=EARLY, fail=False, note=""):
     sent = []
 
     def push(title, body):
@@ -46,7 +46,8 @@ def _run(tmp_path, rows, now=EARLY, fail=False):
         sent.append((title, body))
 
     result = ca.after_tick(ledger=_ledger(tmp_path) if not (tmp_path / "refresh.sqlite").exists()
-                           else tmp_path / "refresh.sqlite", rows=rows, now=now, push=push)
+                           else tmp_path / "refresh.sqlite", rows=rows, now=now, push=push,
+                           release_note=lambda: note)
     return result, sent
 
 
@@ -109,6 +110,13 @@ def test_daily_digest_once_after_eight_taipei(tmp_path):
     assert "成功 1 · 无新数据 1 · 失败 1 · 隔离 0" in body                # only the last 24 hours
     assert "[异常] calendar_fomc_daily：连续失败 2 次" in body
     assert _run(tmp_path, rows, now=LATE + timedelta(hours=1))[1] == []  # once a day
+
+
+def test_daily_digest_lists_release_candidates_waiting_for_a_decision(tmp_path):
+    _run(tmp_path, [Row("a")], now=EARLY)
+    note = "模型发布待确认 1 个：\n- openai/gpt-7（上架 2026-11-28）"
+    body = _run(tmp_path, [Row("a")], now=LATE, note=note)[1][0][1]
+    assert note in body and body.index(note) < body.index("看板：")
 
 
 def test_alerting_never_raises(tmp_path):

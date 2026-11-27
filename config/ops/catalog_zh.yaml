@@ -58,8 +58,8 @@ jobs:
     label: OpenRouter 模型标价
     what: 每天记录 OpenRouter 公开模型列表里各模型的输入与输出单价。
     source: OpenRouter 公开模型列表接口
-    used_by: 估算花费份额与旗舰模型价格变化 → ANT 观测
-    if_broken: 漏掉的日子补不回来，对应周的估算花费份额显示"无价格数据"。SLO 2 天。
+    used_by: 估算花费份额与旗舰模型价格变化 → ANT 观测；新上架型号作为模型发布候选（列在采集日报）
+    if_broken: 漏掉的日子补不回来，对应周的估算花费份额显示"无价格数据"，新型号候选也会晚出现。SLO 2 天。
   openrouter_rankings_p7d_ingest:
     label: OpenRouter 模型调用排行
     what: OpenRouter 上各模型 / 各实验室的 token 调用量，按周汇总。

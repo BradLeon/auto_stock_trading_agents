@@ -2343,6 +2343,7 @@ def run_data(
     evidence_reason: str = "",
     evidence_event_id: str = "",
     disclosure: dict | None = None,
+    model_release: dict | None = None,
 ) -> int:
     """Inspect stable data products without knowing their backing tables."""
     import json
@@ -2423,6 +2424,11 @@ def run_data(
         return disclosure_cli.run(
             action, entity=entity or value, form=form, metric=metric, status=status, as_of=as_of,
             output_format=output_format, isolated=bool(db_path or artifact_root or force), **(disclosure or {}))
+
+    if action.startswith("model-release-"):
+        from . import model_release_cli
+
+        return model_release_cli.run(action, status=status, output_format=output_format, **(model_release or {}))
 
     if action in {"registration-ingest", "registration-backfill", "registration-filings"}:
         return _run_registration(action, entity=entity or value, form=form, file=file,
@@ -3247,6 +3253,10 @@ def main(argv: list[str] | None = None) -> int:
             "disclosure-correct",
             "disclosure-series",
             "disclosure-derived",
+            "model-release-candidates",
+            "model-release-confirm",
+            "model-release-dismiss",
+            "model-release-add",
             "chain-source-collect",
             "article-evidence-observe",
             "evidence-observe",
@@ -3361,7 +3371,16 @@ def main(argv: list[str] | None = None) -> int:
     data.add_argument("--accession", default="", help="registration-ingest: SEC accession 号（若已知）")
     data.add_argument("--document", default="", help="disclosure-extract: 指定已入库文件（代替 --form 取最新一版）")
     data.add_argument("--candidate", action="append", default=[],
-                      help="disclosure-confirm/reject/correct: 候选 ID，可重复")
+                      help="disclosure-confirm/reject/correct、model-release-confirm/dismiss: 候选 ID，可重复")
+    data.add_argument("--tier", choices=["general_flagship", "other"], default=None,
+                      help="model-release-confirm/add: 模型层级")
+    data.add_argument("--release-date", default="", help="model-release-confirm/add: 官方公告的发布日期 YYYY-MM-DD")
+    data.add_argument("--url", default="", help="model-release-confirm/add: 实验室自己域名上的公告链接")
+    data.add_argument("--lab", default="", help="model-release-add: 实验室 ID，例如 ZAI")
+    data.add_argument("--model", default="", help="model-release-add: 模型 ID；confirm 可省略")
+    data.add_argument("--name", default="", help="model-release-confirm/add: 显示名")
+    data.add_argument("--alias", action="append", default=[],
+                      help="model-release-confirm/add: 同一模型的其他叫法（含同型号的其他候选 ID），可重复")
     data.add_argument("--reviewer", default="", help="disclosure-confirm/reject/correct: 审阅人")
     data.add_argument("--note", default="", help="disclosure-reject/correct: 理由；confirm 可选")
     data.add_argument("--basis-note", default="", help="disclosure-confirm: 记录口径变化")
@@ -4064,6 +4083,10 @@ def main(argv: list[str] | None = None) -> int:
             disclosure={"dry_run": args.dry_run, "document_id": args.document, "candidate_ids": args.candidate,
                         "reviewer": args.reviewer, "note": args.note, "basis_note": args.basis_note,
                         "settings_changes": args.changes} if args.action.startswith("disclosure-") else None,
+            model_release={"candidate_ids": args.candidate, "tier": args.tier or "",
+                           "release_date": args.release_date, "url": args.url, "lab": args.lab,
+                           "model": args.model, "name": args.name, "aliases": args.alias,
+                           "note": args.note} if args.action.startswith("model-release-") else None,
         )
     if args.command == "ibkr":
         return ibkr_probe()

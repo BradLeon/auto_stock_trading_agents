@@ -1,0 +1,5 @@
+# 看过、决定不登记的模型发布候选。由 `ats data model-release-dismiss` 在文件末尾追加，git 留痕。
+# 想让某个型号重新出现在候选里，删掉它的条目。`dismissed` 必须是文件最后一段。
+version: 1
+
+dismissed:
